@@ -189,7 +189,6 @@ namespace Setting
     extern const SettingsUInt64 keeper_retry_max_backoff_ms;
     extern const SettingsSeconds lock_acquire_timeout;
     extern const SettingsUInt64 max_distributed_depth;
-    extern const SettingsUInt64 max_query_size;
     extern const SettingsUInt64 max_fetch_partition_retries_count;
     extern const SettingsUInt64 max_partitions_per_insert_block;
     extern const SettingsBool materialize_ttl_after_modify;
@@ -308,7 +307,6 @@ namespace ErrorCodes
     extern const int CONCURRENT_ACCESS_NOT_SUPPORTED;
     extern const int CHECKSUM_DOESNT_MATCH;
     extern const int SUPPORT_IS_DISABLED;
-    extern const int QUERY_IS_TOO_LARGE;
     extern const int NOT_INITIALIZED;
     extern const int TABLE_IS_DROPPED;
     extern const int FAULT_INJECTED;
@@ -6814,6 +6812,9 @@ void StorageReplicatedMergeTree::alter(
             throw Exception(ErrorCodes::NOT_IMPLEMENTED, "The `table_readonly` setting is not supported for ReplicatedMergeTree");
     }
 
+    /// Check that the resulting metadata does not exceed max_query_size before mutating any in-memory state.
+    checkMetadataDoesNotExceedMaxQuerySize(table_id, future_metadata, query_context);
+
     if (commands.isSettingsAlter())
     {
         /// We don't replicate storage_settings_ptr ALTER. It's local operation.
@@ -6824,7 +6825,7 @@ void StorageReplicatedMergeTree::alter(
         if (statistics_changed)
             setInMemoryMetadata(future_metadata);
 
-        /// It is safe to ignore exceptions here as only settings are changed, which is not validated in `alterTable`
+        /// Safe because the early max_query_size check already passed.
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(query_context, table_id, future_metadata, /*validate_new_create_query=*/true);
         return;
     }
@@ -6833,7 +6834,7 @@ void StorageReplicatedMergeTree::alter(
     {
         setInMemoryMetadata(future_metadata);
 
-        /// It is safe to ignore exceptions here as only the comment is changed, which is not validated in `alterTable`
+        /// Safe because the early max_query_size check already passed.
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(query_context, table_id, future_metadata, /*validate_new_create_query=*/true);
         return;
     }
@@ -6857,7 +6858,7 @@ void StorageReplicatedMergeTree::alter(
 
         setInMemoryMetadata(future_metadata);
 
-        /// It is safe to ignore exceptions here as only settings and comments are changed, neither of which is validated in `alterTable`
+        /// Safe because the early max_query_size check already passed.
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(query_context, table_id, future_metadata, /*validate_new_create_query=*/true);
         return;
     }
@@ -6867,23 +6868,6 @@ void StorageReplicatedMergeTree::alter(
         && MergeTreeData::sortingKeyChanged(old_sorting_key, future_metadata.sorting_key))
     {
         MergeTreeData::verifySortingKey(future_metadata.sorting_key);
-    }
-
-    {
-        /// Call applyMetadataChangesToCreateQuery to validate the resulting CREATE query
-        auto ast = DatabaseCatalog::instance().getDatabase(table_id.database_name)->getCreateTableQuery(table_id.table_name, query_context);
-        applyMetadataChangesToCreateQuery(ast, future_metadata, query_context);
-
-        auto statement = getObjectDefinitionFromCreateQuery(ast);
-        size_t max_query_size = query_context->getSettingsRef()[Setting::max_query_size];
-        if (max_query_size && statement.size() > max_query_size)
-            throw Exception(
-                ErrorCodes::QUERY_IS_TOO_LARGE,
-                "The resulting metadata of table {} ({} bytes) would exceed max_query_size ({}), "
-                "which would make the table unloadable. Reduce the number of columns or increase max_query_size.",
-                table_id.getNameForLogs(),
-                statement.size(),
-                max_query_size);
     }
 
     auto ast_to_str = [](ASTPtr query) -> String
