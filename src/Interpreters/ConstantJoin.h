@@ -4,14 +4,13 @@
 #include <list>
 #include <memory>
 #include <optional>
-#include <vector>
 
 #include <Core/Block.h>
 #include <Core/Field.h>
 #include <Interpreters/IJoin.h>
 #include <Interpreters/RowRefs.h>
 #include <Interpreters/TemporaryDataOnDisk.h>
-#include <Common/logger_useful.h>
+#include <Common/Logger.h>
 
 namespace DB
 {
@@ -62,6 +61,8 @@ private:
     friend class ConstantJoinResult;
     friend class ConstantJoinNotJoinedRightFiller;
 
+    /// A right-side block prepared for probing. `rows` can be non-zero while `columns_info` is empty
+    /// when the query needs only the right-side row count.
     struct StoredBlock
     {
         ColumnsInfo columns_info;
@@ -91,40 +92,55 @@ private:
 
     std::shared_ptr<TableJoin> table_join;
 
-    Block right_sample_block;
+    /// Header of the right columns appended to every output row (excludes the dummy constant key).
     Block sample_block_with_columns_to_add;
+    /// Empty block with the structure the stored right blocks are normalized to.
     Block saved_block_sample;
 
+    /// Right-side data kept in memory, possibly compressed.
     StoredBlocks right_blocks;
 
+    /// Spilling of right blocks once the join size limits are approached; `tmp_stream` exists after the first spill.
     TemporaryDataOnDiskScopePtr tmp_data;
     std::optional<TemporaryBlockStreamHolder> tmp_stream;
 
+    /// All right rows, including spilled ones.
     size_t total_rows_to_join = 0;
+    /// Rows residing in `right_blocks` only.
     size_t in_memory_rows = 0;
+    /// Incrementally maintained sum of `StoredBlock::allocatedBytes` over `right_blocks`.
     size_t allocated_size = 0;
+    /// At least one stored block is compressed; readers then decompress every stored block.
     bool have_compressed = false;
+    /// The single right row joined by the selected-right-row modes (first or last, see `useLastRightRow`).
     std::optional<ColumnsInfo> selected_right_columns_info;
 
     PredicateKind predicate_kind = PredicateKind::True;
-    std::optional<String> left_constant_key_name;
-    std::optional<String> right_constant_key_name;
+    /// The dummy constant key names; set only for `PredicateKind::CompareConstantKeys`.
+    String left_constant_key_name;
+    String right_constant_key_name;
+    /// Value of the right dummy key, captured from the first right block.
     std::optional<Field> right_constant_key_value;
-    mutable std::atomic<Int32> constant_predicate_match = -1;
-    mutable std::atomic_bool right_rows_matched = false;
+    /// Lazily cached result of `CompareConstantKeys`: -1 unknown, 0 no match, 1 match.
+    std::atomic<Int32> constant_predicate_match = -1;
+    /// Whether any probe rows have matched; gates the non-joined right rows and the first-left-row cut in `joinBlock`.
+    std::atomic_bool has_seen_matching_rows = false;
+    /// The `join_any_take_last_row` setting (see `useLastRightRow`).
     const bool any_take_last_row;
 
+    /// Per-result-block limits: `max_joined_block_size_rows` / `max_joined_block_size_bytes`.
     size_t max_joined_block_rows = 0;
     size_t max_joined_block_bytes = 0;
 
+    /// Set under memory pressure; from then on stored blocks are shrunk to fit (see `shrinkStoredBlocksToFit`).
     bool shrink_blocks = false;
+    /// Query memory usage at the first `addBlockToJoin`; the baseline for measuring the join's own consumption.
     Int64 memory_usage_before_adding_blocks = 0;
 
     LoggerPtr log;
 
-    Block materializeColumnsFromRightBlock(Block block) const;
     bool constantPredicateMatches(const Block & left_block);
-    void shrinkStoredBlocksToFit(size_t & total_bytes_in_join, bool force_optimize = false);
+    void shrinkStoredBlocksToFit(size_t & total_bytes_in_join);
     void doDebugAsserts() const;
 };
 
