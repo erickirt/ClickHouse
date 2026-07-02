@@ -3871,10 +3871,13 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
 
     /// Now check if we have to use primary-key or skip indexes for join pruning
     bool runtime_prune_primary_key = false;
+    const bool pending_mutations = mutations_snapshot->hasDataMutations() || mutations_snapshot->hasAlterMutations() || mutations_snapshot->hasPatchParts();
     MergeTreeIndices runtime_skip_indexes;
-    if (context->getSettingsRef()[Setting::use_skip_indexes_on_data_read]
+    if (context->getSettingsRef()[Setting::use_skip_indexes]
+        && context->getSettingsRef()[Setting::use_skip_indexes_on_data_read]
         && !query_info.isFinal()
-        && !join_runtime_filters_for_index_analysis.empty())
+        && !join_runtime_filters_for_index_analysis.empty()
+        && !pending_mutations)
     {
         const auto & metadata = *storage_snapshot->metadata;
         const auto & pk_columns = metadata.getPrimaryKey().column_names;
