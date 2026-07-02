@@ -10,6 +10,16 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 query_id="kill_query_mutation_sync_${CLICKHOUSE_DATABASE}_$RANDOM"
 alter_stderr="${CLICKHOUSE_TMP}/kill_query_mutation_sync_${CLICKHOUSE_DATABASE}_$RANDOM.stderr"
 
+cleanup()
+{
+    # Runs on every exit path (including the fatal assertion below) so a failed run still
+    # removes the never-executed mutation entry and the table.
+    $CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "KILL MUTATION WHERE database = '${CLICKHOUSE_DATABASE}' AND table = 't_kill_mutation'" >/dev/null 2>&1 || true
+    $CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "DROP TABLE IF EXISTS ${CLICKHOUSE_DATABASE}.t_kill_mutation SYNC" >/dev/null 2>&1 || true
+    rm -f "$alter_stderr"
+}
+trap cleanup EXIT
+
 $CLICKHOUSE_CLIENT --query "
     CREATE TABLE ${CLICKHOUSE_DATABASE}.t_kill_mutation
     (
@@ -59,12 +69,12 @@ wait "$alter_pid" 2>/dev/null
 # Assert the ALTER exited via cancellation, not by the mutation completing on its own:
 # the client prints QUERY_WAS_CANCELLED only when KILL QUERY cancelled the waiting ALTER.
 # Without this check the test is a false positive (wait_for_query_to_start only proves the
-# query was observed once).
-grep -oF "QUERY_WAS_CANCELLED" "$alter_stderr"
-
-# Remove the never-executed mutation entry so the table can be dropped cleanly.
-$CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "KILL MUTATION WHERE database = '${CLICKHOUSE_DATABASE}' AND table = 't_kill_mutation'" >/dev/null 2>&1 || true
-
-$CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "DROP TABLE IF EXISTS ${CLICKHOUSE_DATABASE}.t_kill_mutation SYNC"
-
-rm -f "$alter_stderr"
+# query was observed once). clickhouse-test runs .sh tests without `set -e`, so the grep must
+# fail the test explicitly rather than falling through to teardown with exit 0.
+if grep -qF "QUERY_WAS_CANCELLED" "$alter_stderr"; then
+    echo "QUERY_WAS_CANCELLED"
+else
+    echo "ALTER did not report QUERY_WAS_CANCELLED after KILL QUERY:" >&2
+    cat "$alter_stderr" >&2
+    exit 1
+fi
