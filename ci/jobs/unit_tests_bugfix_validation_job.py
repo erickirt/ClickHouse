@@ -122,8 +122,16 @@ def build_gtest_filter(suites):
 
 def determine_merge_base(info):
     base = info.base_branch or "master"
-    # Ensure full history and the base branch are available (the runner unshallows for
-    # most jobs, but be defensive — `git merge-base` needs the base commit locally).
+    # IMPORTANT: this workflow checks out GitHub's synthetic MERGE ref by default
+    # (CHECKOUT_REF is empty unless DISABLE_CI_MERGE_COMMIT=1 in pull_request.yml), so
+    # `git rev-parse HEAD` is the base+PR merge commit, NOT the PR head. Using HEAD here
+    # would make `git merge-base` resolve to the current base tip and the overlay pick up
+    # the merged test file — i.e. the "before" tree would be master-tip + merged test
+    # rather than the true merge-base + PR-head test, causing false reproductions and
+    # refutations whenever master touched the buggy code or the test after the branch
+    # split. Anchor everything on the PR head commit (info.sha) instead.
+    pr_head = info.sha
+    assert pr_head, "Info.sha (PR head commit) is empty; cannot compute a correct merge-base"
     Shell.check(
         "git rev-parse --is-shallow-repository | grep -q true && "
         "git fetch --unshallow --prune --no-recurse-submodules --filter=tree:0 origin HEAD ||:",
@@ -133,8 +141,17 @@ def determine_merge_base(info):
         f"git fetch --prune --no-recurse-submodules --filter=tree:0 origin {base} ||:",
         verbose=True,
     )
-    merge_base = Shell.get_output(f"git merge-base HEAD origin/{base}").strip()
-    assert merge_base, f"Failed to determine merge-base with origin/{base}"
+    # Fetch the PR head explicitly: under the merge-ref checkout it is only reachable as
+    # the merge commit's second parent, and may be absent in a partial/shallow clone.
+    Shell.check(
+        "git fetch --prune --no-recurse-submodules --filter=tree:0 origin "
+        f"{shlex.quote(pr_head)} ||:",
+        verbose=True,
+    )
+    merge_base = Shell.get_output(
+        f"git merge-base {shlex.quote(pr_head)} origin/{base}"
+    ).strip()
+    assert merge_base, f"Failed to determine merge-base of {pr_head} with origin/{base}"
     return merge_base
 
 
@@ -444,9 +461,13 @@ def main():
     results = []
 
     # 4. Build the "before" binary (merge-base + test files, without the fix).
-    pr_sha = Shell.get_output("git rev-parse HEAD").strip()
+    # Overlay the PR-HEAD version of the test files (info.sha), NOT `git rev-parse HEAD`:
+    # the default checkout is the base+PR merge commit, whose test file is base-merged, not
+    # what the PR author wrote. See determine_merge_base.
+    pr_sha = info.sha
+    assert pr_sha, "Info.sha (PR head commit) is empty; cannot overlay the PR's test files"
     merge_base = determine_merge_base(info)
-    print(f"PR commit: {pr_sha}")
+    print(f"PR head commit: {pr_sha}")
     print(f"merge-base: {merge_base}")
 
     # SECURITY: refuse to touch the network if the PR's .gitmodules is unsafe. This job

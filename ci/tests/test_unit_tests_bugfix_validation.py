@@ -281,5 +281,39 @@ def test_gitmodules_shape_rejects_traversal_path(tmp_path, monkeypatch, path):
     assert violation and "unsafe path" in violation
 
 
+# --------------------------------------------------------------------------
+# determine_merge_base: must anchor on the PR head (info.sha), not `git HEAD`,
+# because the default checkout is the base+PR merge commit.
+# --------------------------------------------------------------------------
+def test_determine_merge_base_uses_pr_head_not_git_head(monkeypatch):
+    import ci.jobs.unit_tests_bugfix_validation_job as job
+
+    calls = []
+
+    def fake_check(cmd, **kwargs):
+        calls.append(cmd)
+        return True
+
+    def fake_get_output(cmd, **kwargs):
+        calls.append(cmd)
+        return "abc123mergebase"
+
+    monkeypatch.setattr(job.Shell, "check", staticmethod(fake_check))
+    monkeypatch.setattr(job.Shell, "get_output", staticmethod(fake_get_output))
+
+    class _Info:
+        sha = "deadbeefprheadsha"
+        base_branch = "master"
+
+    assert job.determine_merge_base(_Info()) == "abc123mergebase"
+
+    merge_base_cmds = [c for c in calls if "merge-base" in c]
+    assert merge_base_cmds, "no `git merge-base` command was issued"
+    # It computes merge-base of the PR head vs the base, never of the merge commit (HEAD).
+    for c in merge_base_cmds:
+        assert "deadbeefprheadsha" in c
+        assert "merge-base HEAD " not in c
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
