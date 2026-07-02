@@ -1565,6 +1565,26 @@ void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 t
     tokens_map.emplace(key_holder, it, inserted);
 
     PostingListBuilder & posting_list_builder = it->getMapped();
+
+    if (token_drop_filter)
+    {
+        /// Hybrid fast path: decide the drop once per distinct token (on first insert). Dropped tokens keep
+        /// an empty posting builder as a sentinel and never build postings; later occurrences short-circuit
+        /// on the empty builder (isSmall() avoids the roaring cardinality() call in isEmpty()), so each
+        /// occurrence is hashed only once (into tokens_map).
+        const bool dropped = inserted
+            ? token_drop_filter->shouldDrop(token)
+            : (posting_list_builder.isSmall() && posting_list_builder.isEmpty());
+        if (dropped)
+        {
+            /// Dropped tokens build no postings, but still count toward the temporary-segment flush
+            /// threshold so the flush cadence (and thus peak memory) tracks the input volume rather than
+            /// the drop rate - counting only kept tokens would enlarge each segment as the drop rate rises.
+            ++num_processed_tokens;
+            return;
+        }
+    }
+
     posting_list_builder.add(static_cast<UInt32>(current_row), posting_lists);
 
     if (position_map)
@@ -1575,6 +1595,7 @@ void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 t
         positions_builder.add(static_cast<UInt32>(current_row), token_position);
     }
 
+    /// Kept tokens (and every token on the non-hybrid paths) count toward the flush threshold.
     ++num_processed_tokens;
 }
 
@@ -1592,6 +1613,11 @@ std::unique_ptr<MergeTreeIndexGranuleTextWritable> MergeTreeIndexTextGranuleBuil
     tokens_map.forEachValue([&](const auto & key, auto & mapped)
     {
         std::string_view token = key;
+        /// Hybrid fast path leaves dropped tokens with an empty posting builder; skip them. (No non-dropped
+        /// token is ever empty - every kept occurrence adds at least one posting - so this never over-drops.)
+        /// isSmall() short-circuits the roaring cardinality() call in isEmpty() for large kept tokens.
+        if (mapped.isSmall() && mapped.isEmpty())
+            return;
         if (!dropped_tokens.empty() && dropped_tokens.contains(token))
             return;
         sorted_tokens.push_back(SortedToken{token, &mapped, nullptr});
@@ -1676,7 +1702,21 @@ MergeTreeIndexAggregatorText::MergeTreeIndexAggregatorText(
     , preprocessor(preprocessor_)
     , postprocessor(postprocessor_)
 {
-    use_filter_fast_path = postprocessor->hasActions() && postprocessor->isFilterOnly() && !params.positions;
+    /// Both fast paths need positions disabled (phrase search needs dense position renumbering after drops).
+    if (postprocessor->hasActions() && !params.positions)
+    {
+        if (const auto * inline_filter = postprocessor->getInlineFilter())
+        {
+            /// Hybrid path: dropped tokens are decided per distinct token in addToken and never build postings.
+            granule_builder.token_drop_filter = inline_filter;
+            use_hybrid_filter = true;
+        }
+        else if (postprocessor->isFilterOnly())
+        {
+            /// Flush path: build all tokens, then drop the distinct ones the postprocessor empties at flush.
+            use_filter_fast_path = true;
+        }
+    }
 }
 
 MergeTreeIndexGranulePtr MergeTreeIndexAggregatorText::getGranuleAndReset()
@@ -1713,7 +1753,7 @@ void MergeTreeIndexAggregatorText::update(const Block & block, size_t * pos, siz
     const auto & index_column = block.getByName(index_column_name);
     auto [preprocessed_column, offset] = preprocessor->processColumn(index_column, *pos, rows_read);
 
-    if (postprocessor->hasActions() && !use_filter_fast_path)
+    if (postprocessor->hasActions() && !use_filter_fast_path && !use_hybrid_filter)
     {
         ColumnPtr tokenized = tokenizeToArray(*tokenizer, *preprocessed_column, offset, rows_read);
         ColumnPtr postprocessed = postprocessor->processTokensArrayBatch(assert_cast<const ColumnArray *>(tokenized.get()));

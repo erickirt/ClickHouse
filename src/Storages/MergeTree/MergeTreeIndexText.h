@@ -438,6 +438,7 @@ struct ITokenizer;
 using TokenizerPtr = const ITokenizer *;
 
 class MergeTreeIndexTextPostprocessor;
+struct MergeTreeIndexTextInlineFilter;
 
 struct MergeTreeIndexTextGranuleBuilder
 {
@@ -479,6 +480,9 @@ struct MergeTreeIndexTextGranuleBuilder
     std::unique_ptr<TokenToPositionListMap> position_map;
     /// Tokens the filter-only postprocessor maps to the empty string.
     absl::flat_hash_set<std::string_view> dropped_tokens;
+    /// Hybrid fast path: when set, addToken decides (once per distinct token) whether a token is dropped;
+    /// dropped tokens keep an empty posting builder as a sentinel and never build postings. Non-owning.
+    const MergeTreeIndexTextInlineFilter * token_drop_filter = nullptr;
 };
 
 class MergeTreeIndexTextPreprocessor;
@@ -518,6 +522,8 @@ private:
     MergeTreeIndexTextPostprocessorPtr postprocessor;
     /// True when the postprocessor only drops tokens (filter-only) and positions are disabled.
     bool use_filter_fast_path = false;
+    /// True when the postprocessor is an IN/NOT IN filter handled by the hybrid per-distinct-token drop path.
+    bool use_hybrid_filter = false;
 };
 
 class MergeTreeIndexText final : public IMergeTreeIndex

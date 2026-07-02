@@ -1,6 +1,8 @@
 #pragma once
 
 #include <optional>
+#include <string_view>
+#include <absl/container/flat_hash_set.h>
 #include <Columns/ColumnArray.h>
 #include <Common/VectorWithMemoryTracking.h>
 #include <Columns/ColumnString.h>
@@ -14,6 +16,18 @@ namespace DB
 {
 
 struct IndexDescription;
+
+/// Drop set extracted from a filter-only `if(token IN/NOT IN (<string literals>), '', token)` postprocessor.
+/// Lets the granule builder decide, once per distinct token, whether it is dropped - used by the hybrid
+/// fast path so dropped tokens never build posting lists while each occurrence is still hashed only once.
+struct MergeTreeIndexTextInlineFilter
+{
+    struct Hash { using is_transparent = void; size_t operator()(std::string_view s) const { return std::hash<std::string_view>{}(s); } };
+    struct Eq   { using is_transparent = void; bool operator()(std::string_view a, std::string_view b) const { return a == b; } };
+    absl::flat_hash_set<std::string, Hash, Eq> tokens;
+    bool drop_on_match = true;
+    bool shouldDrop(std::string_view token) const { return tokens.contains(token) == drop_on_match; }
+};
 
 /// Postprocessor for text index tokens.
 /// Applies a user-defined expression to each output token after tokenization.
@@ -52,6 +66,10 @@ public:
     /// tokens after a plain streaming build instead of to every occurrence; see the granule builder fast path.
     bool isFilterOnly() const { return is_filter_only; }
 
+    /// Non-null when the postprocessor is an `if(token IN/NOT IN (<string literals>), '', token)` filter,
+    /// enabling the hybrid fast path (drop decided per distinct token, dropped tokens build no postings).
+    const MergeTreeIndexTextInlineFilter * getInlineFilter() const { return inline_filter ? &*inline_filter : nullptr; }
+
     /// Returns an ActionsDAG rewriting a haystack column into the Array(String) of postprocessed tokens
     /// the index stores: arrayMap(x -> postprocessor(x), tokens(col, '<tokenizer>')). Array(String)
     /// index columns are mapped directly (elements are already tokens). Only call when hasActions().
@@ -65,6 +83,8 @@ private:
     DataTypePtr string_type;
     /// True when the expression maps every token to itself or the empty string (a pure filter).
     bool is_filter_only = false;
+    /// Set when the filter is an `IN`/`NOT IN` over string literals; enables the hybrid drop fast path.
+    std::optional<MergeTreeIndexTextInlineFilter> inline_filter;
 };
 
 }
