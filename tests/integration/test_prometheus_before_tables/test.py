@@ -63,10 +63,9 @@ def get_metrics(retries=10):
 
 
 def test_prometheus_starts_before_tables_are_loaded(start_cluster):
-    # The Prometheus endpoint is started together with `servers_to_start_before_tables`, so it must
-    # begin listening before metadata (tables) loading finishes. This keeps metrics observable during
-    # the (potentially long) metadata loading phase. If Prometheus were created with the regular
-    # `servers` (the previous behavior), it would start only after "Loaded metadata.".
+    # A metrics-only Prometheus endpoint (no `prometheus.handlers`) is started before metadata
+    # (tables) loading begins. This keeps metrics observable during the (potentially long) metadata
+    # loading phase. Previously it would start only after "Loaded metadata.".
     prometheus_listen_line = first_log_line_number("Listening for Prometheus")
     loaded_metadata_line = first_log_line_number("Loaded metadata.")
     assert prometheus_listen_line < loaded_metadata_line
@@ -79,3 +78,18 @@ def test_prometheus_exposes_metrics(start_cluster):
     # Asynchronous metrics are collected by a thread that is now started before tables are loaded;
     # check that they are still exposed (e.g. the server uptime).
     assert any(name.startswith("ClickHouseAsyncMetrics_") for name in metrics)
+
+
+def test_system_stop_start_listen(start_cluster):
+    # Although the Prometheus server is started early, it lives in the regular `servers` list, so
+    # the `SYSTEM START/STOP LISTEN` contract must keep working for it.
+    node.query("SYSTEM STOP LISTEN PROMETHEUS")
+    with pytest.raises(requests.exceptions.ConnectionError):
+        requests.get(
+            "http://{host}:{port}/metrics".format(host=node.ip_address, port=8001),
+            allow_redirects=False,
+            timeout=5,
+        )
+    node.query("SYSTEM START LISTEN PROMETHEUS")
+    metrics = get_metrics()
+    assert metrics["ClickHouseProfileEvents_Query"] >= 0
