@@ -366,8 +366,10 @@ void Reader::prefilterAndInitRowGroups(const std::optional<std::unordered_set<UI
         for (size_t idx_in_output_block : format_filter_info->key_condition->getUsedColumns())
         {
             const auto & output_idx = sample_block_to_output_columns_idx.at(idx_in_output_block);
+            /// No file-readable column for this key-condition column: it has no column-chunk
+            /// stats, so it cannot prune. Skip it (its range stays the whole universe).
             if (!output_idx.has_value())
-                throw Exception(ErrorCodes::LOGICAL_ERROR, "KeyCondition uses PREWHERE output");
+                continue;
             const OutputColumnInfo & output_info = output_columns[output_idx.value()];
 
             if (output_info.is_primitive)
