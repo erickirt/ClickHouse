@@ -17,6 +17,8 @@ namespace ProfileEvents
     extern const Event FilteringMarksWithSecondaryKeysMicroseconds;
     extern const Event SelectedMarks;
     extern const Event SelectedRanges;
+    extern const Event RuntimeFilterGranulesConsidered;
+    extern const Event RuntimeFilterGranulesDropped;
 }
 
 namespace DB
@@ -176,8 +178,11 @@ SkipIndexReadResultPtr MergeTreeSkipIndexReader::read(const RangesInDataPart & p
                 ranges = std::move(filtered_ranges);
             }
 
+            const size_t granules_after = ranges.getNumberOfMarks();
+            ProfileEvents::increment(ProfileEvents::RuntimeFilterGranulesConsidered, granules_before);
+            ProfileEvents::increment(ProfileEvents::RuntimeFilterGranulesDropped, granules_before - granules_after);
             LOG_DEBUG(log, "Dynamic read-time predicate dropped {}/{} granules in part {}",
-                granules_before - ranges.getNumberOfMarks(), granules_before, part.data_part->name);
+                granules_before - granules_after, granules_before, part.data_part->name);
         }
     }
 

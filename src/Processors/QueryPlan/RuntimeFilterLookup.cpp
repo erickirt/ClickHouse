@@ -496,13 +496,15 @@ SharedFixedHashTableRuntimeFilter::SharedFixedHashTableRuntimeFilter(
     Float64 pass_ratio_threshold_for_disabling_,
     UInt64 blocks_to_skip_before_reenabling_,
     ProbeFn probe_fn_,
-    std::optional<Range> key_range_)
+    std::optional<Range> key_range_,
+    ColumnPtr recorded_key_values_)
     : IRuntimeFilter(
         /*filters_to_merge_=*/0,
         filter_column_target_type_,
         pass_ratio_threshold_for_disabling_,
         blocks_to_skip_before_reenabling_)
     , probe_fn(std::move(probe_fn_))
+    , recorded_key_values(std::move(recorded_key_values_))
 {
     /// Build was already done elsewhere; nothing left to insert.
     inserts_are_finished = true;

@@ -327,11 +327,16 @@ public:
         Float64 pass_ratio_threshold_for_disabling_,
         UInt64 blocks_to_skip_before_reenabling_,
         ProbeFn probe_fn_,
-        std::optional<Range> key_range_ = {});
+        std::optional<Range> key_range_ = {},
+        ColumnPtr recorded_key_values_ = {});
 
     /// All "build" entry points are no-ops: the data was built inside HashJoin already.
     void insert(ColumnPtr) override {}
     void merge(const IRuntimeFilter *) override {}
+
+    /// Carried over from the replaced filter (non-null only when it kept an exact set), so the
+    /// left-side index-analysis path can still build IN(...) instead of only a [min,max] range.
+    ColumnPtr getRecordedKeyValues() const override { return recorded_key_values; }
 
 protected:
     void finishInsertImpl() override {}
@@ -339,6 +344,7 @@ protected:
 
 private:
     ProbeFn probe_fn;
+    ColumnPtr recorded_key_values;
 };
 
 /// Store and find per-query runtime filters that are used for optimizing some kinds of JOINs
