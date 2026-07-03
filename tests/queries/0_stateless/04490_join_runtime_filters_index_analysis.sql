@@ -206,7 +206,7 @@ GROUP BY d.tag
 FORMAT Null
 SETTINGS log_comment = '04490_pe_bf';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -232,7 +232,7 @@ GROUP BY d.tag
 FORMAT Null
 SETTINGS log_comment = '04490_pe_bf_cap', join_runtime_filter_exact_values_limit = 100;
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT ProfileEvents['RuntimeFilterGranulesDropped'] = 0
 FROM system.query_log
