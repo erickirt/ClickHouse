@@ -57,7 +57,7 @@ GROUP BY d.tag
 FORMAT Null
 SETTINGS log_comment = '04490_pe';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -83,7 +83,7 @@ GROUP BY d.tag
 FORMAT Null
 SETTINGS log_comment = '04490_pe_skip';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -108,7 +108,7 @@ GROUP BY d.tag
 FORMAT Null
 SETTINGS log_comment = '04490_pe_ckey';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -132,7 +132,7 @@ WHERE d.tag = 'hot'
 FORMAT Null
 SETTINGS log_comment = '04490_pe_str';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -156,7 +156,7 @@ WHERE d.tag = 'hot'
 FORMAT Null
 SETTINGS log_comment = '04490_pe_dt';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -180,7 +180,7 @@ WHERE d.tag = 'hot'
 FORMAT Null
 SETTINGS log_comment = '04490_pe_lc';
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 SELECT
     ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
@@ -214,7 +214,7 @@ SETTINGS log_comment = '04490_pe_fht',
     enable_join_fixed_hash_table_conversion = 1,
     join_runtime_filter_from_fixed_hash_table = 1;
 
-SYSTEM FLUSH LOGS;
+SYSTEM FLUSH LOGS query_log;
 
 -- exact-set pruning must survive the FixedHashMap runtime filter, not degrade to a [min,max] range
 SELECT ProfileEvents['RuntimeFilterGranulesDropped'] > 0
