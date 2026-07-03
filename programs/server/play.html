@@ -1707,6 +1707,14 @@ class QueryResultElement extends HTMLElement
                     overflow: hidden;
                 }
 
+                /* A single-value result (one row, one column, e.g. SHOW CREATE TABLE) is shown
+                   with its full height, so the whole value is visible without selecting the cell. */
+                #data-table.single-value .cell-content
+                {
+                    max-height: none;
+                    overflow: visible;
+                }
+
                 td u
                 {
                     text-decoration-color: var(--misc-text-color);
@@ -2086,6 +2094,7 @@ class QueryResultElement extends HTMLElement
         this._clearImage();
 
         this._dataTable.classList.remove('fixed');
+        this._dataTable.classList.remove('single-value');
         this._dataDiv.classList.remove('fixed');
 
         this._extremes = {};
@@ -2843,6 +2852,18 @@ class QueryResultElement extends HTMLElement
         table.removeChild(table.tHead);
         table.removeChild(table.tBodies[0]);
         table.appendChild(new_tbody);
+    }
+
+    /// A result that is exactly one row and one column (for example, `SHOW CREATE TABLE`) is shown
+    /// with its full height instead of the default 3-line clamp, so the whole value is visible
+    /// without having to select the cell.
+    expandSingleValueIfNeeded()
+    {
+        const table = this._dataTable;
+        const is_single_value = !this._totals
+            && Array.isArray(this._header) && this._header.length == 1
+            && table.rows.length == 1;
+        table.classList.toggle('single-value', is_single_value);
     }
 
     _changeTableLayout()
@@ -4330,6 +4351,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             if (is_table) targetResultEl.renderTotals();
             targetResultEl.applyColumnColors();
             if (is_table) targetResultEl.transposeIfNeeded();
+            if (is_table) targetResultEl.expandSingleValueIfNeeded();
         }
 
         /// A tab switch during an awaited renderer (chart/graph loader) makes the render bail
@@ -4667,6 +4689,7 @@ async function renderSnapshotIntoElement(el, snap, token) {
         if (is_table) el.renderTotals();
         el.applyColumnColors();
         if (is_table) el.transposeIfNeeded();
+        if (is_table) el.expandSingleValueIfNeeded();
     }
 }
 
@@ -4906,6 +4929,7 @@ async function restoreFromHistory(state, token) {
         if (is_table) resultEl.renderTotals();
         resultEl.applyColumnColors();
         if (is_table) resultEl.transposeIfNeeded();
+        if (is_table) resultEl.expandSingleValueIfNeeded();
         if (is_table) resultEl._changeTableLayout();
     }
 
