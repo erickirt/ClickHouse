@@ -66,8 +66,11 @@ def test_prometheus_starts_before_tables_are_loaded(start_cluster):
     # A metrics-only Prometheus endpoint (no `prometheus.handlers`) is started before metadata
     # (tables) loading begins. This keeps metrics observable during the (potentially long) metadata
     # loading phase. Previously it would start only after "Loaded metadata.".
-    prometheus_listen_line = first_log_line_number("Listening for Prometheus")
-    loaded_metadata_line = first_log_line_number("Loaded metadata.")
+    # Anchor on the `Application:` logger prefix: other components log similar messages, e.g. with
+    # the database on a plain disk, `MetadataStorageFromPlainObjectStorage` logs
+    # "Loaded metadata (empty)" during disk initialization, long before tables are loaded.
+    prometheus_listen_line = first_log_line_number("Application: Listening for Prometheus")
+    loaded_metadata_line = first_log_line_number("Application: Loaded metadata")
     assert prometheus_listen_line < loaded_metadata_line
 
 
