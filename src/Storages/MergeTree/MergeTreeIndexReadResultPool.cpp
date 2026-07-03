@@ -40,6 +40,7 @@ MergeTreeSkipIndexReader::MergeTreeSkipIndexReader(
     DynamicPredicateBuilder dynamic_predicate_builder_,
     bool prune_primary_key_,
     MergeTreeIndices dynamic_skip_indexes_,
+    DynamicSkipIndexFilter dynamic_skip_index_filter_,
     ContextPtr context_,
     LoggerPtr log_)
     : skip_indexes(std::move(skip_indexes_))
@@ -52,6 +53,7 @@ MergeTreeSkipIndexReader::MergeTreeSkipIndexReader(
     , dynamic_predicate_builder(std::move(dynamic_predicate_builder_))
     , prune_primary_key(prune_primary_key_)
     , dynamic_skip_indexes(std::move(dynamic_skip_indexes_))
+    , dynamic_skip_index_filter(std::move(dynamic_skip_index_filter_))
     , context(std::move(context_))
     , log(std::move(log_))
 {
@@ -154,6 +156,8 @@ SkipIndexReadResultPtr MergeTreeSkipIndexReader::read(const RangesInDataPart & p
             {
                 if (ranges.empty())
                     break;
+                if (dynamic_skip_index_filter && !dynamic_skip_index_filter(*index_helper))
+                    continue;
                 if (auto can_use = MergeTreeDataSelectExecutor::canUseIndex(index_helper, metadata_snapshot, all_updated_columns); !can_use)
                     continue;
 

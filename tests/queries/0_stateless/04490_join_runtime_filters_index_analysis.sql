@@ -190,6 +190,56 @@ WHERE current_database = currentDatabase() AND log_comment = '04490_pe_lc' AND t
 ORDER BY event_time DESC
 LIMIT 1;
 
+DROP TABLE IF EXISTS bf_fact;
+DROP TABLE IF EXISTS bf_dim;
+CREATE TABLE bf_fact (id UInt64, k UInt64, v UInt64, INDEX idx_k k TYPE bloom_filter GRANULARITY 1)
+ENGINE = MergeTree ORDER BY id SETTINGS index_granularity = 16;
+CREATE TABLE bf_dim (k UInt64, tag String) ENGINE = MergeTree ORDER BY k;
+INSERT INTO bf_fact SELECT number, number, number FROM numbers(2000);
+INSERT INTO bf_dim SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
+
+SELECT d.tag, sum(f.v)
+FROM bf_fact AS f
+INNER JOIN bf_dim AS d ON f.k = d.k
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe_bf';
+
+SYSTEM FLUSH LOGS;
+
+SELECT
+    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
+    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
+FROM system.query_log
+WHERE current_database = currentDatabase() AND log_comment = '04490_pe_bf' AND type = 'QueryFinish'
+ORDER BY event_time DESC
+LIMIT 1;
+
+DROP TABLE IF EXISTS bf_fact_cap;
+DROP TABLE IF EXISTS bf_dim_cap;
+CREATE TABLE bf_fact_cap (id UInt64, k UInt64, v UInt64, INDEX idx_k k TYPE bloom_filter GRANULARITY 1)
+ENGINE = MergeTree ORDER BY id SETTINGS index_granularity = 16;
+CREATE TABLE bf_dim_cap (k UInt64, tag String) ENGINE = MergeTree ORDER BY k;
+INSERT INTO bf_fact_cap SELECT number, number, number FROM numbers(2000);
+INSERT INTO bf_dim_cap SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
+
+SELECT d.tag, sum(f.v)
+FROM bf_fact_cap AS f
+INNER JOIN bf_dim_cap AS d ON f.k = d.k
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe_bf_cap', join_runtime_filter_exact_values_limit = 100;
+
+SYSTEM FLUSH LOGS;
+
+SELECT ProfileEvents['RuntimeFilterGranulesDropped'] = 0
+FROM system.query_log
+WHERE current_database = currentDatabase() AND log_comment = '04490_pe_bf_cap' AND type = 'QueryFinish'
+ORDER BY event_time DESC
+LIMIT 1;
+
 DROP TABLE IF EXISTS jrf_fact;
 DROP TABLE IF EXISTS jrf_dim;
 CREATE TABLE jrf_fact (id UInt64, k Int32, v UInt64, INDEX idx_k k TYPE set(0) GRANULARITY 1)
@@ -237,5 +287,9 @@ DROP TABLE dt_fact;
 DROP TABLE dt_dim;
 DROP TABLE lc_fact;
 DROP TABLE lc_dim;
+DROP TABLE bf_fact;
+DROP TABLE bf_dim;
+DROP TABLE bf_fact_cap;
+DROP TABLE bf_dim_cap;
 DROP TABLE jrf_fact;
 DROP TABLE jrf_dim;

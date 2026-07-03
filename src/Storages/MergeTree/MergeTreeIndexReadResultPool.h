@@ -33,6 +33,9 @@ public:
     /// Builds a predicate into the DAG to prune granules at read time, or nullptr for none.
     using DynamicPredicateBuilder = std::function<const ActionsDAG::Node *(ActionsDAG &)>;
 
+    /// Whether a dynamic skip index should be applied at read time.
+    using DynamicSkipIndexFilter = std::function<bool(const IMergeTreeIndex &)>;
+
     MergeTreeSkipIndexReader(
         UsefulSkipIndexes skip_indexes_,
         std::optional<KeyCondition> & key_condition_rpn_template_,
@@ -44,6 +47,7 @@ public:
         DynamicPredicateBuilder dynamic_predicate_builder_,
         bool prune_primary_key_,
         MergeTreeIndices dynamic_skip_indexes_,
+        DynamicSkipIndexFilter dynamic_skip_index_filter_,
         ContextPtr context_,
         LoggerPtr log_);
 
@@ -63,6 +67,7 @@ private:
     DynamicPredicateBuilder dynamic_predicate_builder;
     bool prune_primary_key = false;
     MergeTreeIndices dynamic_skip_indexes;
+    DynamicSkipIndexFilter dynamic_skip_index_filter;
     ContextPtr context;
     LoggerPtr log;
 

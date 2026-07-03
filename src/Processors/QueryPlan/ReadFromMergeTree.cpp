@@ -269,6 +269,7 @@ namespace Setting
     extern const SettingsBool read_in_order_use_virtual_row_per_block;
     extern const SettingsBool use_skip_indexes_if_final_exact_mode;
     extern const SettingsBool use_skip_indexes_on_data_read;
+    extern const SettingsUInt64 join_runtime_filter_exact_values_limit;
     extern const SettingsBool use_skip_indexes_for_top_k;
     extern const SettingsBool use_top_k_dynamic_filtering;
     extern const SettingsBool use_query_condition_cache;
@@ -2034,7 +2035,7 @@ bool areAllSkipIndexColumnsInPrimaryKey(const Names & primary_key_columns, const
 
 void ReadFromMergeTree::addJoinRuntimeFilterIndexAnalysisOnDataRead(const String & filter_id, const String & column_name, const DataTypePtr & column_type)
 {
-    /// Prunable only if in the primary key or has a minmax/set skip index.
+    /// Prunable only if in the primary key or has a minmax/set/bloom_filter skip index.
     const auto & metadata = *storage_snapshot->metadata;
     const auto & primary_key_columns = metadata.getPrimaryKey().column_names;
     const bool is_primary_key_column
@@ -2043,7 +2044,7 @@ void ReadFromMergeTree::addJoinRuntimeFilterIndexAnalysisOnDataRead(const String
     bool has_applicable_skip_index = false;
     for (const auto & index : metadata.getSecondaryIndices())
     {
-        if (index.type != "minmax" && index.type != "set")
+        if (index.type != "minmax" && index.type != "set" && index.type != "bloom_filter")
             continue;
         if (std::find(index.column_names.begin(), index.column_names.end(), column_name) != index.column_names.end())
         {
@@ -3891,7 +3892,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
             }
             for (const auto & index : metadata.getSecondaryIndices())
             {
-                if (index.type != "minmax" && index.type != "set")
+                if (index.type != "minmax" && index.type != "set" && index.type != "bloom_filter")
                     continue;
                 if (std::find(index.column_names.begin(), index.column_names.end(), descr.key_column_name) == index.column_names.end())
                     continue;
@@ -3903,6 +3904,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
 
     /// Use a callback to isolate MergeTreeReader from JoinRuntimeFilter
     MergeTreeSkipIndexReader::DynamicPredicateBuilder dynamic_predicate_builder;
+    MergeTreeSkipIndexReader::DynamicSkipIndexFilter dynamic_skip_index_filter;
     if (!join_runtime_filters_for_index_analysis.empty())
     {
         dynamic_predicate_builder =
@@ -3910,6 +3912,26 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
             (ActionsDAG & dag) -> const ActionsDAG::Node *
             {
                 return buildRuntimeRangePredicate(*lookup, descriptors, dag, ctx);
+            };
+
+        const UInt64 bloom_filter_in_cap = context->getSettingsRef()[Setting::join_runtime_filter_exact_values_limit] / 100;
+        dynamic_skip_index_filter =
+            [lookup = context->getRuntimeFilterLookup(), descriptors = join_runtime_filters_for_index_analysis, bloom_filter_in_cap]
+            (const IMergeTreeIndex & index) -> bool
+            {
+                if (index.index.type != "bloom_filter")
+                    return true;
+                for (const auto & descr : descriptors)
+                {
+                    if (std::find(index.index.column_names.begin(), index.index.column_names.end(), descr.key_column_name) == index.index.column_names.end())
+                        continue;
+                    auto filter = lookup->find(descr.filter_id);
+                    if (!filter)
+                        return false;
+                    auto values = filter->getRecordedKeyValues();
+                    return values && values->size() <= bloom_filter_in_cap;
+                }
+                return false;
             };
     }
 
@@ -3938,6 +3960,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
                 dynamic_predicate_builder,
                 runtime_prune_primary_key,
                 runtime_skip_indexes,
+                dynamic_skip_index_filter,
                 context,
                 getLogger("MergeTreeSkipIndexReader"));
         }
@@ -3958,6 +3981,7 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
             dynamic_predicate_builder,
             runtime_prune_primary_key,
             runtime_skip_indexes,
+            dynamic_skip_index_filter,
             context,
             getLogger("MergeTreeSkipIndexReader"));
     }
