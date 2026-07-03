@@ -1596,6 +1596,17 @@ try
     /// NOTE: global context should be destroyed *before* GlobalThreadPool::shutdown()
     /// Otherwise GlobalThreadPool::shutdown() will hang, since Context holds some threads.
     SCOPE_EXIT_SAFE({
+        /// Stop accepting connections on the regular servers. In the normal shutdown path they are
+        /// already stopped, but on startup failure some of them can still be running: the Prometheus
+        /// endpoint is started before tables are loaded. Otherwise `server_pool.joinAll()` below
+        /// would wait forever for their listener threads.
+        {
+            std::lock_guard lock(servers_lock);
+            for (auto & server : servers)
+                if (!server.isStopping())
+                    server.stop();
+        }
+
         async_metrics->stop();
 
         /** Ask to cancel background jobs all table engines,
