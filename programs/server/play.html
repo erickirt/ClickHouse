@@ -3600,16 +3600,22 @@ checkURL();
 /// the page's own origin when `/play` is opened locally (`file://`) or pointed at a remote server.
 /// Resolve the Documentation link against that configured server (like `getTerminalURL` does for the Web
 /// Terminal) instead of leaving it hardcoded to `/docs`, and keep it in sync as the URL input changes.
+/// The non-empty Play username is carried over as a `user` query parameter so the docs page connects as
+/// the same user instead of falling back to the server default user. The password is intentionally
+/// omitted (it would leak in the URL).
 {
     const docs_icon = document.getElementById('docs-icon');
     function updateDocsURL() {
         try {
-            docs_icon.href = new URL('/docs', url_elem.value).href;
+            const url = new URL('/docs', url_elem.value);
+            if (user_elem.value) url.searchParams.set('user', user_elem.value);
+            docs_icon.href = url.href;
         } catch (e) {
             /// Leave the previous href in place while the configured URL is not parsable.
         }
     }
     url_elem.addEventListener('input', updateDocsURL);
+    user_elem.addEventListener('input', updateDocsURL);
     updateDocsURL();
 }
 
