@@ -147,6 +147,7 @@ SkipIndexReadResultPtr MergeTreeSkipIndexReader::read(const RangesInDataPart & p
                     /*part_offset_condition=*/std::nullopt,
                     /*total_offset_condition=*/std::nullopt,
                     /*exact_ranges=*/nullptr,
+                    /*pk_to_minmax_slot=*/nullptr,
                     context->getSettingsRef(),
                     log);
             }
