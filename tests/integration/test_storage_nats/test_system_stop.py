@@ -121,13 +121,32 @@ def setup_consuming_table(table, subject):
     instance.wait_for_log_line(f"test.{table}.*Started streaming to 1 attached views")
 
 
+def count_streaming_starts(table):
+    # Occurrences of the "Started streaming" line for this table within the same window
+    # wait_for_log_line looks at, so we can wait for a fresh occurrence past the current ones.
+    filename = "/var/log/clickhouse-server/clickhouse-server.log"
+    result = instance.exec_in_container(
+        ["bash", "-c", f"tail -n10000 {filename} | grep -Ec 'test.{table}.*Started streaming to 1 attached views' || true"]
+    )
+    return int(result.strip() or 0)
+
+
+def start_and_wait_for_streaming(table, query=None):
+    seen = count_streaming_starts(table)
+    instance.query(query or f"SYSTEM START test.{table}")
+    instance.wait_for_log_line(
+        f"test.{table}.*Started streaming to 1 attached views", repetitions=seen + 1
+    )
+
+
 def wait_dst_count_at_least(table, expected):
-    instance.query_with_retry(
+    result = instance.query_with_retry(
         f"SELECT count() FROM test.{table}_dst",
         check_callback=lambda res: int(res) >= expected,
         retry_count=120,
         sleep_time=0.5,
     )
+    assert int(result) >= expected, f"expected at least {expected} rows in {table}_dst, got {result!r}"
 
 
 def assert_dst_count_stable(table, expected, seconds=5):
@@ -153,8 +172,7 @@ def test_system_stop_start_consuming(nats_cluster):
     assert_dst_count_stable(table, 10)
 
     # START resumes consumption: freshly published messages are delivered again.
-    instance.query(f"SYSTEM START test.{table}")
-    instance.wait_for_log_line(f"test.{table}.*Started streaming to 1 attached views")
+    start_and_wait_for_streaming(table)
     nats_publish(nats_cluster, subject, 20, 10)
     wait_dst_count_at_least(table, 20)
 
@@ -171,8 +189,7 @@ def test_system_pause_start_consuming(nats_cluster):
     nats_publish(nats_cluster, subject, 10, 10)
     assert_dst_count_stable(table, 10)
 
-    instance.query(f"SYSTEM START test.{table}")
-    instance.wait_for_log_line(f"test.{table}.*Started streaming to 1 attached views")
+    start_and_wait_for_streaming(table)
     nats_publish(nats_cluster, subject, 20, 10)
     wait_dst_count_at_least(table, 20)
 
@@ -254,8 +271,7 @@ def test_refresh_runs_once_while_start_keeps_consuming(nats_cluster):
 
     # START resumes continuous streaming: subsequently published messages keep being consumed
     # "forever" without any further command.
-    instance.query(f"SYSTEM START test.{table}")
-    instance.wait_for_log_line(f"test.{table}.*Started streaming to 1 attached views")
+    start_and_wait_for_streaming(table)
     nats_publish(nats_cluster, subject, 10, 5)
     wait_dst_count_at_least(table, 10)
 
@@ -1058,8 +1074,7 @@ def test_direct_select_blocked_while_stopped_with_attached_view(nats_cluster):
     ), "direct SELECT was not blocked immediately after a materialized view was attached"
 
     # START resumes consumption into the view.
-    instance.query(f"SYSTEM START test.{table}")
-    instance.wait_for_log_line(f"test.{table}.*Started streaming to 1 attached views")
+    start_and_wait_for_streaming(table)
     nats_publish(nats_cluster, subject, 0, 10)
     wait_dst_count_at_least(table, 10)
 

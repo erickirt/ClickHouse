@@ -84,12 +84,13 @@ def setup_consuming_table(table, exchange):
 
 
 def wait_dst_count(table, expected):
-    instance.query_with_retry(
+    result = instance.query_with_retry(
         f"SELECT count() FROM test.{table}_dst",
         check_callback=lambda res: int(res) == expected,
         retry_count=120,
         sleep_time=0.5,
     )
+    assert int(result) == expected, f"expected {expected} rows in {table}_dst, got {result!r}"
 
 
 def assert_dst_count_stable(table, expected, seconds=5):

@@ -49,12 +49,13 @@ def setup_consuming_table(started_cluster, node, table):
 
 
 def wait_dst_count(node, table, expected):
-    node.query_with_retry(
+    result = node.query_with_retry(
         f"SELECT count() FROM {table}_dst",
         check_callback=lambda res: int(res) == expected,
         retry_count=120,
         sleep_time=0.5,
     )
+    assert int(result) == expected, f"expected {expected} rows in {table}_dst, got {result!r}"
 
 
 def assert_dst_count_stable(node, table, expected, seconds=5):
