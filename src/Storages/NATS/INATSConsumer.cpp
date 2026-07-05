@@ -152,7 +152,7 @@ void INATSConsumer::onMsg(natsConnection *, natsSubscription *, natsMsg * msg, v
             if (!queue->push(std::move(data)))
             {
                 LOG_DEBUG(nats_consumer->log, "Consumer {} is shutting down, dropping a message", static_cast<void *>(nats_consumer));
-                nats_consumer->nackMessage(data.msg.get());
+                nats_consumer->nackMessage(msg);
             }
         }
         else if (nats_consumer->needsAck())
