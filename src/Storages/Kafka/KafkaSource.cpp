@@ -325,7 +325,7 @@ Chunk KafkaSource::generateImpl()
         }
     }
 
-    if (cancelled)
+    if (cancelled || storage.isConsumeCancelRequested(cancel_epoch))
     {
         try
         {
