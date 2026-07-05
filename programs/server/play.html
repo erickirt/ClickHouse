@@ -4384,9 +4384,12 @@ let elapsed_ns = 0;
 const default_format = 'JSONStringsEachRowWithProgress';
 
 /// Low-level marker for an exception raised after the HTTP response body has already started.
-/// At that point the status code is committed to 200 and the format cannot emit its own
-/// `{"exception":...}` line, so the server (`WriteBufferFromHTTPServerResponse`) appends a marker
-/// block and breaks the HTTP framing. The block looks like:
+/// Exceptions are normally reported by the output format itself — `JSONEachRowWithProgress` writes
+/// a `{"exception":...}` line when it finalizes, and that still happens. But there is also a newer,
+/// format-agnostic transport-level mechanism: when the HTTP write buffer
+/// (`WriteBufferFromHTTPServerResponse::cancelWithException`) is cancelled with an error after the
+/// body has already been sent, it appends this marker block and breaks the HTTP framing. The Web UI
+/// has to handle it in addition to the `{"exception":...}` line. The block looks like:
 ///
 ///     \r\n
 ///     __exception__\r\n
