@@ -25,6 +25,12 @@ SET use_skip_indexes_on_data_read = 1;
 -- optimizer may build the fact side and the transferred filter never lands on its primary key).
 SET query_plan_join_swap_table = true;
 SET allow_statistics_optimize = 0;
+-- Runtime filters are only built for hash-family joins; pin the algorithm so a randomized
+-- partial_merge/full_sorting_merge (which build no runtime filter) does not disable pruning.
+SET join_algorithm = 'hash';
+-- Disable cost-based join reordering so the syntactic chain order is preserved; otherwise the
+-- reorderer can rearrange the tables and the transferred filter never reaches mh_fact.
+SET query_plan_optimize_join_order_limit = 0;
 
 -- 2-hop: the predicate on mh_d2 is transferred mh_d2 -> mh_d1 -> mh_fact and prunes mh_fact by its primary key.
 SELECT count(), sum(f.v)
