@@ -513,7 +513,7 @@ std::unique_ptr<ReadFromMergeTree> ReadFromMergeTree::createLocalParallelReplica
     size_t replica_number)
 {
     const bool enable_parallel_reading = true;
-    auto parallel_replicas_step = std::make_unique<ReadFromMergeTree>(
+    return std::make_unique<ReadFromMergeTree>(
         /// Optimized version of getParts() to avoid extra copy
         analyzed_result_ptr ? std::make_shared<RangesInDataParts>(analyzed_result_ptr->parts_with_ranges) : prepared_parts,
         mutations_snapshot,
@@ -532,10 +532,6 @@ std::unique_ptr<ReadFromMergeTree> ReadFromMergeTree::createLocalParallelReplica
         all_ranges_callback_,
         read_task_callback_,
         replica_number);
-    /// Carry the JOIN runtime filter descriptors so left-side pruning is not lost under parallel
-    /// replicas. Only the primary-key path runs in this mode (see initializePipeline).
-    parallel_replicas_step->join_runtime_filters_for_index_analysis = join_runtime_filters_for_index_analysis;
-    return parallel_replicas_step;
 }
 
 Pipe ReadFromMergeTree::readFromPoolParallelReplicas(
@@ -3566,7 +3562,6 @@ QueryPlanStepPtr ReadFromMergeTree::clone() const
         number_of_current_replica);
     cloned_step->allow_query_condition_cache = allow_query_condition_cache;
     cloned_step->enable_remove_parts_from_snapshot_optimization = enable_remove_parts_from_snapshot_optimization;
-    cloned_step->join_runtime_filters_for_index_analysis = join_runtime_filters_for_index_analysis;
     return cloned_step;
 }
 
@@ -4044,12 +4039,14 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
     if (context->getSettingsRef()[Setting::use_skip_indexes_on_data_read]
         && !query_info.isFinal()
         && !join_runtime_filters_for_index_analysis.empty()
-        && !pending_mutations)
+        && !pending_mutations
+        /// Not supported under parallel replicas: the descriptor is not carried to remote replica
+        /// reads, so pruning would only cover the local replica's share. Skip it entirely there.
+        && !isParallelReadingFromReplicas())
     {
         /// The PK path only needs the data-read safety checks above; only the secondary skip-index
         /// part is gated by use_skip_indexes (buildIndexes builds key_condition_rpn_template regardless).
-        /// Under parallel replicas we only support the primary-key path, so skip secondary indexes there.
-        const bool collect_skip_indexes = context->getSettingsRef()[Setting::use_skip_indexes] && !isParallelReadingFromReplicas();
+        const bool collect_skip_indexes = context->getSettingsRef()[Setting::use_skip_indexes];
         const auto & metadata = *storage_snapshot->metadata;
         const auto & pk_columns = metadata.getPrimaryKey().column_names;
         std::unordered_set<String> seen_index_names;

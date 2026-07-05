@@ -28,6 +28,9 @@ SET enable_join_runtime_filters = 1;
 SET enable_join_runtime_filters_index_analysis = 1;
 SET use_skip_indexes_on_data_read = 1;
 SET query_plan_join_swap_table = 'false';
+-- Left-side join pruning is intentionally disabled under parallel replicas, so pin PR off to
+-- exercise the feature (the ParallelReplicas CI job otherwise forces it on).
+SET enable_parallel_replicas = 0;
 
 -- PK join
 SELECT s1.id, s1.country, s1.amount

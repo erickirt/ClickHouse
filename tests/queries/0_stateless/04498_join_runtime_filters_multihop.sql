@@ -20,6 +20,9 @@ SET enable_analyzer = 1;
 SET enable_join_runtime_filters = 1;
 SET enable_join_runtime_filters_index_analysis = 1;
 SET use_skip_indexes_on_data_read = 1;
+-- Left-side join pruning is intentionally disabled under parallel replicas; pin PR off so the
+-- multi-hop pruning assertions are exercised (the ParallelReplicas CI job otherwise forces it on).
+SET enable_parallel_replicas = 0;
 
 -- Pin the join order so the chained runtime filters reliably reach mh_fact (otherwise the
 -- optimizer may build the fact side and the transferred filter never lands on its primary key).
