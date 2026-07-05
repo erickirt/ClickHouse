@@ -114,6 +114,18 @@ def assert_dst_count_stable(table, expected, seconds=5):
         time.sleep(1)
 
 
+def wait_for_inflight_block(table, n):
+    """Wait until >= `n` rows are polled into an in-flight block but not yet committed, so a following
+    SYSTEM PAUSE/STOP lands mid-block. `num_messages_read` counts rows during assembly, before commit."""
+    instance.query_with_retry(
+        f"SELECT sum(num_messages_read) FROM system.kafka_consumers "
+        f"WHERE database = 'test' AND table = '{table}'",
+        check_callback=lambda res: int(res) >= n,
+        retry_count=120,
+        sleep_time=0.25,
+    )
+
+
 def produce_to_partition(kafka_cluster, topic, partition, start, count):
     """Produce to an explicit partition, so each of several consumers gets its own data."""
     producer = k.get_kafka_producer(
@@ -283,7 +295,8 @@ def test_stop_aborts_inflight_block_pause_commits_it(kafka_cluster):
             produce(kafka_cluster, table, 0, 5)
             instance.query(f"SYSTEM START test.{table}")
 
-            time.sleep(2)  # the block is now open: rows polled but not yet committed
+            # Land the verb mid-block rather than racing the consuming cycle's claim.
+            wait_for_inflight_block(table, 5)
             instance.query(f"SYSTEM {verb} test.{table}")
 
             if verb == "PAUSE":
@@ -332,7 +345,8 @@ def test_kafka2_stop_aborts_inflight_block_pause_commits_it(kafka_cluster):
             produce(kafka_cluster, table, 0, 5)
             instance.query(f"SYSTEM START test.{table}")
 
-            time.sleep(2)  # the block is open: rows polled but the offset guard is not yet committed
+            # Land the verb mid-block rather than racing the consuming cycle's claim.
+            wait_for_inflight_block(table, 5)
             instance.query(f"SYSTEM {verb} test.{table}")
 
             if verb == "PAUSE":
