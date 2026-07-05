@@ -410,16 +410,31 @@ void KafkaConsumer::rewindToLastCommitted()
     }
 
     /// Rewind to where the in-flight block started. Re-commit the block partitions
-    auto positions = consumer->get_offsets_committed(consumer->get_assignment());
-    for (auto & tp : positions)
-        for (const auto & start : block_start_offsets)
-            if (tp.get_partition() == start.get_partition() && tp.get_topic() == start.get_topic())
-                tp.set_offset(start.get_offset());
+    size_t max_retries = 5;
+    while (max_retries > 0)
+    {
+        try
+        {
+            auto positions = consumer->get_offsets_committed(consumer->get_assignment());
+            for (auto & tp : positions)
+                for (const auto & start : block_start_offsets)
+                    if (tp.get_partition() == start.get_partition() && tp.get_topic() == start.get_topic())
+                        tp.set_offset(start.get_offset());
 
-    consumer->assign(positions);
-    consumer->commit(block_start_offsets);
-    LOG_TRACE(log, "Aborted in-flight block, rewound to block start: {}", block_start_offsets);
-    cleanBlockStartOffsets();
+            consumer->assign(positions);
+            consumer->commit(block_start_offsets);
+            LOG_TRACE(log, "Aborted in-flight block, rewound to block start: {}", block_start_offsets);
+            cleanBlockStartOffsets();
+            return;
+        }
+        catch (const cppkafka::HandleException & e)
+        {
+            --max_retries;
+            LOG_WARNING(log, "Exception while rewinding to block start (attempts left: {}): {}", max_retries, e.what());
+            if (max_retries == 0)
+                throw;
+        }
+    }
 }
 
 

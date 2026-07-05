@@ -327,7 +327,16 @@ Chunk KafkaSource::generateImpl()
 
     if (cancelled)
     {
-        consumer->rewindToLastCommitted();
+        try
+        {
+            consumer->rewindToLastCommitted();
+        }
+        catch (const cppkafka::HandleException & e)
+        {
+            LOG_WARNING(log, "Failed to rewind to last committed offset on abort: {}", e.what());
+            consumer->cleanBlockStartOffsets();
+            consumer->markDirty();
+        }
         return {};
     }
 
