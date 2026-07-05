@@ -4383,6 +4383,52 @@ let elapsed_ns = 0;
 
 const default_format = 'JSONStringsEachRowWithProgress';
 
+/// Low-level marker for an exception raised after the HTTP response body has already started.
+/// At that point the status code is committed to 200 and the format cannot emit its own
+/// `{"exception":...}` line, so the server (`WriteBufferFromHTTPServerResponse`) appends a marker
+/// block and breaks the HTTP framing. The block looks like:
+///
+///     \r\n
+///     __exception__\r\n
+///     <TAG>\r\n
+///     <error message, may span several lines>\n
+///     <message_length> <TAG>\r\n
+///     __exception__\r\n
+///
+/// where <TAG> is a random 16-character string repeated to delimit the message unambiguously even
+/// if the message itself contains the marker text.
+const EXCEPTION_MARKER = '__exception__';
+
+/// Extract the error message from a `__exception__` marker block embedded anywhere in `text`
+/// (typically at the very end of a streamed response). Returns the message string, or null if no
+/// complete block is present. The message is everything between the tag line and the trailing
+/// `<length> <TAG>` line, so it is recovered verbatim regardless of its own content.
+function parseExceptionMarker(text)
+{
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; ++i)
+    {
+        if (lines[i].replace(/\r$/, '') !== EXCEPTION_MARKER) continue;
+
+        const tag = (lines[i + 1] ?? '').replace(/\r$/, '');
+        if (!tag) return null;
+
+        /// The message ends at the trailer line `<length> <TAG>`; the length lets the server bound
+        /// the message, but here the tag alone is enough to locate the boundary unambiguously.
+        const trailer = ' ' + tag;
+        const message_lines = [];
+        for (let j = i + 2; j < lines.length; ++j)
+        {
+            const stripped = lines[j].replace(/\r$/, '');
+            if (/^\d+$/.test(stripped.slice(0, stripped.length - trailer.length)) && stripped.endsWith(trailer))
+                return message_lines.join('\n');
+            message_lines.push(lines[j]);
+        }
+        return null;   /// Block started but its trailer has not arrived yet.
+    }
+    return null;
+}
+
 let controller = null;
 /// Execute a single query, rendering results into the given targetResultEl.
 /// Returns { format, reply, response_ok, is_table, is_raw, is_chart, is_image, is_error }.
@@ -4460,20 +4506,52 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             const decoder = new TextDecoder();
 
             let buffer = '';
+            let marker_seen = false;   /// once the `__exception__` block starts, stop parsing rows
             while (true) {
-                const { done, value } = await reader.read();
+                let done, value;
+                try {
+                    ({ done, value } = await reader.read());
+                } catch (e) {
+                    /// After writing the `__exception__` block the server intentionally breaks the
+                    /// HTTP framing (it omits the terminating chunk to signal the error), so the
+                    /// reader may reject with a network `TypeError`. If the marker was already seen
+                    /// that is expected — parse the buffered block below. Otherwise it is a genuine
+                    /// transport failure, so let the outer handler report it.
+                    if (marker_seen && e instanceof TypeError) break;
+                    throw e;
+                }
                 if (posted_request_num != request_num) { return { cancelled: true }; }
                 if (done) break;
 
                 let new_content = decoder.decode(value, { stream: true });
-                buffer += new_content;
                 reply += new_content;
+
+                /// Once the marker block has started, the remainder of the stream is that block
+                /// (message + trailer), not JSON rows: keep accumulating `reply` for the parser
+                /// (invoked after the loop) and stop feeding lines to `JSON.parse`.
+                if (marker_seen) continue;
+
+                buffer += new_content;
 
                 let lines = buffer.split('\n');
                 let fragment = document.createDocumentFragment();
 
                 let cont = true;
-                for (const line of lines.slice(0, -1)) {
+                for (let idx = 0; idx < lines.length; ++idx) {
+                    const line = lines[idx];
+                    /// The `__exception__` marker signals an exception raised after the body already
+                    /// started (see `EXCEPTION_MARKER`). It always occupies whole lines, so match the
+                    /// line exactly (ignoring the trailing `\r`) — this is robust to chunk-boundary
+                    /// splits, and a row value that merely contains the text is `{"row":...}` and
+                    /// never equals the marker. Everything from here on is the block, not rows: stop
+                    /// parsing and leave it in `reply` for `parseExceptionMarker` after the loop.
+                    if (line.replace(/\r$/, '') === EXCEPTION_MARKER) { marker_seen = true; break; }
+                    /// The last line is a partial row (or a partial marker); keep it in `buffer`.
+                    if (idx == lines.length - 1) break;
+                    /// Skip blank/whitespace-only lines: `JSON.parse` on them throws
+                    /// ("Unexpected end of JSON input"). The marker block is framed by `\r\n`, so
+                    /// its leading bare-`\r` line is skipped here too.
+                    if (line.trim().length == 0) continue;
                     const data = JSON.parse(line);
                     cont = targetResultEl.update(data, fragment);
                     if (!cont) { break; }
@@ -4481,12 +4559,35 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
 
                 targetResultEl.flushFragment(fragment);
 
+                /// The marker block keeps arriving after this: do not abort (that could truncate it)
+                /// and do not carry the marker text as an unfinished row — just keep draining into
+                /// `reply`. The marker line and the rest stay in `buffer` (unused once `marker_seen`).
+                if (marker_seen) continue;
+
                 if (!cont)
                 {
                     abortController.abort();
                     break;
                 }
                 buffer = lines[lines.length - 1];
+            }
+
+            /// A `__exception__` marker means the query failed after its response body had already
+            /// started streaming. Keep any partial rows that arrived (they are already flushed into
+            /// the table): finish their totals/coloring so they look consistent, then render the
+            /// parsed error beneath them. If nothing but a header arrived, hide the empty table.
+            if (marker_seen) {
+                const message = parseExceptionMarker(reply)
+                    ?? "The query failed after the response body had already started, but the error message could not be parsed.";
+                if (targetResultEl.rowCount > 0) {
+                    targetResultEl.renderTotals();
+                    targetResultEl.applyColumnColors();
+                    targetResultEl.transposeIfNeeded();
+                } else {
+                    targetResultEl.clear();
+                }
+                targetResultEl.renderError(message);
+                return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
             }
         } else if (format == 'JSONCompactColumns') {
             is_chart = true;
@@ -4817,7 +4918,13 @@ async function renderSnapshotIntoElement(el, snap, token) {
                 break;
             }
         }
-        if (!has_exception) el.renderError(snap.data);
+        if (!has_exception) {
+            /// A mid-stream failure is saved as the raw reply, which ends with a low-level
+            /// `__exception__` marker block rather than a `{"exception":...}` line. Recover the
+            /// message so the restored result shows the real error, not the raw framing bytes.
+            const marker_message = parseExceptionMarker(snap.data);
+            el.renderError(marker_message ?? snap.data);
+        }
         return;
     }
 
@@ -5042,7 +5149,11 @@ async function restoreFromHistory(state, token) {
             }
         }
         if (!has_exception) {
-            resultEl.renderError(result.data);
+            /// A mid-stream failure is saved as the raw reply, which ends with a low-level
+            /// `__exception__` marker block rather than a `{"exception":...}` line. Recover the
+            /// message so the restored result shows the real error, not the raw framing bytes.
+            const marker_message = parseExceptionMarker(result.data);
+            resultEl.renderError(marker_message ?? result.data);
         }
 
         progressEl.clear();
