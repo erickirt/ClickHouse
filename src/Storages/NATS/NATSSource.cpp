@@ -161,7 +161,7 @@ Chunk NATSSource::generateImpl()
 
     while (true)
     {
-        if (storage.isConsumeCancelRequested(cancel_epoch))
+        if (isCancelled() || storage.isConsumeCancelRequested(cancel_epoch))
         {
             consumption_aborted = true;
             return {};
