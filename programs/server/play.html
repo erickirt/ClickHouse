@@ -342,6 +342,9 @@
                second line 1px below it. */
             border: 1px solid var(--border-color);
             border-bottom: none;
+            /* Anchor for the absolutely-positioned progress fill and the active tab's
+               bottom-border eraser (::after). */
+            position: relative;
             /* Inactive tabs are tinted by the hash of their own query text, mirroring
                the page background formula, so different queries get distinct colors. */
             background: oklch(96% 0.0296 var(--tab-hue, var(--background-color-rotate)));
@@ -415,6 +418,58 @@
             flex-shrink: 0;
         }
 
+        /* Per-tab activity indicators (rendered even for inactive/background tabs):
+           a translucent progress fill behind the title, a spinning hourglass while the
+           tab's query runs, and a completion check-mark shown until the tab is opened.
+           The title/close/status sit above the fill via z-index. */
+        .tab-title, .tab-close, .tab-status
+        {
+            position: relative;
+            z-index: 1;
+        }
+
+        .tab-progress-fill
+        {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: var(--tab-progress, 0%);
+            background: var(--progress-color);
+            opacity: 0.35;
+            z-index: 0;
+            pointer-events: none;
+            transition: width 0.15s linear;
+        }
+
+        .tab-status
+        {
+            flex-shrink: 0;
+            line-height: 1;
+            font-size: 1em;
+        }
+
+        .tab-spinner
+        {
+            display: inline-block;
+            color: var(--misc-text-color);
+            animation: tab-hourglass-animation 2s linear infinite;
+        }
+
+        .tab-check
+        {
+            color: #080;
+        }
+
+        @keyframes tab-hourglass-animation
+        {
+            0% { transform: none; }
+            25% { transform: rotate(180deg); }
+            50% { transform: rotate(180deg); }
+            75% { transform: rotate(360deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         .tab-close
         {
             line-height: 1;
@@ -454,6 +509,14 @@
         {
             background: var(--button-color);
             color: var(--button-text-color);
+        }
+
+        /* Each tab owns one persistent result panel; only the active one is shown, the
+           rest are kept alive but hidden so their rendered result (and any running query)
+           survives switching away and back. */
+        .tab-panel[hidden]
+        {
+            display: none;
         }
 
         /* Holds the 🔑 button and its drop-down; pushed to the far right of the tab bar
@@ -1562,7 +1625,7 @@
                 <div id="theme"><span id="toggle-dark">🌘</span><span id="toggle-light">☀️</span></div>
             </div>
         </form>
-        <query-result id="query-result"></query-result>
+        <div id="result-panels"></div>
         <p id="logo-container">
             <a href="https://clickhouse.com/">
             <svg id="logo" width="50%" viewBox="0 0 180 28" version="1.1" xmlns="http://www.w3.org/2000/svg"><title>Powered by ClickHouse</title><g transform="translate(21, 0)"><path d="M9.76,20.95 C8.43,20.97 7.11,20.73 5.87,20.26 C4.72,19.80 3.67,19.11 2.81,18.22 C1.90,17.32 1.20,16.25 0.74,15.07 C-0.24,12.29 -0.24,9.27 0.74,6.49 C1.67,4.07 3.61,2.16 6.08,1.26 C7.35,0.79 8.71,0.55 10.07,0.57 C11.16,0.54 12.24,0.67 13.30,0.93 C14.15,1.16 14.98,1.47 15.78,1.87 L15.03,4.17 C14.33,3.70 13.57,3.32 12.78,3.03 C11.83,2.71 10.83,2.56 9.82,2.58 C7.96,2.56 6.18,3.35 4.96,4.74 C4.30,5.50 3.79,6.38 3.47,7.33 C3.08,8.46 2.89,9.65 2.91,10.85 C2.90,12.02 3.07,13.18 3.43,14.29 C3.73,15.23 4.21,16.09 4.86,16.84 C5.46,17.52 6.21,18.06 7.05,18.41 C7.95,18.78 8.92,18.96 9.90,18.96 C10.80,18.96 11.68,18.82 12.53,18.55 C13.34,18.27 14.12,17.91 14.85,17.47 L15.57,19.20 C14.87,19.72 14.09,20.13 13.25,20.40 C12.13,20.78 10.95,20.97 9.76,20.95 L9.76,20.95 Z"></path><polygon points="21.20 0 21.20 20.67 18.73 20.67 18.73 0 21.20 0"></polygon><path d="M26.51,4.15 C26.09,4.18 25.68,4.03 25.38,3.74 C25.08,3.46 24.92,3.05 24.94,2.64 C24.92,2.23 25.07,1.83 25.35,1.52 C25.99,0.92 26.99,0.92 27.63,1.52 C27.92,1.82 28.07,2.23 28.06,2.64 C28.07,3.05 27.92,3.44 27.63,3.72 C27.33,4.01 26.93,4.16 26.51,4.15 L26.51,4.15 Z M27.75,6.31 L27.75,20.56 L25.31,20.56 L25.31,6.31 L27.77,6.31 L27.75,6.31 Z"></path><path d="M38.20,20.95 C37.23,20.96 36.27,20.78 35.36,20.44 C34.50,20.12 33.72,19.62 33.07,18.98 C32.40,18.30 31.88,17.51 31.54,16.63 C30.78,14.61 30.78,12.39 31.54,10.36 C31.89,9.48 32.43,8.68 33.11,8.02 C33.80,7.36 34.62,6.85 35.53,6.53 C36.46,6.19 37.45,6.02 38.44,6.02 C39.23,6.02 40.02,6.11 40.78,6.29 C41.40,6.43 41.99,6.67 42.52,7.00 L41.73,9.14 C41.23,8.76 40.68,8.44 40.10,8.18 C39.49,7.95 38.85,7.84 38.20,7.86 C37.57,7.85 36.95,7.97 36.38,8.20 C35.80,8.44 35.28,8.80 34.87,9.26 C34.42,9.77 34.07,10.36 33.85,10.99 C33.58,11.78 33.45,12.61 33.46,13.44 C33.36,14.92 33.85,16.38 34.83,17.51 C35.81,18.45 37.15,18.94 38.53,18.87 C39.72,18.85 40.89,18.48 41.88,17.81 L42.44,19.61 C41.88,20.02 41.26,20.33 40.60,20.52 C39.82,20.79 39.01,20.93 38.20,20.95 L38.20,20.95 Z"></path><path d="M47.94,0 L47.94,20.67 L45.44,20.67 L45.44,0 L47.94,0 Z M54.35,20.67 L48.27,13.01 L54.27,6.33 L56.83,6.33 L50.90,12.72 L57.24,20.67 L54.35,20.67 L54.35,20.67 Z"></path><polygon points="73.11 11.87 62.77 11.87 62.77 20.65 60.10 20.65 60.10 0.85 62.77 0.85 62.77 9.89 73.11 9.89 73.11 0.85 75.78 0.85 75.78 20.67 73.11 20.67"></polygon><path d="M86.30,20.95 C85.38,20.95 84.47,20.78 83.61,20.44 C82.78,20.12 82.01,19.63 81.38,19.00 C80.72,18.32 80.21,17.53 79.87,16.65 C79.12,14.60 79.12,12.35 79.87,10.30 C80.21,9.43 80.72,8.64 81.38,7.98 C82.02,7.35 82.78,6.86 83.61,6.53 C84.47,6.20 85.38,6.02 86.30,6.02 C87.23,6.02 88.15,6.20 89.01,6.53 C89.86,6.86 90.62,7.35 91.27,7.98 C91.94,8.64 92.47,9.43 92.82,10.30 C93.59,12.35 93.59,14.60 92.82,16.65 C92.50,17.52 92.00,18.32 91.37,19.00 C90.73,19.63 89.96,20.12 89.12,20.44 C88.22,20.79 87.27,20.96 86.30,20.95 Z M86.30,19.10 C86.88,19.10 87.46,18.99 88.00,18.79 C88.56,18.59 89.07,18.25 89.47,17.81 C89.93,17.31 90.28,16.71 90.50,16.06 C90.78,15.23 90.91,14.35 90.89,13.48 C90.92,12.60 90.78,11.72 90.50,10.89 C90.28,10.25 89.93,9.66 89.47,9.16 C89.07,8.72 88.56,8.39 88.00,8.18 C87.46,7.98 86.88,7.88 86.30,7.88 C85.74,7.88 85.18,7.98 84.65,8.18 C84.10,8.39 83.61,8.73 83.22,9.16 C82.77,9.66 82.42,10.25 82.21,10.89 C81.94,11.73 81.81,12.60 81.84,13.48 C81.81,14.35 81.94,15.23 82.21,16.06 C82.42,16.71 82.76,17.31 83.22,17.81 C83.61,18.25 84.10,18.58 84.65,18.79 C85.18,18.99 85.74,19.10 86.30,19.10 L86.30,19.10 Z"></path><path d="M104.21,20.12 C103.26,20.71 102.14,21.00 101.01,20.95 C99.79,21.00 98.61,20.56 97.74,19.73 C96.83,18.70 96.38,17.34 96.50,15.98 L96.50,6.31 L98.98,6.31 L98.98,15.98 C98.97,16.47 99.04,16.95 99.19,17.41 C99.30,17.76 99.50,18.07 99.77,18.32 C100.01,18.55 100.31,18.72 100.64,18.81 C100.99,18.91 101.35,18.96 101.71,18.96 C102.65,19.00 103.58,18.73 104.34,18.18 C105.05,17.63 105.63,16.94 106.03,16.14 L106.03,6.31 L108.49,6.31 L108.49,20.56 L106.32,20.56 L106.10,18.00 L106.10,18.00 C105.68,18.86 105.03,19.60 104.21,20.12 L104.21,20.12 Z"></path><path d="M116.42,20.95 C115.80,20.99 115.17,20.99 114.55,20.95 C114.09,20.89 113.62,20.80 113.17,20.69 C112.81,20.60 112.46,20.48 112.11,20.34 C111.83,20.22 111.55,20.07 111.29,19.91 L112.09,17.88 C112.27,18.02 112.47,18.15 112.67,18.26 C112.97,18.43 113.28,18.57 113.60,18.69 C114.01,18.85 114.43,18.97 114.86,19.06 C115.38,19.16 115.90,19.20 116.42,19.20 C117.26,19.26 118.09,19.04 118.79,18.59 C119.33,18.19 119.63,17.56 119.60,16.90 C119.62,16.34 119.38,15.80 118.94,15.45 C118.24,14.98 117.47,14.63 116.64,14.43 L114.86,13.84 C114.33,13.66 113.82,13.39 113.36,13.07 C112.91,12.76 112.55,12.35 112.28,11.89 C111.99,11.34 111.84,10.72 111.87,10.10 C111.79,8.92 112.33,7.79 113.29,7.10 C114.46,6.39 115.83,6.05 117.20,6.13 C118.07,6.11 118.94,6.19 119.79,6.37 C120.38,6.49 120.97,6.68 121.52,6.92 L120.95,8.96 C120.47,8.73 119.99,8.52 119.50,8.34 C118.79,8.11 118.05,8.00 117.31,8.02 C116.53,7.98 115.76,8.13 115.05,8.45 C114.47,8.75 114.14,9.37 114.20,10.01 C114.20,10.33 114.29,10.63 114.47,10.89 C114.66,11.15 114.90,11.36 115.18,11.52 C115.50,11.72 115.85,11.87 116.21,11.99 L117.45,12.36 L119.13,12.91 C119.66,13.10 120.16,13.36 120.61,13.70 C121.60,14.41 122.15,15.56 122.08,16.76 C122.12,17.46 121.95,18.17 121.61,18.79 C121.30,19.33 120.86,19.79 120.35,20.14 C119.80,20.50 119.19,20.76 118.55,20.91 C117.84,21.01 117.13,21.02 116.42,20.95 Z"></path><path d="M136.37,19.42 C135.76,19.91 135.06,20.28 134.31,20.50 C133.39,20.80 132.43,20.95 131.47,20.93 C129.48,21.04 127.53,20.30 126.14,18.89 C124.81,17.36 124.15,15.38 124.28,13.38 C124.26,12.31 124.43,11.26 124.79,10.26 C125.11,9.39 125.59,8.60 126.22,7.92 C126.79,7.29 127.50,6.79 128.29,6.45 C129.13,6.11 130.03,5.94 130.93,5.94 C131.84,5.93 132.74,6.10 133.58,6.45 C134.35,6.77 135.02,7.28 135.53,7.94 C136.06,8.66 136.42,9.50 136.56,10.38 C136.75,11.50 136.75,12.64 136.56,13.76 L126.72,13.76 C126.83,17.17 128.46,18.87 131.62,18.87 C132.38,18.89 133.13,18.77 133.85,18.53 C134.49,18.30 135.10,18.00 135.67,17.63 L136.37,19.42 Z M131.02,7.73 C130.01,7.72 129.05,8.12 128.35,8.83 C127.52,9.75 127.03,10.91 126.94,12.13 L134.33,12.13 C134.53,10.97 134.25,9.78 133.56,8.81 C132.93,8.09 131.99,7.69 131.02,7.73 Z"></path></g></svg>
@@ -1745,10 +1808,15 @@ class QueryProgressElement extends HTMLElement
 customElements.define('query-progress', QueryProgressElement);
 
 
-/// Per-column color coding modes chosen by the user, keyed by column name.
-/// Only columns with an explicit (non-default) choice are stored here. It is the single source
-/// of truth shared across result tables and is persisted in the URL and browser history.
-let column_color_modes = {};
+/// Per-column color coding modes chosen by the user, keyed by column name. Only columns with
+/// an explicit (non-default) choice are stored. These modes are PER TAB: each tab keeps its own
+/// `colorModes` object (see `makeTab`), and its result element(s) hold the same object via
+/// `_colorModes`, so a toggle in one tab never repaints another tab's columns. They are persisted
+/// with the tab's result snapshot and mirrored into the URL / history for the active tab.
+function activeColorModes() {
+    const tab = getActiveTab();
+    return tab ? tab.colorModes : {};
+}
 
 class QueryResultElement extends HTMLElement
 {
@@ -2188,6 +2256,11 @@ class QueryResultElement extends HTMLElement
         /// Debounce timer for the categorical emphasis, so rapid selection changes recompute once.
         this._emphasis_timer = null;
         this._uplot = null;
+        /// Per-column color coding modes for THIS result, keyed by column name. Each tab's
+        /// result element holds its own object (shared by all statements of a multi-query run
+        /// within the same tab), so toggling a color in one tab never repaints another tab's
+        /// identically-named columns. Points at the owning tab's `colorModes` object.
+        this._colorModes = {};
         this._queryText = '';
         /// Object URL backing the displayed image, kept so it can be revoked when the result is cleared.
         this._imageObjectURL = null;
@@ -2516,16 +2589,18 @@ class QueryResultElement extends HTMLElement
         /// Store only non-default choices, to keep the URL and history state compact.
         if (next === this._defaultColorMode(name))
         {
-            delete column_color_modes[name];
+            delete this._colorModes[name];
         }
         else
         {
-            column_color_modes[name] = next;
+            this._colorModes[name] = next;
         }
 
-        /// The modes are shared by column name, so every visible result table that has this
-        /// column must be repainted (not just the clicked one) to stay in sync with the URL.
-        for (const el of document.querySelectorAll('query-result'))
+        /// The modes are shared by column name WITHIN a tab, so every result table of the same
+        /// tab that has this column must be repainted (not just the clicked one) to stay in sync.
+        /// Scope to this tab's panel: other tabs keep their own independent modes.
+        const scope = this.closest('.tab-panel');
+        for (const el of (scope ? scope.querySelectorAll('query-result') : [this]))
         {
             el.refreshColumnColor(name);
         }
@@ -2565,9 +2640,9 @@ class QueryResultElement extends HTMLElement
     /// break its none <-> categorical cycle), so it falls back to the default there.
     _effectiveColorMode(name)
     {
-        if (Object.prototype.hasOwnProperty.call(column_color_modes, name))
+        if (Object.prototype.hasOwnProperty.call(this._colorModes, name))
         {
-            const stored = column_color_modes[name];
+            const stored = this._colorModes[name];
             if (this._colorModeCycle(name).includes(stored)) { return stored; }
         }
         return this._defaultColorMode(name);
@@ -3465,13 +3540,19 @@ class QueryResultElement extends HTMLElement
 customElements.define('query-result', QueryResultElement);
 
 
-/// Incremental request number. When response is received,
-/// if its request number does not equal to the current request number, response will be ignored.
-/// This is to avoid race conditions.
-let request_num = 0;
+/// Two supersede tokens guard against races. They used to be a single `request_num`, but
+/// persistent per-tab queries need them separated:
+///   - `activation_num` (this global): bumped on every tab activation, Back/Forward navigation,
+///     and run launch. It guards the SHARED editor + parameter-input restore (`restoreEditor`),
+///     so a superseded switch stops writing the editor. It does NOT abort queries.
+///   - `tab.reqNum` (per tab, see `makeTab`): bumped on each run / (re)materialization / cancel /
+///     close WITHIN a tab. It guards everything that writes into that tab's own result element
+///     (a live `postImpl` stream and a snapshot materialization). A plain switch does not bump it,
+///     so a query keeps streaming into its background tab and a late response still lands there.
+let activation_num = 0;
 
 /// While a tab activation is rebuilding the active tab's parameter inputs, this holds the
-/// activation's request token. `restoreFromHistory` sets it right before the `updateQueryParams`
+/// activation's request token. `restoreEditor` sets it right before the `updateQueryParams`
 /// await (the `param_*` DOM inputs still hold the PREVIOUS tab's values during that await) and
 /// clears it once the restored parameters are committed. `captureActiveTab` uses it to avoid
 /// snapshotting the stale inputs into the newly-active tab while the restore is in flight.
@@ -3480,8 +3561,15 @@ let params_restore_pending_token = null;
 /// Tabs let the user keep several independent queries side by side. Each tab owns its
 /// query text, title, query parameters and the last result snapshot. The connection
 /// settings (url/user/password) are global and shared across all tabs.
-/// We keep a SINGLE editor and a SINGLE result element and swap their content when the
-/// active tab changes, rather than maintaining a DOM tree per tab.
+///
+/// We keep a SINGLE editor (its content restored from the active tab on switch), but each tab
+/// owns a PERSISTENT result panel (`tab.panel` / `tab.resultEl`) that stays alive in the DOM
+/// while inactive (just hidden). So switching away and back neither re-renders the result (an
+/// image, chart or oversized table survives intact) nor aborts a running query — a query keeps
+/// streaming into its own tab's element in the background. Panels are materialized lazily: a
+/// tab loaded from IndexedDB builds its DOM only when first activated. Per-tab runtime state
+/// (`resultEl`, `controller`, `reqNum`, `inFlight`, `progress`, `colorModes`, …) is transient
+/// and never persisted; only `{id,title,query,params,result,lastSavedQuery}` are saved.
 let tabs = [];           /// array of tab objects; display order == array order
 let activeTabId = null;
 let tabSeq = 0;          /// monotonic counter for synthetic, stable tab ids
@@ -3518,23 +3606,46 @@ const opened_locally = location.protocol == 'file:';
 let run_immediately = current_url.searchParams.has("run");
 
 /// Restore per-column color coding modes from the URL, so a shared/bookmarked link keeps them.
+/// Seeded into the bootstrap tab's `colorModes` once it is created (see the bootstrap below).
+let url_color_modes = {};
 const color_modes_from_url = current_url.searchParams.get('color_modes');
 if (color_modes_from_url) {
-    try { column_color_modes = JSON.parse(color_modes_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    try { url_color_modes = JSON.parse(color_modes_from_url) || {}; } catch (e) { /* ignore malformed */ }
 }
 
 let url_elem = document.getElementById('url');
 let user_elem = document.getElementById('user');
 let password_elem = document.getElementById('password');
 let progressEl = document.getElementById('query-progress');
-let resultEl = document.getElementById('query-result');
 let logoEl = document.getElementById('logo-container');
+/// Container for the per-tab result panels. Each tab owns one `.tab-panel` here (created
+/// lazily); only the active tab's panel is shown. `resultEl`/`multiQueryContainer` are dynamic
+/// aliases that always point at the ACTIVE tab's elements, repointed by `activateTab`, so the
+/// many "operate on the current result" call sites keep working. A running query, however,
+/// targets the tab it was launched in via `tab.resultEl`, never these aliases.
+let resultPanelsEl = document.getElementById('result-panels');
+let resultEl = null;
+let multiQueryContainer = null;
 
-resultEl.addEventListener('query-progress', (e) => {
-    elapsed_ns = +e.detail.elapsed_ns;
-    progressEl.updateProgress(e.detail);
-    progressEl.updateText(resultEl.rowCount, elapsed_ns, resultEl.incompleteResult);
-});
+/// Route a result element's live progress to the shared progress bar (under Run) and to the
+/// owning tab's title indicators. For a background tab only the tab-title effects update; the
+/// shared bar reflects the active tab only. Attached per tab in `getOrCreatePanel`.
+function handleResultProgress(tab, detail) {
+    tab.progress = {
+        read_rows: +detail.read_rows,
+        read_bytes: +detail.read_bytes,
+        total_rows_to_read: +detail.total_rows_to_read,
+        elapsed_ns: +detail.elapsed_ns,
+        rowCount: tab.resultEl ? tab.resultEl.rowCount : 0,
+        incomplete: tab.resultEl ? tab.resultEl.incompleteResult : false,
+    };
+    updateTabIndicator(tab);
+    if (tab.id === activeTabId) {
+        elapsed_ns = +detail.elapsed_ns;
+        progressEl.updateProgress(detail);
+        progressEl.updateText(tab.resultEl.rowCount, elapsed_ns, tab.resultEl.incompleteResult);
+    }
+}
 
 if (url_elem.value == '') {
     const server_address = current_url.searchParams.get('url');
@@ -4383,12 +4494,12 @@ let elapsed_ns = 0;
 
 const default_format = 'JSONStringsEachRowWithProgress';
 
-let controller = null;
 /// Execute a single query, rendering results into the given targetResultEl.
 /// Returns { format, reply, response_ok, is_table, is_raw, is_chart, is_image, is_error }.
 /// The caller is responsible for top-level UI (download buttons, history, favicon).
-/// `abortController` is an AbortController that can be used to cancel this query.
-async function postImpl(posted_request_num, query, targetResultEl, abortController, paramValuesSnapshot)
+/// `tab` owns the run; `posted_request_num` is a snapshot of `tab.reqNum` taken at launch, so a
+/// late response bails once the tab is re-run/cancelled/closed. `abortController` cancels the fetch.
+async function postImpl(tab, posted_request_num, query, targetResultEl, abortController, paramValuesSnapshot)
 {
     const user = user_elem.value;
     const password = password_elem.value;
@@ -4434,7 +4545,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         if (!response.ok) {
             is_error = true;
             reply = await response.text();
-            if (posted_request_num != request_num) { return { cancelled: true }; }
+            if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
 
             let has_exception = false;
             for (const line of reply.split('\n')) {
@@ -4452,7 +4563,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         } else if (content_type.startsWith('image/')) {
             is_image = true;
             const blob = await response.blob();
-            if (posted_request_num != request_num) { return { cancelled: true }; }
+            if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
             targetResultEl.renderImage(blob);
         } else if (format == default_format) {
             is_table = true;
@@ -4462,7 +4573,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             let buffer = '';
             while (true) {
                 const { done, value } = await reader.read();
-                if (posted_request_num != request_num) { return { cancelled: true }; }
+                if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
                 if (done) break;
 
                 let new_content = decoder.decode(value, { stream: true });
@@ -4491,10 +4602,10 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         } else if (format == 'JSONCompactColumns') {
             is_chart = true;
             reply = await response.text();
-            if (posted_request_num != request_num) { return { cancelled: true }; }
+            if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
             /// Await the chart render and let it bail inside (after the uPlot load, before
             /// touching the DOM) if a tab switch superseded this request meanwhile.
-            await targetResultEl.renderChart(JSON.parse(reply), () => posted_request_num === request_num);
+            await targetResultEl.renderChart(JSON.parse(reply), () => posted_request_num === tab.reqNum);
         } else {
             is_raw = true;
             const reader = response.body.getReader();
@@ -4508,7 +4619,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 let new_content = decoder.decode(value, { stream: true });
                 reply += new_content;
 
-                if (posted_request_num != request_num) { return { cancelled: true }; }
+                if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
                 targetResultEl.updateRaw(new_content);
             }
         }
@@ -4517,7 +4628,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             /// Bail inside renderGraph (after the Viz load, before mutating the DOM) if a tab
             /// switch superseded this request during the load. Kept inside the `try` so a Viz
             /// loader failure (like the uPlot one for charts) is reported as a normal error.
-            await targetResultEl.renderGraph(() => posted_request_num === request_num);
+            await targetResultEl.renderGraph(() => posted_request_num === tab.reqNum);
         } else {
             /// Render totals before coloring, so the totals row (which `_colorTargetRows`
             /// includes) is colored on the first paint too.
@@ -4529,11 +4640,11 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         /// A tab switch during an awaited renderer (chart/graph loader) makes the render bail
         /// without painting; report cancellation too, so the caller does not then update the
         /// now-active tab's shared progress/download/history state for this stale run.
-        if (posted_request_num != request_num) { return { cancelled: true }; }
+        if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
 
         return { format, reply, response_ok: true, is_table, is_raw, is_chart, is_image, is_error };
     } catch (e) {
-        if (posted_request_num != request_num) { return { cancelled: true }; }
+        if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
 
         console.log(e);
         if (e instanceof TypeError) {
@@ -4548,38 +4659,49 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
     }
 }
 
-/// Execute a single query (legacy path, used for single-query mode).
+/// Execute a single query (legacy path, used for single-query mode) in the given `tab`, rendering
+/// into that tab's own persistent result element. All shared-chrome updates (progress bar under
+/// Run, download/copy buttons, page hue) are applied only when `tab` is the active one; otherwise
+/// they are recorded on the tab and replayed by `syncActiveTabChrome` when it is next opened, so a
+/// background run never disturbs the foreground.
 /// When `history_query_text` is provided, it overrides `query` for browser history/URL storage,
 /// preserving the full textarea content when running a selected query in multi-query mode.
-async function postSingle(posted_request_num, query, history_query_text, params_restore_pending)
+async function postSingle(tab, posted_request_num, query, history_query_text, params_restore_pending)
 {
     const paramValuesSnapshot = resolveRunParams(params_restore_pending);
     last_query_start = performance.now();
+    const el = tab.resultEl;
+    const active = () => tab.id === activeTabId;
 
-    document.getElementById('download-div').style.display = 'none';
-    document.getElementById('copy-div').style.display = 'none';
+    tab.downloadVisible = false;
+    tab.copyVisible = false;
+    clearPanel(tab);
+    tab.progressPhase = 'running';
+    if (active()) { paintDownloadCopy(tab); progressEl.start(); }
 
-    clear();
-    progressEl.start();
-
-    controller = new AbortController();
-    const result = await postImpl(posted_request_num, query, resultEl, controller, paramValuesSnapshot);
+    tab.controller = new AbortController();
+    const result = await postImpl(tab, posted_request_num, query, el, tab.controller, paramValuesSnapshot);
 
     if (result.cancelled) return;
 
     if (result.is_error || !result.response_ok) {
-        logoEl.style.display = 'none';
-        progressEl.clear();
-        document.getElementById('download-div').style.display = 'none';
-        document.getElementById('copy-div').style.display = 'none';
+        tab.logoVisible = false;
+        tab.progressPhase = 'error';
+        tab.downloadVisible = false;
+        tab.copyVisible = false;
+        if (active()) {
+            logoEl.style.display = 'none';
+            progressEl.clear();
+            paintDownloadCopy(tab);
+        }
         /// Persist the error as this tab's result snapshot. The restore path renders an
         /// `ok: false` snapshot as the exception, so switching away/back or reloading shows
         /// the failed query's error; without this, the failed run leaves the tab's previous
         /// successful result in place and that stale result would resurrect under the failed
-        /// query. Guarded on the request number like the success path below (and like
-        /// `postMulti`), so a superseded run (tab switch / newer run) does not overwrite the
-        /// now-active tab's snapshot.
-        if (posted_request_num == request_num) {
+        /// query. Guarded on the tab's request number (like the success path below and like
+        /// `postMulti`), so a superseded run (re-run / cancel) does not overwrite the snapshot.
+        if (posted_request_num == tab.reqNum) {
+            tab.completed = true;
             saveHistory({
                 query: history_query_text || query,
                 resultQuery: query,
@@ -4588,38 +4710,44 @@ async function postSingle(posted_request_num, query, history_query_text, params_
                 data: result.reply.length > 100000 ? null : result.reply,
                 elapsed_ns: 1e6 * (performance.now() - last_query_start),
                 params: paramValuesSnapshot,
-            });
+            }, undefined, tab);
         }
+        updateTabIndicator(tab);
         return;
     }
 
     /// `postImpl` already performed `renderGraph`/`applyColumnColors`/`renderTotals`/`transposeIfNeeded`;
     /// the only step specific to the single-query path is the final table layout pass.
-    if (result.is_table) resultEl._changeTableLayout();
+    if (result.is_table) el._changeTableLayout();
 
-    progressEl.finish();
-    document.getElementById('download-div').style.display = 'block';
-    document.getElementById('copy-div').style.display = result.is_raw ? 'block' : 'none';
-    last_query_for_download = query;
-    last_params_for_download = paramValuesSnapshot;
+    tab.progressPhase = 'done';
+    tab.downloadVisible = true;
+    tab.copyVisible = result.is_raw;
+    tab.downloadQuery = query;
+    tab.downloadParams = paramValuesSnapshot;
 
     if (result.is_raw || result.is_image) {
-        resultEl.elapsedNs = 1e6 * (performance.now() - last_query_start);
-        elapsed_ns = resultEl.elapsedNs;
-    } else {
-        elapsed_ns = resultEl.elapsedNs;
+        el.elapsedNs = 1e6 * (performance.now() - last_query_start);
+    }
+    tab.finalStats = { rowCount: el.rowCount, elapsedNs: el.elapsedNs, incomplete: el.incompleteResult };
+
+    if (active()) {
+        elapsed_ns = el.elapsedNs;
+        progressEl.finish();
+        paintDownloadCopy(tab);
+        progressEl.updateText(el.rowCount, el.elapsedNs, el.incompleteResult);
+        progressEl.style.setProperty('--progress', '0');
+        document.documentElement.style.setProperty('--background-color-rotate', queryToColor(query));
     }
 
-    progressEl.updateText(resultEl.rowCount, resultEl.elapsedNs, resultEl.incompleteResult);
-    progressEl.style.setProperty('--progress', '0');
-    document.documentElement.style.setProperty('--background-color-rotate', queryToColor(query));
+    if (posted_request_num != tab.reqNum) { updateTabIndicator(tab); return; }
 
-    if (posted_request_num != request_num) { return; }
+    tab.completed = true;
+    updateTabIndicator(tab);
 
-    /// Persist the result snapshot on the active tab and record an entry in browser
-    /// history + the URL. In multi-query "Run selected" mode `history_query_text` carries
-    /// the full editor content (the editor text + URL), while `resultQuery` is the single
-    /// statement that actually produced this result (used for rendering and downloads).
+    /// Persist the result snapshot on this tab and record an entry in browser history + the URL.
+    /// In multi-query "Run selected" mode `history_query_text` carries the full editor content (the
+    /// editor text + URL), while `resultQuery` is the single statement that produced this result.
     /// The per-column color coding modes travel with the snapshot (see `saveHistory`).
     saveHistory({
         query: history_query_text || query,
@@ -4627,53 +4755,57 @@ async function postSingle(posted_request_num, query, history_query_text, params_
         format: result.format,
         ok: result.response_ok,
         data: result.reply.length > 100000 ? null : result.reply,
-        elapsed_ns: elapsed_ns,
+        elapsed_ns: el.elapsedNs,
         params: paramValuesSnapshot,
-    });
+    }, undefined, tab);
 }
 
-/// Container for dynamically created result elements in multi-query mode.
-let multiQueryContainer = null;
-/// Array of AbortControllers for all in-flight queries in multi-query mode.
-let multiQueryControllers = [];
-
-/// Execute multiple queries with parallelization of consecutive SELECTs.
-/// `parsed` is an array of { query, is_select } objects from splitAllQueries.
-async function postMulti(posted_request_num, parsed, params_restore_pending)
+/// Execute multiple queries with parallelization of consecutive SELECTs, in the given `tab`,
+/// rendering into that tab's own multi-query container. Like `postSingle`, all shared-chrome
+/// side effects apply only when `tab` is active; a background run only touches its own tab.
+/// `parsed` is an array of { query, is_select } objects from splitAllQueries; `editorText` is the
+/// full editor content captured at launch (used as the tab's saved query — must NOT be re-read
+/// from the shared editor at completion, which by then may hold another tab's text).
+async function postMulti(tab, posted_request_num, parsed, params_restore_pending, editorText)
 {
     const paramValuesSnapshot = resolveRunParams(params_restore_pending);
     last_query_start = performance.now();
+    const active = () => tab.id === activeTabId;
 
-    document.getElementById('download-div').style.display = 'none';
-    document.getElementById('copy-div').style.display = 'none';
+    tab.downloadVisible = false;
+    tab.copyVisible = false;
+    clearPanel(tab);
+    tab.progressPhase = 'running';
+    if (active()) { paintDownloadCopy(tab); progressEl.start(); }
 
-    clear();
-    progressEl.start();
+    /// Hide this tab's single result element and the logo; the multi container takes over.
+    tab.resultEl.style.display = 'none';
+    tab.logoVisible = false;
+    if (active()) logoEl.style.display = 'none';
 
-    /// Hide the default single result element and the logo.
-    resultEl.style.display = 'none';
-    logoEl.style.display = 'none';
-
-    /// Create a container for multiple results if it doesn't exist.
-    if (!multiQueryContainer) {
-        multiQueryContainer = document.createElement('div');
-        multiQueryContainer.id = 'multi-query-results';
-        resultEl.parentElement.insertBefore(multiQueryContainer, resultEl);
+    /// Create this tab's multi-query container if needed (one per tab, kept alive with the panel).
+    if (!tab.multiContainer) {
+        tab.multiContainer = document.createElement('div');
+        tab.multiContainer.className = 'multi-query-results';
+        tab.panel.insertBefore(tab.multiContainer, tab.resultEl);
     }
-    multiQueryContainer.innerHTML = '';
-    multiQueryContainer.style.display = 'block';
-    multiQueryControllers = [];
+    tab.multiContainer.innerHTML = '';
+    tab.multiContainer.style.display = 'block';
+    if (active()) multiQueryContainer = tab.multiContainer;
+    tab.multiControllers = [];
 
     /// Create result elements for each query.
     const resultElements = [];
     for (let i = 0; i < parsed.length; ++i) {
         const el = document.createElement('query-result');
-        multiQueryContainer.appendChild(el);
+        el._colorModes = tab.colorModes;
+        tab.multiContainer.appendChild(el);
         resultElements.push(el);
     }
 
     /// Track aggregated progress across all concurrent queries.
     const progressState = new Map(); /// query index -> { read_rows, read_bytes, total_rows, elapsed_ns }
+    tab.progressState = progressState;
     function updateAggregatedProgress() {
         let total_read_rows = 0, total_read_bytes = 0, total_total_rows = 0, max_elapsed_ns = 0;
         for (const [, p] of progressState) {
@@ -4682,12 +4814,18 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
             total_total_rows += p.total_rows;
             max_elapsed_ns = Math.max(max_elapsed_ns, p.elapsed_ns);
         }
-        progressEl.updateProgress({
+        const detail = {
             read_rows: String(total_read_rows),
             read_bytes: String(total_read_bytes),
             total_rows_to_read: String(total_total_rows),
             elapsed_ns: String(max_elapsed_ns),
-        });
+        };
+        tab.progress = {
+            read_rows: total_read_rows, read_bytes: total_read_bytes,
+            total_rows_to_read: total_total_rows, elapsed_ns: max_elapsed_ns,
+        };
+        updateTabIndicator(tab);
+        if (active()) progressEl.updateProgress(detail);
     }
 
     /// Listen for progress events from each result element.
@@ -4725,13 +4863,13 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
     let had_error = false;
     const collected = new Array(parsed.length).fill(null);
     for (const group of groups) {
-        if (posted_request_num != request_num) return;
+        if (posted_request_num != tab.reqNum) return;
         if (had_error) break;
 
         const promises = group.indices.map(i => {
             const ac = new AbortController();
-            multiQueryControllers.push(ac);
-            return postImpl(posted_request_num, parsed[i].query, resultElements[i], ac, paramValuesSnapshot)
+            tab.multiControllers.push(ac);
+            return postImpl(tab, posted_request_num, parsed[i].query, resultElements[i], ac, paramValuesSnapshot)
                 .then(result => ({ index: i, result }));
         });
 
@@ -4746,7 +4884,7 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
         }
     }
 
-    if (posted_request_num != request_num) return;
+    if (posted_request_num != tab.reqNum) return;
 
     /// Compute aggregated stats.
     let total_rows = 0;
@@ -4758,17 +4896,27 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
         if (el.incompleteResult) any_incomplete = true;
     }
 
-    if (!had_error) {
-        logoEl.style.display = 'block';
+    tab.logoVisible = !had_error;
+    tab.progressPhase = 'done';
+    tab.finalStats = {
+        rowCount: total_rows,
+        elapsedNs: max_elapsed_ns || 1e6 * (performance.now() - last_query_start),
+        incomplete: any_incomplete,
+    };
+
+    if (active()) {
+        if (!had_error) logoEl.style.display = 'block';
+        progressEl.finish();
+        elapsed_ns = tab.finalStats.elapsedNs;
+        progressEl.updateText(total_rows, tab.finalStats.elapsedNs, any_incomplete);
+        progressEl.style.setProperty('--progress', '0');
+        document.documentElement.style.setProperty('--background-color-rotate', queryToColor(parsed[0].query));
     }
 
-    progressEl.finish();
-    elapsed_ns = max_elapsed_ns || 1e6 * (performance.now() - last_query_start);
-    progressEl.updateText(total_rows, elapsed_ns, any_incomplete);
-    progressEl.style.setProperty('--progress', '0');
-    document.documentElement.style.setProperty('--background-color-rotate', queryToColor(parsed[0].query));
+    if (posted_request_num != tab.reqNum) { updateTabIndicator(tab); return; }
 
-    if (posted_request_num != request_num) return;
+    tab.completed = true;
+    updateTabIndicator(tab);
 
     /// Snapshot the per-statement results so switching tabs / reloading restores the whole
     /// "Run all" output (not just the queries), the same way a single query's result is kept.
@@ -4786,24 +4934,24 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
     for (const s of multi) multi_size += s.data ? s.data.length : 0;
     if (multi_size > 100000) multi = null;
 
-    /// Save all queries to browser history, using the full textarea content.
+    /// Save all queries to browser history, using the full editor content captured at launch.
     saveHistory({
-        query: query_area.value,
+        query: editorText,
         format: null,
         ok: !had_error,
         data: null,
         multi: multi,
-        elapsed_ns: elapsed_ns,
+        elapsed_ns: tab.finalStats.elapsedNs,
         params: paramValuesSnapshot,
-    }, parsed[0].query);
+    }, parsed[0].query, tab);
 }
 
 /// Render one saved multi-query statement snapshot into `el`, mirroring the live per-statement
 /// rendering in `postImpl` (table / chart / EXPLAIN graph / raw / error), minus the streaming.
-/// `token` guards the awaited chart/graph loaders: a superseding activation bails before touching
-/// the DOM, and a loader failure (e.g. a blocked CDN) is shown as an error for that statement
-/// rather than throwing out of the whole restore.
-async function renderSnapshotIntoElement(el, snap, token) {
+/// `matToken` (a snapshot of `tab.reqNum`) guards the awaited chart/graph loaders: a superseding
+/// run/re-materialization/close of the tab bails before touching the DOM, and a loader failure
+/// (e.g. a blocked CDN) is shown as an error for that statement rather than throwing out.
+async function renderSnapshotIntoElement(el, snap, tab, matToken) {
     el.queryText = snap.query;
     if (!snap.data) return;
     const format = snap.format;
@@ -4831,30 +4979,30 @@ async function renderSnapshotIntoElement(el, snap, token) {
         }
         el.flushFragment(fragment);
     } else if (format == 'JSONCompactColumns') {
-        if (token !== request_num) return;
+        if (matToken !== tab.reqNum) return;
         try {
-            await el.renderChart(JSON.parse(snap.data), () => token === request_num);
+            await el.renderChart(JSON.parse(snap.data), () => matToken === tab.reqNum);
         } catch (e) {
-            if (token !== request_num) return;
+            if (matToken !== tab.reqNum) return;
             console.log(e);
             el.renderError(e.toString());
             return;
         }
-        if (token !== request_num) return;
+        if (matToken !== tab.reqNum) return;
     } else {
         el.updateRaw(snap.data);
     }
 
     if (el.isExplainGraph) {
         try {
-            await el.renderGraph(() => token === request_num);
+            await el.renderGraph(() => matToken === tab.reqNum);
         } catch (e) {
-            if (token !== request_num) return;
+            if (matToken !== tab.reqNum) return;
             console.log(e);
             el.renderError(e.toString());
             return;
         }
-        if (token !== request_num) return;
+        if (matToken !== tab.reqNum) return;
     } else {
         /// Render totals before coloring, so the totals row (which `_colorTargetRows`
         /// includes) is colored on the first paint too.
@@ -4870,21 +5018,22 @@ async function renderSnapshotIntoElement(el, snap, token) {
 /// current history entry + URL in place, without creating a new record.
 function persistColorModes() {
     const tab = getActiveTab();
-    if (tab && tab.result) tab.result.color_modes = column_color_modes;
+    const modes = tab ? tab.colorModes : {};
+    if (tab && tab.result) tab.result.color_modes = modes;
     const url = new URL(window.location);
-    if (Object.keys(column_color_modes).length > 0) {
-        url.searchParams.set('color_modes', JSON.stringify(column_color_modes));
+    if (Object.keys(modes).length > 0) {
+        url.searchParams.set('color_modes', JSON.stringify(modes));
     } else {
         url.searchParams.delete('color_modes');
     }
     /// Keep the tabs state shape: fold the modes into the entry's nested `result` when it has one
-    /// (matching how `restoreFromHistory` reads them back via `state.result || state`), else at
+    /// (matching how the restore path reads them back via `state.result || state`), else at
     /// the top level for a legacy flat entry.
     const cur = history.state;
     if (cur) {
         const next = cur.result
-            ? { ...cur, result: { ...cur.result, color_modes: column_color_modes } }
-            : { ...cur, color_modes: column_color_modes };
+            ? { ...cur, result: { ...cur.result, color_modes: modes } }
+            : { ...cur, color_modes: modes };
         try {
             history.replaceState(next, document.title, url.toString());
         } catch (e) {
@@ -4894,36 +5043,35 @@ function persistColorModes() {
     scheduleSave();
 }
 
-/// Re-render a saved multi-query ("Run all") result snapshot, rebuilding the multi-query
-/// container the same way `postMulti` lays it out: one result element per statement, the single
-/// result element and logo hidden, and aggregated progress text. Called from `restoreFromHistory`
-/// for a tab whose result carries a `multi` array (small runs; large ones are query-only).
-async function restoreMultiQuery(snapshot, token) {
-    resultEl.style.display = 'none';
-    logoEl.style.display = 'none';
+/// Re-render a saved multi-query ("Run all") result snapshot into `tab`'s own panel, rebuilding
+/// its multi-query container the same way `postMulti` lays it out: one result element per
+/// statement, this tab's single result element and the logo hidden, and aggregated progress text.
+/// Called from `materializeResult` for a tab whose result carries a `multi` array (small runs;
+/// large ones are query-only). `matToken` is the tab's materialization generation.
+async function restoreMultiQuery(snapshot, tab, matToken) {
+    tab.resultEl.style.display = 'none';
 
-    if (!multiQueryContainer) {
-        multiQueryContainer = document.createElement('div');
-        multiQueryContainer.id = 'multi-query-results';
-        resultEl.parentElement.insertBefore(multiQueryContainer, resultEl);
+    if (!tab.multiContainer) {
+        tab.multiContainer = document.createElement('div');
+        tab.multiContainer.className = 'multi-query-results';
+        tab.panel.insertBefore(tab.multiContainer, tab.resultEl);
     }
-    multiQueryContainer.innerHTML = '';
-    multiQueryContainer.style.display = 'block';
+    tab.multiContainer.innerHTML = '';
+    tab.multiContainer.style.display = 'block';
+    if (tab.id === activeTabId) multiQueryContainer = tab.multiContainer;
 
     const elements = [];
     for (let i = 0; i < snapshot.multi.length; ++i) {
         const el = document.createElement('query-result');
-        multiQueryContainer.appendChild(el);
+        el._colorModes = tab.colorModes;
+        tab.multiContainer.appendChild(el);
         elements.push(el);
     }
 
     for (let i = 0; i < snapshot.multi.length; ++i) {
-        await renderSnapshotIntoElement(elements[i], snapshot.multi[i], token);
-        if (token !== request_num) return;
+        await renderSnapshotIntoElement(elements[i], snapshot.multi[i], tab, matToken);
+        if (matToken !== tab.reqNum) return;
     }
-
-    /// The logo returns only for a fully successful run, matching the live `postMulti` path.
-    if (!snapshot.multi.some(s => !s.ok)) logoEl.style.display = 'block';
 
     let total_rows = 0;
     let max_elapsed_ns = 0;
@@ -4934,40 +5082,22 @@ async function restoreMultiQuery(snapshot, token) {
         if (el.incompleteResult) any_incomplete = true;
     }
 
-    progressEl.finish();
-    elapsed_ns = snapshot.elapsed_ns || max_elapsed_ns;
-    progressEl.updateText(total_rows, elapsed_ns, any_incomplete);
-    progressEl.style.setProperty('--progress', '0');
-    document.documentElement.style.setProperty('--background-color-rotate', queryToColor(snapshot.multi[0].query));
+    /// The logo returns only for a fully successful run, matching the live `postMulti` path.
+    /// Recorded on the tab; `syncActiveTabChrome` applies it to the shared logo/progress bar.
+    tab.logoVisible = !snapshot.multi.some(s => !s.ok);
+    tab.progressPhase = 'done';
+    tab.finalStats = { rowCount: total_rows, elapsedNs: snapshot.elapsed_ns || max_elapsed_ns, incomplete: any_incomplete };
 }
 
-/// `token` ties this render to one activation/history navigation (the value of
-/// `request_num` at the time). After each await we bail if it changed, so a slow
-/// activation cannot apply its state on top of a newer one.
-async function restoreFromHistory(state, token) {
-    if (token === undefined) token = request_num;
-    /// The editor (textarea + param inputs) is restored from the top-level query/params.
-    /// The result is rendered from `state.result`, which carries the query/params that
-    /// produced it; for flat history entries (editor == result) it defaults to `state`.
-    const result = state.result || state;
-    /// Restore the per-column color coding modes saved with this result before rendering, so the
-    /// table is colored on the first paint. Reads `result.color_modes`, which covers both nested
-    /// per-tab snapshots and legacy flat entries (where `result === state`, carrying a top-level
-    /// `color_modes`). A result-less entry leaves the modes empty.
-    column_color_modes = result.color_modes || {};
-    clear();
-    /// Reset the result-action targets, so an empty/other tab can't download or copy the
-    /// previously active tab's query/result. Shown again below if a result renders. They
-    /// follow the PRODUCING query/params, not the (possibly edited) editor.
-    document.getElementById('download-div').style.display = 'none';
-    document.getElementById('copy-div').style.display = 'none';
-    last_query_for_download = result.query || '';
-    last_params_for_download = result.params || {};
+/// Restore the SHARED editor (query text + parameter inputs) from a tab/history `state`. Guarded
+/// by `token` (a snapshot of `activation_num`): a newer activation/run bumps it and this bails
+/// after the tokenization await, so a slow restore never applies on top of a newer activation.
+/// It does NOT touch the result DOM — the result lives in the tab's own panel and is rendered
+/// separately by `materializeResult` (once, lazily) so switching keeps it intact.
+async function restoreEditor(state, token) {
+    if (token === undefined) token = activation_num;
     query_area.value = state.query;
     query_area.dispatchEvent(new Event('input'));
-    /// Graph detection keys off the producing query, so a snapshot still renders as a graph
-    /// even if the editor query was changed without rerunning.
-    resultEl.queryText = result.query ?? state.query;
 
     /// Restore query parameter inputs and their values. Replace the FULL snapshot rather than
     /// overlaying `state.params`: when the previous and restored tabs share a placeholder name,
@@ -4981,7 +5111,7 @@ async function restoreFromHistory(state, token) {
     /// `persist`, or a quick second navigation) does not snapshot those stale inputs into this tab.
     params_restore_pending_token = token;
     const params_ok = await updateQueryParams();
-    if (token !== request_num) return;
+    if (token !== activation_num) return;
     const restored_params = {};
     if (params_ok)
     {
@@ -5007,45 +5137,61 @@ async function restoreFromHistory(state, token) {
     if (active_tab_for_params) active_tab_for_params.params = restored_params;
     /// Parameters are now committed to both the DOM inputs and the tab; capture is safe again.
     params_restore_pending_token = null;
+}
 
-    /// A snapshotted multi-query ("Run all") result is restored into the multi-query
-    /// container, rebuilding one result element per statement, rather than into `resultEl`.
+/// Render a tab's stored result snapshot (`tab.result`) into its OWN persistent result element,
+/// the first time the tab is opened (lazy materialization) or when Back/Forward swaps its
+/// snapshot. Sets per-tab state (progress phase, final stats, logo/download/copy visibility) but
+/// does NOT paint the shared chrome — the caller does that via `syncActiveTabChrome`. Bumps the
+/// tab's `reqNum` so a superseding run / re-materialization / close bails; guarded on `matToken`.
+async function materializeResult(tab) {
+    tab.materialized = true;
+    const matToken = ++tab.reqNum;
+    const el = tab.resultEl;
+    const result = tab.result || {};
+
+    /// Restore this result's per-column color coding modes before rendering so the table is
+    /// colored on first paint. The element shares the tab's modes object.
+    tab.colorModes = result.color_modes || {};
+    el._colorModes = tab.colorModes;
+
+    clearPanel(tab);
+    tab.downloadVisible = false;
+    tab.copyVisible = false;
+    tab.downloadQuery = result.query || '';
+    tab.downloadParams = result.params || {};
+    /// Graph detection keys off the producing query, so a snapshot still renders as a graph
+    /// even if the editor query was changed without rerunning.
+    el.queryText = result.query ?? tab.query;
+
+    /// A snapshotted multi-query ("Run all") result is restored into this tab's multi-query
+    /// container, rebuilding one result element per statement, rather than into `tab.resultEl`.
     if (result.multi && result.multi.length) {
-        await restoreMultiQuery(result, token);
+        await restoreMultiQuery(result, tab, matToken);
         return;
     }
 
-    if (!result.data) return;
+    if (!result.data) { tab.progressPhase = 'idle'; return; }
 
     let is_table = false;
     let is_raw = false;
-    let is_chart = false;
-    let is_error = false;
-
     let format = result.format;
 
     if (!result.ok) {
-        is_error = true;
-        /// Hide the idle logo for the whole error branch, matching the live single-query error
-        /// path (`postSingle` hides it once at the top of its `!result.response_ok` block, for
-        /// both JSON exceptions and plain-text errors). Restoring a JSON exception previously
-        /// left the logo showing, so a reloaded/switched-back error tab looked different from the
-        /// original run.
-        logoEl.style.display = 'none';
-
+        /// The idle logo is hidden for the error branch, matching the live single-query error path.
+        tab.logoVisible = false;
+        tab.progressPhase = 'error';
         let has_exception = false;
         for (const line of result.data.split('\n')) {
             if (line.startsWith(`{"exception":`)) {
-                resultEl.update(JSON.parse(line));
+                el.update(JSON.parse(line));
                 has_exception = true;
                 break;
             }
         }
         if (!has_exception) {
-            resultEl.renderError(result.data);
+            el.renderError(result.data);
         }
-
-        progressEl.clear();
         return;
     } else if (format == default_format) {
         is_table = true;
@@ -5054,68 +5200,62 @@ async function restoreFromHistory(state, token) {
 
         for (const line of lines) {
             if (line.length == 0) continue;
-            if (!resultEl.update(JSON.parse(line), fragment)) { break; }
+            if (!el.update(JSON.parse(line), fragment)) { break; }
         }
 
-        resultEl.flushFragment(fragment);
+        el.flushFragment(fragment);
     } else if (format == 'JSONCompactColumns') {
-        is_chart = true;
-        if (token !== request_num) { return; }
+        if (matToken !== tab.reqNum) { return; }
         /// renderChart awaits the uPlot loader on first use; the predicate makes it bail
-        /// inside (right after the load, before mutating the DOM) if a tab switch superseded
-        /// this activation, and we re-check here too.
+        /// inside (right after the load, before mutating the DOM) if this materialization was
+        /// superseded, and we re-check here too.
         try {
-            await resultEl.renderChart(JSON.parse(result.data), () => token === request_num);
+            await el.renderChart(JSON.parse(result.data), () => matToken === tab.reqNum);
         } catch (e) {
             /// The external chart library failed to load (e.g. CDN blocked). Show the error
-            /// for this saved snapshot instead of throwing out of the activation half-rendered.
-            if (token !== request_num) return;
+            /// for this saved snapshot instead of throwing out half-rendered.
+            if (matToken !== tab.reqNum) return;
             console.log(e);
-            resultEl.renderError(e.toString());
-            logoEl.style.display = 'none';
-            progressEl.clear();
+            el.renderError(e.toString());
+            tab.logoVisible = false;
+            tab.progressPhase = 'error';
             return;
         }
-        if (token !== request_num) { return; }
+        if (matToken !== tab.reqNum) { return; }
     } else {
         is_raw = true;
-        resultEl.updateRaw(result.data);
+        el.updateRaw(result.data);
     }
 
-    if (resultEl.isExplainGraph) {
+    if (el.isExplainGraph) {
         try {
-            await resultEl.renderGraph(() => token === request_num);
+            await el.renderGraph(() => matToken === tab.reqNum);
         } catch (e) {
-            /// The Viz loader failed; show the error instead of throwing out of the activation.
-            if (token !== request_num) return;
+            /// The Viz loader failed; show the error instead of throwing out half-rendered.
+            if (matToken !== tab.reqNum) return;
             console.log(e);
-            resultEl.renderError(e.toString());
-            logoEl.style.display = 'none';
-            progressEl.clear();
+            el.renderError(e.toString());
+            tab.logoVisible = false;
+            tab.progressPhase = 'error';
             return;
         }
-        if (token !== request_num) return;
+        if (matToken !== tab.reqNum) return;
     } else {
         /// Render totals before coloring, so the totals row is colored on first paint too.
-        if (is_table) resultEl.renderTotals();
-        resultEl.applyColumnColors();
-        if (is_table) resultEl.transposeIfNeeded();
-        if (is_table) resultEl._changeTableLayout();
+        if (is_table) el.renderTotals();
+        el.applyColumnColors();
+        if (is_table) el.transposeIfNeeded();
+        if (is_table) el._changeTableLayout();
     }
 
-    progressEl.finish();
     /// A result is shown for this tab, so its download/copy actions apply to this query.
-    document.getElementById('download-div').style.display = 'block';
-    document.getElementById('copy-div').style.display = is_raw ? 'block' : 'none';
-
+    tab.progressPhase = 'done';
+    tab.downloadVisible = true;
+    tab.copyVisible = is_raw;
     if (is_raw) {
-        resultEl.elapsedNs = result.elapsed_ns;
+        el.elapsedNs = result.elapsed_ns;
     }
-    elapsed_ns = resultEl.elapsedNs;
-
-    progressEl.updateText(resultEl.rowCount, resultEl.elapsedNs, resultEl.incompleteResult);
-    progressEl.style.setProperty('--progress', '0');
-    document.documentElement.style.setProperty('--background-color-rotate', queryToColor(state.query));
+    tab.finalStats = { rowCount: el.rowCount, elapsedNs: el.elapsedNs, incomplete: el.incompleteResult };
 }
 
 let query_area = document.getElementById('query');
@@ -5124,7 +5264,9 @@ appendTextareaResizer();
 
 /// ===== Tabs =====================================================================
 /// A tab bundles a query, its title, query parameters and a result snapshot.
-/// We keep one editor + one result element and swap content on activation.
+/// We keep one shared editor (its content restored on activation) but a persistent result panel
+/// per tab, so results survive switching and queries run independently (see the notes on the
+/// `tabs` model above and the `activation_num` / per-tab `reqNum` token split).
 
 const tab_bar_elem = document.getElementById('tab-bar');
 const tabs_elem = document.getElementById('tabs');
@@ -5261,6 +5403,36 @@ function uniqueTitle(desired, excludeId) {
     }
 }
 
+/// Transient per-tab runtime state (never persisted). Kept in a factory so it can be attached both
+/// to tabs created by `makeTab` and to tabs rehydrated from IndexedDB in `reconcileStartup`.
+function tabRuntimeDefaults() {
+    return {
+        panel: null,            /// the <div class="tab-panel"> holding this tab's result(s)
+        resultEl: null,         /// this tab's <query-result>
+        multiContainer: null,   /// this tab's multi-query results container (created on demand)
+        controller: null,       /// AbortController of this tab's in-flight single query
+        multiControllers: [],   /// AbortControllers of this tab's in-flight multi-query statements
+        reqNum: 0,              /// per-tab run/render generation (see the token model at `activation_num`)
+        inFlight: false,        /// a query is currently running in this tab
+        materialized: false,    /// this tab's stored result has been rendered into its panel
+        completed: false,       /// a query finished while this tab was inactive (check-mark on its title)
+        progress: null,         /// last progress detail (numbers) for the shared bar / tab indicator
+        progressState: null,    /// per-statement progress map for a multi-query run
+        progressPhase: 'idle',  /// 'idle' | 'running' | 'done' | 'error' — drives the shared bar on activation
+        finalStats: null,       /// { rowCount, elapsedNs, incomplete } shown when a run finishes
+        logoVisible: true,      /// whether the shared logo shows for this tab (hidden by errors / multi)
+        colorModes: {},         /// per-column color modes for this tab's result (shared with its element)
+        downloadQuery: '',      /// query the download button should re-run for this tab
+        downloadParams: {},
+        downloadVisible: false, /// whether the download / copy buttons apply to this tab
+        copyVisible: false,
+        barEl: null,            /// cached tab-bar row + indicator nodes (see renderTabBar/updateTabIndicator)
+        spinnerEl: null,
+        checkEl: null,
+        fillEl: null,
+    };
+}
+
 function makeTab(title, query) {
     return {
         id: 't' + (++tabSeq),
@@ -5269,11 +5441,87 @@ function makeTab(title, query) {
         params: {},
         result: null,          /// last result snapshot (history-state shape) or null
         lastSavedQuery: undefined,
+        ...tabRuntimeDefaults(),
     };
 }
 
 function getActiveTab() {
     return tabs.find(t => t.id === activeTabId) || null;
+}
+
+/// Create (once) this tab's persistent result panel and <query-result>, append it (hidden), and
+/// wire its live-progress routing. The panel and its rendered result survive tab switches.
+function getOrCreatePanel(tab) {
+    if (tab.panel) return tab.panel;
+    const panel = document.createElement('div');
+    panel.className = 'tab-panel';
+    panel.dataset.id = tab.id;
+    panel.hidden = true;
+    const el = document.createElement('query-result');
+    el._colorModes = tab.colorModes;
+    panel.appendChild(el);
+    resultPanelsEl.appendChild(panel);
+    tab.panel = panel;
+    tab.resultEl = el;
+    el.addEventListener('query-progress', (e) => handleResultProgress(tab, e.detail));
+    return panel;
+}
+
+/// Show only the given tab's panel (creating it if needed), hide the rest, and repoint the
+/// active-result aliases (`resultEl`/`multiQueryContainer`) at it. Result content is untouched.
+function setActivePanel(tab) {
+    getOrCreatePanel(tab);
+    for (const t of tabs) if (t.panel) t.panel.hidden = (t !== tab);
+    resultEl = tab.resultEl;
+    multiQueryContainer = tab.multiContainer;
+}
+
+/// Clear a tab's own result element and multi container (its logo state resets to visible). Only
+/// touches the shared progress bar / logo when the tab is active; a background clear stays local.
+function clearPanel(tab) {
+    if (tab.resultEl) { tab.resultEl.clear(); tab.resultEl.style.display = ''; }
+    if (tab.multiContainer) { tab.multiContainer.innerHTML = ''; tab.multiContainer.style.display = 'none'; }
+    tab.logoVisible = true;
+    if (tab.id === activeTabId) { progressEl.clear(); logoEl.style.display = 'block'; elapsed_ns = 0; }
+}
+
+/// Point the shared download/copy buttons at a tab's stored state.
+function paintDownloadCopy(tab) {
+    document.getElementById('download-div').style.display = tab.downloadVisible ? 'block' : 'none';
+    document.getElementById('copy-div').style.display = tab.copyVisible ? 'block' : 'none';
+    last_query_for_download = tab.downloadQuery || '';
+    last_params_for_download = tab.downloadParams || {};
+}
+
+/// Repaint the shared chrome (Run/Stop button, favicon, progress bar, logo, download/copy) from
+/// the ACTIVE tab's stored state, so switching to a tab shows exactly what its own query left
+/// behind — including a still-running background query's live bar. Also clears its check-mark.
+function syncActiveTabChrome() {
+    const tab = getActiveTab();
+    if (!tab) return;
+    tab.completed = false;   /// opening a tab clears its "finished while away" check-mark
+
+    if (tab.inFlight) {
+        document.getElementById('run').innerText = 'Stop';
+        document.getElementById('run-all').style.display = 'none';
+    } else {
+        updateRunButtons(isMultiQuery);
+    }
+    refreshFavicon();
+
+    if (tab.progressPhase === 'running') {
+        progressEl.start();
+        if (tab.progress) progressEl.updateProgress(tab.progress);
+    } else if (tab.progressPhase === 'done' && tab.finalStats) {
+        progressEl.finish();
+        progressEl.updateText(tab.finalStats.rowCount, tab.finalStats.elapsedNs, tab.finalStats.incomplete);
+        progressEl.style.setProperty('--progress', '0');
+    } else {
+        progressEl.clear();
+    }
+
+    logoEl.style.display = tab.logoVisible ? 'block' : 'none';
+    paintDownloadCopy(tab);
 }
 
 /// Serialize the live editor (query text + parameter values) into the active tab.
@@ -5283,43 +5531,49 @@ function captureActiveTab() {
     if (!tab) return;
     tab.query = query_area.value;
     /// While an activation is restoring this tab's parameter inputs (after the `updateQueryParams`
-    /// await in `restoreFromHistory`, before `setParamValues`), the `param_*` DOM inputs still hold
-    /// the previously active tab's values. Snapshotting them now would overwrite this tab's own
-    /// parameters with the previous tab's and later reload/run with the wrong values. Skip the
-    /// parameter capture until the restore commits. `tab.query` is safe: `restoreFromHistory` sets
-    /// the editor to this tab's query before the await. The guard lifts automatically once a run or
-    /// a newer activation advances `request_num`, so it can never suppress capture indefinitely.
-    if (params_restore_pending_token !== request_num) tab.params = getParamValues();
+    /// await in `restoreEditor`, before `setParamValues`), the `param_*` DOM inputs still hold the
+    /// previously active tab's values. Snapshotting them now would overwrite this tab's own
+    /// parameters with the previous tab's. Skip the capture until the restore commits; `tab.query`
+    /// is safe (set before the await). The guard lifts once a newer activation advances
+    /// `activation_num`, so it can never suppress capture indefinitely.
+    if (params_restore_pending_token !== activation_num) tab.params = getParamValues();
 }
 
-/// Invalidate any in-flight query and abort its HTTP requests, so a late response cannot
-/// render or be saved into the now-active tab. Bumping `request_num` also supersedes any
-/// run still suspended on an await (it captured the old value) and any in-progress tab
-/// activation (`restoreFromHistory` bails when the token no longer matches `request_num`).
-function invalidateInFlight() {
-    ++request_num;
-    if (controller) controller.abort();
-    for (const ac of multiQueryControllers) ac.abort();
-    multiQueryControllers = [];
-    if (typeof in_flight !== 'undefined' && in_flight) endFlight();
+/// Abort a tab's in-flight query (if any) and supersede its run generation so its late responses
+/// bail. Touches only that tab. Used by cancel/close and by Back/Forward re-materialization.
+function abortTabQuery(tab) {
+    ++tab.reqNum;
+    if (tab.controller) tab.controller.abort();
+    for (const ac of tab.multiControllers) ac.abort();
+    tab.multiControllers = [];
+    tab.inFlight = false;
 }
 
-/// Load a tab's content into the editor and re-render its stored result.
-/// Routed through `restoreFromHistory` so the syntax backdrop, params and run
-/// buttons resync (it dispatches an 'input' event), exactly like history navigation.
+/// Activate a tab: reveal its persistent panel, restore the shared editor from it, materialize its
+/// stored result the FIRST time it is opened (lazily), and repaint the shared chrome from its
+/// state. It does NOT abort a query running in the tab we leave or the one we open — a background
+/// query keeps streaming into its own panel, and returning to it shows its live progress.
 async function activateTab(id) {
     const tab = tabs.find(t => t.id === id);
     if (!tab) return;
     activeTabId = id;
-    invalidateInFlight();
-    const token = request_num;
+    ++activation_num;
+    const token = activation_num;
 
-    /// Restore the editor from the live tab.query/tab.params (latest edits), while rendering
-    /// the stored result from tab.result, which keeps its own producing query/params.
-    await restoreFromHistory({ query: tab.query, params: tab.params, result: tab.result }, token);
-    if (token !== request_num) return; /// a newer activation/run superseded this one
-    /// Always recolor the page (and thus the active tab slab) to this tab's query,
-    /// even when there is no result to render (restoreFromHistory skips this otherwise).
+    setActivePanel(tab);
+
+    /// Restore the shared editor (query text + params) from the tab; the result DOM stays put.
+    await restoreEditor({ query: tab.query, params: tab.params }, token);
+    if (token !== activation_num) return; /// a newer activation/run superseded this one
+
+    /// Lazily materialize the stored result into this tab's element the first time it is opened,
+    /// unless a query is running in it (the live stream owns the element) or it is already built.
+    if (!tab.materialized && !tab.inFlight) {
+        await materializeResult(tab);
+        if (token !== activation_num) return;
+    }
+
+    syncActiveTabChrome();
     document.documentElement.style.setProperty('--background-color-rotate', queryToColor(tab.query));
     renderTabBar();
     query_area.focus();
@@ -5345,7 +5599,7 @@ function addTab() {
     const tab = makeTab();
     tabs.push(tab);
     activeTabId = tab.id;
-    /// A brand new tab has no result; clear the editor and result area.
+    /// A brand new tab has no result; its panel materializes empty on activation.
     activateTab(tab.id).then(syncHistory);
     scheduleSave();
 }
@@ -5353,7 +5607,11 @@ function addTab() {
 function closeTab(id) {
     const idx = tabs.findIndex(t => t.id === id);
     if (idx === -1) return;
+    const closing = tabs[idx];
     const wasActive = id === activeTabId;
+    /// Stop the closed tab's query and drop its panel from the DOM (freeing its result/images).
+    abortTabQuery(closing);
+    if (closing.panel) closing.panel.remove();
     tabs.splice(idx, 1);
     if (tabs.length === 0) {
         /// Never leave zero tabs: start a fresh default one.
@@ -5368,6 +5626,7 @@ function closeTab(id) {
         activateTab(next.id).then(syncHistory);
     } else {
         renderTabBar();
+        refreshFavicon();   /// closing a background tab may have removed the last running query
     }
     scheduleSave();
 }
@@ -5433,16 +5692,44 @@ function renderTabBar() {
         /// Inactive tabs are tinted by the hash of their own query text.
         el.style.setProperty('--tab-hue', queryToColor(tab.query));
 
+        /// Progress fill behind the title (width driven by `--tab-progress`).
+        const fillEl = document.createElement('div');
+        fillEl.className = 'tab-progress-fill';
+        el.appendChild(fillEl);
+
         const titleEl = document.createElement('span');
         titleEl.className = 'tab-title';
         titleEl.textContent = tab.title;
         el.appendChild(titleEl);
+
+        /// Activity indicators: a spinning hourglass while the tab's query runs, and a check-mark
+        /// once it has finished while the tab was inactive (cleared when the tab is opened).
+        const statusEl = document.createElement('span');
+        statusEl.className = 'tab-status';
+        const spinnerEl = document.createElement('span');
+        spinnerEl.className = 'tab-spinner';
+        spinnerEl.textContent = '⧗';
+        spinnerEl.style.display = 'none';
+        const checkEl = document.createElement('span');
+        checkEl.className = 'tab-check';
+        checkEl.textContent = '✔';
+        checkEl.style.display = 'none';
+        statusEl.appendChild(spinnerEl);
+        statusEl.appendChild(checkEl);
+        el.appendChild(statusEl);
 
         const closeEl = document.createElement('span');
         closeEl.className = 'tab-close';
         closeEl.title = 'Close';
         closeEl.textContent = '×';
         el.appendChild(closeEl);
+
+        /// Cache the row + indicator nodes so `updateTabIndicator` can update them in place on
+        /// every progress tick without rebuilding the whole bar.
+        tab.barEl = el;
+        tab.fillEl = fillEl;
+        tab.spinnerEl = spinnerEl;
+        tab.checkEl = checkEl;
 
         el.addEventListener('click', (e) => {
             if (e.target === closeEl) { e.stopPropagation(); closeTab(tab.id); return; }
@@ -5458,7 +5745,29 @@ function renderTabBar() {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchToTab(tab.id); }
         });
         tabs_elem.appendChild(el);
+        /// Reflect the tab's current run state on its fresh indicator nodes.
+        updateTabIndicator(tab);
     }
+}
+
+/// Update one tab's title indicators in place (no full `renderTabBar`): the spinning hourglass
+/// while its query runs, the progress fill behind its title, and the completion check-mark shown
+/// once a query has finished while the tab is inactive. Cheap O(1) attribute writes, safe to call
+/// on every progress event. A no-op until the tab has a row in the bar (`renderTabBar` ran).
+function updateTabIndicator(tab) {
+    if (!tab.barEl) return;
+    const isActive = tab.id === activeTabId;
+
+    if (tab.spinnerEl) tab.spinnerEl.style.display = tab.inFlight ? 'inline-block' : 'none';
+    if (tab.checkEl) tab.checkEl.style.display = (tab.completed && !tab.inFlight && !isActive) ? 'inline-block' : 'none';
+
+    let pct = 0;
+    if (tab.inFlight && tab.progress) {
+        const total = +tab.progress.total_rows_to_read || 0;
+        const rows = +tab.progress.read_rows || 0;
+        if (total > 0) pct = Math.min(100, 100 * rows / total);
+    }
+    tab.barEl.style.setProperty('--tab-progress', pct ? pct + '%' : '0%');
 }
 
 document.getElementById('tab-add').addEventListener('click', addTab);
@@ -5684,11 +5993,14 @@ function refreshCurrentHistoryEntry(tab) {
     writeHistoryEntry(tab, undefined, /*forceReplace=*/ true, /*fromRun=*/ tabReflectsRun(tab));
 }
 
-/// Called after an actual run: stash the result snapshot on the active tab (this is
-/// what makes the tab "have a result", hence visible in the bar) and record history.
-/// The snapshot records the query/params that produced it.
-function saveHistory(stateData, titleForDoc) {
-    const tab = getActiveTab();
+/// Called after an actual run: stash the result snapshot on the tab that ran (this is what makes
+/// the tab "have a result", hence visible in the bar) and record history. `tab` defaults to the
+/// active tab (color-mode / popstate callers), but the run path passes the tab it launched in,
+/// which may have become inactive: for a background tab we persist the snapshot and refresh the
+/// bar, but must NOT touch the browser history / URL / document title — those follow the ACTIVE
+/// tab, and hijacking them to a background tab's query would break Back/Forward and reload.
+function saveHistory(stateData, titleForDoc, tab) {
+    tab = tab || getActiveTab();
     if (!tab) return;
     tab.query = stateData.query;
     tab.result = {
@@ -5706,12 +6018,19 @@ function saveHistory(stateData, titleForDoc) {
         /// Per-column color coding modes in effect when this result was produced. Travels with the
         /// snapshot so re-activating the tab (or navigating to its entry / reloading) restores and
         /// re-applies the same coloring; a later toggle updates it via `persistColorModes`.
-        color_modes: column_color_modes,
+        color_modes: tab.colorModes,
         elapsed_ns: stateData.elapsed_ns,
     };
-    /// This entry was produced by an actual run, so it may carry `run=1` (a reload/shared link
-    /// re-runs it). Editor-only writers (`syncHistory`/`refreshCurrentHistoryEntry`) never do.
-    writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ true);
+    if (tab.id === activeTabId) {
+        /// This entry was produced by an actual run, so it may carry `run=1` (a reload/shared link
+        /// re-runs it). Editor-only writers (`syncHistory`/`refreshCurrentHistoryEntry`) never do.
+        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ true);
+    } else {
+        /// Background run finished: reflect its new result in the tab bar and persist it, without
+        /// disturbing the active tab's URL/history entry.
+        renderTabBar();
+        scheduleSave();
+    }
 }
 
 /// Record a history entry for the active tab on tab switch / rename. Reuses the tab's
@@ -5747,10 +6066,6 @@ function resolveTabForState(state) {
 window.onpopstate = function(event) {
     if (!event.state) return;
     captureActiveTab();
-    /// Back/Forward can switch tabs while a query is in flight; invalidate it just like a
-    /// click switch, so a late response is not saved into the tab we are navigating to.
-    invalidateInFlight();
-    const token = request_num;
     const tab = resolveTabForState(event.state);
     /// Keep this history entry's identity in sync with the tab it actually resolves to, restamping
     /// BOTH the state's `tabId`/`tabName` and the URL's `tab=` key. Two cases need it:
@@ -5781,10 +6096,10 @@ window.onpopstate = function(event) {
     /// Adopt the entry's result snapshot (its own producing query/params), or clear it. This
     /// avoids leaving a stale snapshot attached to a different query. Modern entries nest the
     /// snapshot under `result`; legacy flat entries (predating per-tab state) store the produced
-    /// result at the TOP level, and `restoreFromHistory` still renders them via `state.result ||
-    /// state`. Normalize such a flat entry into a nested snapshot rather than treating it as "no
-    /// result" — otherwise the tab bar would hide despite a visible result and the next
-    /// persist/switch would drop the restored snapshot. A truly result-less entry stays null.
+    /// result at the TOP level. Normalize such a flat entry into a nested snapshot on `tab.result`
+    /// (which `materializeResult` renders) rather than treating it as "no result" — otherwise the
+    /// tab bar would hide despite a visible result and the next persist/switch would drop the
+    /// restored snapshot. A truly result-less entry stays null.
     if (event.state.result) {
         tab.result = event.state.result;
     } else if (event.state.data != null || (event.state.multi && event.state.multi.length)) {
@@ -5803,16 +6118,14 @@ window.onpopstate = function(event) {
     } else {
         tab.result = null;
     }
-    restoreFromHistory(event.state, token).then(() => {
-        if (token !== request_num) return; /// a newer navigation/run superseded this one
-        /// Mirror `activateTab`: always recolor the page (and thus the active-tab slab) to this
-        /// tab's query. `restoreFromHistory` only recolors on its full-result path, so a
-        /// Back/Forward into a result-less, error, or large/image-result tab would otherwise keep
-        /// the previously active tab's hue even though the active tab has changed.
-        document.documentElement.style.setProperty('--background-color-rotate', queryToColor(tab.query));
-        renderTabBar();
-    });
-    scheduleSave();
+    /// Back/Forward is an explicit time-travel to this entry's snapshot: stop any query still
+    /// running in the target tab and force its result to be re-rendered from the entry (rather
+    /// than keeping whatever is live in its panel). Routing through `activateTab` reveals the
+    /// tab's panel, restores the editor + params, re-materializes the snapshot, and repaints the
+    /// shared chrome + page hue, exactly like a normal switch.
+    abortTabQuery(tab);
+    tab.materialized = false;
+    activateTab(tab.id).then(scheduleSave);
 };
 
 if (window.location.hash) {
@@ -5820,54 +6133,75 @@ if (window.location.hash) {
     query_area.dispatchEvent(new Event('input'));
 }
 
-let in_flight = false;
-
 // Favicon changes to gray while a query is running, to indicate progress on the browser tab.
 const favicon_default = document.querySelector('link[rel="icon"]').href;
 const favicon_running = 'data:image/svg+xml;base64,' + btoa(atob(favicon_default.split(',')[1]).replace('#ff0', '#bbb'));
 
 function setFavicon(href) { document.querySelector('link[rel="icon"]').href = href; }
 
-function beginFlight() {
-    in_flight = true;
-    setFavicon(favicon_running);
-    document.getElementById('run').innerText = 'Stop';
-    document.getElementById('run-all').style.display = 'none';
-    /// Hide any open autocompletion when a query starts running.
-    closeCompletions();
+/// True when the ACTIVE tab has a query in flight (drives the Run/Stop button and Ctrl+Enter).
+function activeInFlight() { const t = getActiveTab(); return !!(t && t.inFlight); }
+/// True when ANY tab (active or background) is running, so the favicon shows "running" while a
+/// background query is still going even after switching to an idle tab.
+function anyInFlight() { return tabs.some(t => t.inFlight); }
+function refreshFavicon() { setFavicon(anyInFlight() ? favicon_running : favicon_default); }
+
+/// Mark a tab's query as started. The favicon and the tab-title spinner reflect it immediately;
+/// the Run/Stop button and autocompletion only when the tab is active (background runs are shown
+/// solely on their tab title).
+function beginFlight(tab) {
+    tab.inFlight = true;
+    tab.completed = false;
+    tab.progressPhase = 'running';
+    /// A run renders directly into this tab's live element, which is now authoritative: mark the
+    /// tab materialized so switching away and back does NOT re-render it from the stored snapshot
+    /// (that snapshot is lossy — images and results over 100 KB persist no data — and re-rendering
+    /// would wipe the live DOM, reset chart zoom/selection, and defeat the whole point of
+    /// persistent panels). Back/Forward still forces a re-render by resetting `materialized`.
+    tab.materialized = true;
+    updateTabIndicator(tab);
+    refreshFavicon();
+    if (tab.id === activeTabId) {
+        document.getElementById('run').innerText = 'Stop';
+        document.getElementById('run-all').style.display = 'none';
+        /// Hide any open autocompletion when a query starts running.
+        closeCompletions();
+    }
 }
 
-function endFlight() {
-    in_flight = false;
-    document.getElementById('run').blur();
-    updateRunButtons(isMultiQuery);
-    setFavicon(favicon_default);
+function endFlight(tab) {
+    tab.inFlight = false;
+    updateTabIndicator(tab);
+    refreshFavicon();
+    if (tab.id === activeTabId) {
+        document.getElementById('run').blur();
+        updateRunButtons(isMultiQuery);
+    }
 }
 
-/// Run the query under cursor, or all queries intersecting the selection.
+/// Run the query under cursor, or all queries intersecting the selection, in the ACTIVE tab.
 async function postOne()
 {
-    /// Capture the request id now; `getQueryUnderCursor`/`splitAllQueries` await the lexer
-    /// (WASM) load, during which a tab switch may bump `request_num`. Reading the global
-    /// after the await would let this stale run execute/save in the wrong tab, so bail if
-    /// it changed and pass the captured id (not the global) to the post functions.
-    ///
-    /// A tab activation / Back-Forward restore already in flight for this generation has not
-    /// yet written the destination tab's saved parameters to the `param_*` inputs (that write
-    /// happens only after `restoreFromHistory`'s tokenization await, which the `++request_num`
-    /// below aborts). Detect it before the bump so the run sources its parameters from the
-    /// destination tab's own saved snapshot instead of the previous tab's stale DOM inputs.
-    const params_restore_pending = params_restore_pending_token === request_num;
-    const my_request_num = ++request_num;
+    /// The run belongs to the tab active at launch; it keeps running (in the background) even if
+    /// the user switches away. `activation_num` still guards the SHARED editor reads below (a tab
+    /// switch during the WASM-lexer load would swap the editor content under us), while `my_run`
+    /// (a snapshot of this tab's `reqNum`) is the per-tab supersede token threaded into the post
+    /// functions. Detect an in-flight parameter restore before bumping `activation_num` so the run
+    /// sources parameters from this tab's saved snapshot, not the previous tab's stale DOM inputs.
+    const tab = getActiveTab();
+    if (!tab) return;
+    const params_restore_pending = params_restore_pending_token === activation_num;
+    const my_activation = ++activation_num;
+    const my_run = ++tab.reqNum;
     document.body.scrollTo(0, 0);
-    beginFlight();
+    beginFlight(tab);
 
     const has_selection = query_area.selectionStart !== query_area.selectionEnd;
     if (has_selection && isMultiQuery) {
         /// Find all queries that intersect the selection and run them.
         const all_text = query_area.value;
         const parsed = await splitAllQueries(all_text);
-        if (my_request_num !== request_num) return;
+        if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
         const selStart = query_area.selectionStart;
         const selEnd = query_area.selectionEnd;
 
@@ -5880,64 +6214,59 @@ async function postOne()
         }
 
         if (selected.length > 1) {
-            await postMulti(my_request_num, selected, params_restore_pending);
+            await postMulti(tab, my_run, selected, params_restore_pending, all_text);
         } else if (selected.length === 1) {
-            await postSingle(my_request_num, selected[0].query, all_text, params_restore_pending);
+            await postSingle(tab, my_run, selected[0].query, all_text, params_restore_pending);
         }
     } else {
         const query = await getQueryUnderCursor();
-        if (my_request_num !== request_num) return;
+        if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
         /// In multi-query mode, preserve the full textarea content in history/URL
         /// even when running a single query under cursor (so refresh restores all queries).
-        await postSingle(my_request_num, query, isMultiQuery ? query_area.value : undefined, params_restore_pending);
+        await postSingle(tab, my_run, query, isMultiQuery ? query_area.value : undefined, params_restore_pending);
     }
 
-    /// Only reset the run/favicon/cancel state if this entrypoint still owns the in-flight
-    /// state; a newer run (e.g. after a tab switch) may have taken over while we awaited.
-    if (my_request_num === request_num) endFlight();
+    /// Reset the run/favicon state only if this run still owns its tab's in-flight state; a newer
+    /// run or cancel in the same tab (which bumped `tab.reqNum`) has taken over otherwise.
+    if (my_run === tab.reqNum) endFlight(tab);
 }
 
-/// Run all queries from the textarea.
+/// Run all queries from the textarea in the ACTIVE tab.
 async function postAll()
 {
-    /// See `postOne`: detect an in-flight tab activation / Back-Forward parameter restore for
-    /// this generation before `++request_num` aborts it, so the run reads the destination tab's
-    /// saved parameters rather than the previously active tab's stale DOM inputs.
-    const params_restore_pending = params_restore_pending_token === request_num;
-    const my_request_num = ++request_num;
+    const tab = getActiveTab();
+    if (!tab) return;
+    /// See `postOne` for the `activation_num` (shared editor) vs `my_run` (per-tab) split.
+    const params_restore_pending = params_restore_pending_token === activation_num;
+    const my_activation = ++activation_num;
+    const my_run = ++tab.reqNum;
     document.body.scrollTo(0, 0);
-    beginFlight();
+    beginFlight(tab);
 
     const all_text = query_area.value;
     const parsed = await splitAllQueries(all_text);
-    if (my_request_num !== request_num) return;
+    if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
 
     if (parsed.length > 1) {
-        await postMulti(my_request_num, parsed, params_restore_pending);
+        await postMulti(tab, my_run, parsed, params_restore_pending, all_text);
     } else {
         const query = await getQueryUnderCursor();
-        if (my_request_num !== request_num) return;
-        await postSingle(my_request_num, query, undefined, params_restore_pending);
+        if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
+        await postSingle(tab, my_run, query, undefined, params_restore_pending);
     }
 
-    /// Only reset the run/favicon/cancel state if this entrypoint still owns the in-flight
-    /// state; a newer run (e.g. after a tab switch) may have taken over while we awaited.
-    if (my_request_num === request_num) endFlight();
+    if (my_run === tab.reqNum) endFlight(tab);
 }
 
+/// Stop the ACTIVE tab's query (the Run→Stop button / Ctrl+Enter while running).
 async function cancel()
 {
-    /// Invalidate in-flight requests so postImpl/postSingle/postMulti will
-    /// see a stale posted_request_num and bail out before saving history.
-    ++request_num;
-    /// Cancel single-query mode controller.
-    if (controller) controller.abort();
-    /// Cancel all multi-query mode controllers.
-    for (const ac of multiQueryControllers) {
-        ac.abort();
-    }
-    multiQueryControllers = [];
-    endFlight();
+    const tab = getActiveTab();
+    if (!tab) return;
+    /// Bump the tab's run generation and abort its requests so postImpl/postSingle/postMulti
+    /// see a stale run token and bail out before saving history.
+    abortTabQuery(tab);
+    endFlight(tab);
 }
 
 function storeCredentials() {
@@ -5956,7 +6285,7 @@ document.getElementById('controls').addEventListener('submit', e =>
 {
     e.preventDefault();
     markBootstrapDirty(e);   /// a manual run before reconciliation must keep this tab's state
-    if (in_flight) {
+    if (activeInFlight()) {
         cancel();
     } else {
         postOne();
@@ -5969,7 +6298,7 @@ document.getElementById('run-all').addEventListener('click', e =>
 {
     e.preventDefault();
     markBootstrapDirty(e);
-    if (!in_flight) {
+    if (!activeInFlight()) {
         postAll();
         storeCredentials();
     }
@@ -5985,7 +6314,7 @@ document.addEventListener('keydown', event => {
     /// Firefox has code 13 for Enter and Chromium has code 10.
     if ((event.metaKey || event.ctrlKey) && (event.keyCode == 13 || event.keyCode == 10)) {
         markBootstrapDirty(event);
-        if (in_flight) {
+        if (activeInFlight()) {
             cancel();
         } else if (event.shiftKey && isMultiQuery) {
             /// Ctrl/Cmd+Shift+Enter runs all queries in multi-query mode.
@@ -6089,19 +6418,13 @@ query_area.onkeydown = (e) => {
     }
 };
 
+/// Clear the ACTIVE tab's result pane (its own element + multi container) and the shared progress
+/// bar / logo. Used by the connection-check path to blank the pane before rendering an error.
+/// Background tabs are untouched (see `clearPanel`).
 function clear()
 {
-    resultEl.clear();
-    resultEl.style.display = '';
-    progressEl.clear();
-    logoEl.style.display = 'block';
-    elapsed_ns = 0;
-
-    /// Clean up multi-query results.
-    if (multiQueryContainer) {
-        multiQueryContainer.innerHTML = '';
-        multiQueryContainer.style.display = 'none';
-    }
+    const tab = getActiveTab();
+    if (tab) clearPanel(tab);
 }
 
 function formatReadable(number = 0, decimals = 2, units = []) {
@@ -6454,7 +6777,7 @@ function updateRunButtons(multi) {
         && query_area.selectionStart === 0
         && query_area.selectionEnd >= query_area.value.length;
 
-    if (!in_flight) {
+    if (!activeInFlight()) {
         if (!multi) {
             runBtn.innerText = 'Run';
         } else {
@@ -7576,8 +7899,8 @@ function setParamValues(values)
 ///
 /// Normally the live DOM inputs are authoritative. But when a tab activation / Back-Forward
 /// restore is still pending for this run's generation, the destination tab's saved parameters
-/// have not yet been written to the inputs — that write happens only after `restoreFromHistory`'s
-/// tokenization await, which `++request_num` in `postOne`/`postAll` has just aborted — so the
+/// have not yet been written to the inputs — that write happens only after `restoreEditor`'s
+/// tokenization await, which the `++activation_num` in `postOne`/`postAll` has just superseded — so the
 /// inputs still hold the previously active tab's values. Sourcing them would execute this tab's
 /// query against the wrong bindings (a correctness bug, not just a stale UI). Take the values
 /// from the destination tab's own saved `params` instead (parameters are tab-owned), and write
@@ -7608,7 +7931,7 @@ function resolveRunParams(params_restore_pending)
 /// editor text. Returns `true` when `currentQueryParams` now reflects that text (tokenized
 /// successfully, or the query is empty), and `false` when it could not be rebuilt (WASM lexer
 /// unavailable, the query too large to tokenize, or a newer generation superseded this call).
-/// Callers that then read `currentQueryParams` to restore a tab's parameters (`restoreFromHistory`
+/// Callers that then read `currentQueryParams` to restore a tab's parameters (`restoreEditor`
 /// and the startup URL reconciliation) MUST honor a `false` result: on failure the list may still
 /// describe the PREVIOUS tab, so deriving params from it would attach that tab's placeholder names
 /// to this one and persist them into history / `IndexedDB`.
@@ -7733,7 +8056,7 @@ async function updateQueryParams()
 query_area.addEventListener('input', (e) =>
 {
     /// A real keystroke/paste into the editor before reconciliation completes means the live
-    /// query is newer than the saved workspace; keep it. `restoreFromHistory`/bootstrap dispatch
+    /// query is newer than the saved workspace; keep it. `restoreEditor`/bootstrap dispatch
     /// synthetic input events (`isTrusted === false`), which `markBootstrapDirty` ignores.
     markBootstrapDirty(e);
 
@@ -7760,7 +8083,7 @@ query_area.addEventListener('input', (e) =>
         /// `history.state` over the newer unrun edit (both `window.onpopstate` and
         /// `resolveTabForState` read `event.state.query`). Refreshing here keeps the entry the tab
         /// would be restored from in sync with the latest keystroke. Only genuine keystrokes do it:
-        /// the synthetic 'input' events `restoreFromHistory`/bootstrap dispatch merely replay
+        /// the synthetic 'input' events `restoreEditor`/bootstrap dispatch merely replay
         /// already-recorded state (`isTrusted === false`, as `markBootstrapDirty` relies on) and
         /// must not rewrite the entry. `refreshCurrentHistoryEntry` only touches the current entry
         /// when it belongs to this tab (or seeds the page's initial entry when a fresh load has not
@@ -7779,7 +8102,10 @@ function setColorTheme(new_theme, update_preference) {
         window.localStorage.setItem('theme', theme);
     }
     document.documentElement.setAttribute('data-theme', theme);
-    resultEl.redrawChart();
+    /// Recolor every materialized tab's chart(s), not just the active one, so a background tab's
+    /// chart matches the theme when it is next opened. Runs before any panel exists at startup, so
+    /// the query is safe (empty).
+    for (const el of resultPanelsEl.querySelectorAll('query-result')) el.redrawChart();
 }
 /// First we check if theme is set via the 'theme' GET parameter, if not, we check localStorage, otherwise we check OS preference.
 let theme = current_url.searchParams.get('theme');
@@ -7810,6 +8136,11 @@ if (theme) {
 /// first paint is identical to the pre-tabs UI (no layout shift).
 tabs = [makeTab(undefined, query_area.value)];
 activeTabId = tabs[0].id;
+/// Seed the bootstrap tab's color modes from the URL (a shared/bookmarked link may carry them).
+tabs[0].colorModes = url_color_modes;
+/// Build the active tab's panel now (synchronously), so the `resultEl` alias exists before any
+/// connection check / early render runs, matching the pre-tabs invariant that it always existed.
+setActivePanel(tabs[0]);
 
 const url_tab_name = current_url.searchParams.get('tab');
 /// Whether the URL actually carries a query fragment (`#<base64>`), as opposed to no
@@ -7844,6 +8175,10 @@ async function reconcileStartup() {
         const savedTabs = ordered.map(r => ({
             id: r.id, title: r.title, query: r.query || '',
             params: r.params || {}, result: r.result || null, lastSavedQuery: r.lastSavedQuery,
+            /// Attach fresh transient runtime state (panels/queries are materialized lazily on
+            /// first activation), seeding color modes from the persisted result snapshot.
+            ...tabRuntimeDefaults(),
+            colorModes: (r.result && r.result.color_modes) || {},
         }));
         if (loaded.meta) {
             tabSeq = Math.max(tabSeq, loaded.meta.tabSeq || 0);
@@ -7903,6 +8238,9 @@ async function reconcileStartup() {
             return;   /// skip URL param reconciliation and auto-run: the user is already editing
         }
 
+        /// Replacing the in-memory workspace with the saved one: drop the bootstrap tab's panel
+        /// from the DOM so it does not linger (visible) behind the restored active tab's panel.
+        for (const t of tabs) if (t.panel) t.panel.remove();
         tabs = savedTabs;
         if (!has_url_query && !url_tab_name) {
             /// Plain load: restore the saved workspace as-is.
