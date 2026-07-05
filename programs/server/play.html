@@ -4606,7 +4606,20 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
 
                 let cont = true;
                 for (const line of lines.slice(0, -1)) {
+                    /// Skip blank lines: a trailing/blank line would make `JSON.parse('')` throw
+                    /// ("Unexpected end of JSON input"), masking the real result with a client error.
+                    if (line.length == 0) continue;
                     const data = JSON.parse(line);
+                    /// A `{"exception":...}` can arrive mid-stream after a 200 (e.g. a query that
+                    /// streams progress and then hits `max_execution_time`). The response was `ok`,
+                    /// so without this it would be classified as a successful empty result (green
+                    /// check, `ok:true` snapshot, and the 0-row "empty result" layout). Render just
+                    /// the error and report it as a failure so the caller takes the error path.
+                    if (data.exception) {
+                        targetResultEl.clear();
+                        targetResultEl.renderError(data.exception);
+                        return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
+                    }
                     cont = targetResultEl.update(data, fragment);
                     if (!cont) { break; }
                 }
