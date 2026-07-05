@@ -4592,6 +4592,7 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
             const decoder = new TextDecoder();
 
             let buffer = '';
+            let stream_exception = null;   /// set if a `{"exception"}` arrives mid-stream
             while (true) {
                 const { done, value } = await reader.read();
                 if (posted_request_num != tab.reqNum) { return { cancelled: true }; }
@@ -4611,15 +4612,10 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
                     if (line.length == 0) continue;
                     const data = JSON.parse(line);
                     /// A `{"exception":...}` can arrive mid-stream after a 200 (e.g. a query that
-                    /// streams progress and then hits `max_execution_time`). The response was `ok`,
-                    /// so without this it would be classified as a successful empty result (green
-                    /// check, `ok:true` snapshot, and the 0-row "empty result" layout). Render just
-                    /// the error and report it as a failure so the caller takes the error path.
-                    if (data.exception) {
-                        targetResultEl.clear();
-                        targetResultEl.renderError(data.exception);
-                        return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
-                    }
+                    /// streams progress/rows and then hits `max_execution_time`). The response was
+                    /// `ok`, so without this it would be classified as a successful result. Stop the
+                    /// stream and remember the message; it is handled after the loop.
+                    if (data.exception) { stream_exception = data.exception; cont = false; break; }
                     cont = targetResultEl.update(data, fragment);
                     if (!cont) { break; }
                 }
@@ -4632,6 +4628,23 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
                     break;
                 }
                 buffer = lines[lines.length - 1];
+            }
+
+            /// A mid-stream exception fails the query. Keep any partial rows that already streamed
+            /// in and render the error beneath them (a partial result is still worth showing), but
+            /// if nothing but a header arrived, hide the empty table so only the error shows. The
+            /// partial table still needs its layout pass (deferred while the tab is hidden).
+            if (stream_exception !== null) {
+                if (targetResultEl.rowCount > 0) {
+                    targetResultEl.renderTotals();
+                    targetResultEl.applyColumnColors();
+                    if (tab.id === activeTabId) { targetResultEl.transposeIfNeeded(); targetResultEl._changeTableLayout(); }
+                    else { targetResultEl._pendingTranspose = true; targetResultEl._pendingChangeLayout = true; }
+                } else {
+                    targetResultEl.clear();
+                }
+                targetResultEl.renderError(stream_exception);
+                return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
             }
         } else if (format == 'JSONCompactColumns') {
             is_chart = true;
