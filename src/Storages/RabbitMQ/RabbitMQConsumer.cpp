@@ -162,6 +162,12 @@ bool RabbitMQConsumer::nackMessages(const CommitInfo & commit_info, bool requeue
         return false;
     }
 
+    if (commit_info.channel_id != channel_id)
+    {
+        LOG_TEST(log, "Channel ID changed {} -> {}, will not {} messages", commit_info.channel_id, channel_id, verb);
+        return false;
+    }
+
     const int failed_flags = requeue ? AMQP::requeue : 0;
     for (const auto & delivery_tag : commit_info.failed_delivery_tags)
     {
