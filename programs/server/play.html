@@ -4509,7 +4509,8 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             const decoder = new TextDecoder();
 
             let buffer = '';
-            let marker_seen = false;   /// once the `__exception__` block starts, stop parsing rows
+            let marker_seen = false;      /// once the `__exception__` block starts, stop parsing rows
+            let stream_exception = null;  /// the error message, from either signalling method
             while (true) {
                 let done, value;
                 try {
@@ -4556,6 +4557,11 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                     /// its leading bare-`\r` line is skipped here too.
                     if (line.trim().length == 0) continue;
                     const data = JSON.parse(line);
+                    /// The other way an exception is signalled: with `http_write_exception_in_output_format`
+                    /// the format writes a `{"exception":...}` line (this is the pre-marker mechanism, and
+                    /// it can still arrive mid-stream after a 200). Treat it as a failure — like the marker
+                    /// — rather than letting the query fall through to the success path below.
+                    if (data.exception) { stream_exception = data.exception; cont = false; break; }
                     cont = targetResultEl.update(data, fragment);
                     if (!cont) { break; }
                 }
@@ -4575,13 +4581,19 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 buffer = lines[lines.length - 1];
             }
 
-            /// A `__exception__` marker means the query failed after its response body had already
-            /// started streaming. Keep any partial rows that arrived (they are already flushed into
-            /// the table): finish their totals/coloring so they look consistent, then render the
-            /// parsed error beneath them. If nothing but a header arrived, hide the empty table.
-            if (marker_seen) {
-                const message = parseExceptionMarker(reply)
+            /// The `__exception__` marker (the newer, format-agnostic mechanism) is parsed out of the
+            /// full reply after the stream ended; the format-level `{"exception":...}` line is already
+            /// captured in `stream_exception` above.
+            if (marker_seen && stream_exception === null) {
+                stream_exception = parseExceptionMarker(reply)
                     ?? "The query failed after the response body had already started, but the error message could not be parsed.";
+            }
+
+            /// Either way, the query failed after its response body had already started streaming. Keep
+            /// any partial rows that arrived (they are already flushed into the table): finish their
+            /// totals/coloring so they look consistent, then render the error beneath them. If nothing
+            /// but a header arrived, hide the empty table so only the error shows.
+            if (stream_exception !== null) {
                 if (targetResultEl.rowCount > 0) {
                     targetResultEl.renderTotals();
                     targetResultEl.applyColumnColors();
@@ -4589,7 +4601,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 } else {
                     targetResultEl.clear();
                 }
-                targetResultEl.renderError(message);
+                targetResultEl.renderError(stream_exception);
                 return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
             }
         } else if (format == 'JSONCompactColumns') {
