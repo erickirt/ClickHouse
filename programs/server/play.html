@@ -4701,7 +4701,10 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
         /// query. Guarded on the tab's request number (like the success path below and like
         /// `postMulti`), so a superseded run (re-run / cancel) does not overwrite the snapshot.
         if (posted_request_num == tab.reqNum) {
-            tab.completed = true;
+            /// Mark "finished while away" only when the tab is not the active one at the moment the
+            /// run ends; a foreground finish must not make the tab sprout a completion check-mark
+            /// the instant the user later switches away from it.
+            tab.completed = !active();
             saveHistory({
                 query: history_query_text || query,
                 resultQuery: query,
@@ -4742,7 +4745,10 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
 
     if (posted_request_num != tab.reqNum) { updateTabIndicator(tab); return; }
 
-    tab.completed = true;
+    /// Only flag "finished while inactive" when the tab is not currently active (see the error
+    /// path above): otherwise switching away from a tab that just finished in the foreground would
+    /// wrongly show its completion check-mark.
+    tab.completed = !active();
     updateTabIndicator(tab);
 
     /// Persist the result snapshot on this tab and record an entry in browser history + the URL.
@@ -4915,7 +4921,9 @@ async function postMulti(tab, posted_request_num, parsed, params_restore_pending
 
     if (posted_request_num != tab.reqNum) { updateTabIndicator(tab); return; }
 
-    tab.completed = true;
+    /// As in the single-query path, only mark "finished while away" when this tab is inactive at
+    /// the moment the run completes; a foreground finish must not badge the tab on the next switch.
+    tab.completed = !active();
     updateTabIndicator(tab);
 
     /// Snapshot the per-statement results so switching tabs / reloading restores the whole
@@ -5688,7 +5696,10 @@ function renderTabBar() {
     /// run, so the page looks exactly as before tabs existed. Keying off `result.ran`
     /// (rather than merely `result != null`) also ignores any stale/fabricated result
     /// snapshot that an older build may have persisted to IndexedDB.
-    tab_bar_elem.hidden = (tabs.length <= 1 && !(active && active.result && active.result.ran));
+    /// A running query also reveals the bar (`anyInFlight`), so even the very first query on a
+    /// fresh page can be backgrounded: the user needs the `[+]` button to open a second tab (or
+    /// switch away) while that first query is still in flight.
+    tab_bar_elem.hidden = (tabs.length <= 1 && !(active && active.result && active.result.ran) && !anyInFlight());
     syncConnectionUI();
 
     tabs_elem.textContent = '';
@@ -6161,6 +6172,11 @@ function beginFlight(tab) {
     tab.inFlight = true;
     tab.completed = false;
     tab.progressPhase = 'running';
+    /// Drop any progress snapshot left by the previous run in this tab. Otherwise a rerun would
+    /// inherit the old fill (via `updateTabIndicator` below) until the first new `query-progress`
+    /// event arrives, and a quick switch-away/back before that event would replay the stale
+    /// "Read ..." numbers through `syncActiveTabChrome`.
+    tab.progress = null;
     /// A run renders directly into this tab's live element, which is now authoritative: mark the
     /// tab materialized so switching away and back does NOT re-render it from the stored snapshot
     /// (that snapshot is lossy — images and results over 100 KB persist no data — and re-rendering
@@ -6169,6 +6185,11 @@ function beginFlight(tab) {
     tab.materialized = true;
     updateTabIndicator(tab);
     refreshFavicon();
+    /// Reveal the tab bar (with its `[+]`) the moment a run starts on an otherwise-hidden bar, so
+    /// the first query on a fresh page can be backgrounded. Only rebuilds when hidden (a no-op cost
+    /// once the bar is already shown), and in that case there is a single tab, so no background
+    /// tab's spinner animation is reset by the rebuild.
+    if (tab_bar_elem.hidden) renderTabBar();
     if (tab.id === activeTabId) {
         document.getElementById('run').innerText = 'Stop';
         document.getElementById('run-all').style.display = 'none';
@@ -6181,6 +6202,14 @@ function endFlight(tab) {
     tab.inFlight = false;
     updateTabIndicator(tab);
     refreshFavicon();
+    /// A run that ended without leaving a result (e.g. cancelled before the first row) on a lone
+    /// tab should let the bar collapse back to its pristine hidden state. Re-render only when that
+    /// hide actually applies, so the common case (bar stays visible) does not rebuild on every run.
+    if (!tab_bar_elem.hidden && tabs.length <= 1 && !anyInFlight()
+        && !(getActiveTab() && getActiveTab().result && getActiveTab().result.ran))
+    {
+        renderTabBar();
+    }
     if (tab.id === activeTabId) {
         document.getElementById('run').blur();
         updateRunButtons(isMultiQuery);
@@ -6191,47 +6220,60 @@ function endFlight(tab) {
 async function postOne()
 {
     /// The run belongs to the tab active at launch; it keeps running (in the background) even if
-    /// the user switches away. `activation_num` still guards the SHARED editor reads below (a tab
-    /// switch during the WASM-lexer load would swap the editor content under us), while `my_run`
-    /// (a snapshot of this tab's `reqNum`) is the per-tab supersede token threaded into the post
-    /// functions. Detect an in-flight parameter restore before bumping `activation_num` so the run
-    /// sources parameters from this tab's saved snapshot, not the previous tab's stale DOM inputs.
+    /// the user switches away. The lexer preflight (`splitAllQueries` / `getQueryUnderCursor`)
+    /// awaits the WASM lexer, and a tab switch during that await would swap `query_area` to another
+    /// tab's content — so snapshot the editor text + selection BEFORE the await and parse the
+    /// snapshot, rather than dropping a launched run just because the active tab changed. Only a
+    /// newer run/cancel in the SAME tab (which bumps `tab.reqNum`, tracked by `my_run`) supersedes
+    /// it. Detect an in-flight parameter restore before bumping `activation_num` so the run sources
+    /// parameters from this tab's saved snapshot, not the previous tab's stale DOM inputs.
     const tab = getActiveTab();
     if (!tab) return;
     const params_restore_pending = params_restore_pending_token === activation_num;
-    const my_activation = ++activation_num;
+    /// Bump `activation_num` so a concurrent, still-awaiting `activateTab` restore bails instead of
+    /// overwriting the editor after this run starts; the run itself is no longer gated on it.
+    ++activation_num;
     const my_run = ++tab.reqNum;
     document.body.scrollTo(0, 0);
     beginFlight(tab);
 
-    const has_selection = query_area.selectionStart !== query_area.selectionEnd;
+    /// Snapshot the shared editor before any await (see above).
+    const editor_text = query_area.value;
+    const sel_start = query_area.selectionStart;
+    const sel_end = query_area.selectionEnd;
+    const has_selection = sel_start !== sel_end;
+
     if (has_selection && isMultiQuery) {
         /// Find all queries that intersect the selection and run them.
-        const all_text = query_area.value;
-        const parsed = await splitAllQueries(all_text);
-        if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
-        const selStart = query_area.selectionStart;
-        const selEnd = query_area.selectionEnd;
+        const parsed = await splitAllQueries(editor_text);
+        if (my_run !== tab.reqNum) return;
 
         /// Use start/end offsets from splitAllQueries to find which queries overlap with the selection.
         const selected = [];
         for (let i = 0; i < parsed.length; ++i) {
-            if (parsed[i].end > selStart && parsed[i].start < selEnd) {
+            if (parsed[i].end > sel_start && parsed[i].start < sel_end) {
                 selected.push(parsed[i]);
             }
         }
 
         if (selected.length > 1) {
-            await postMulti(tab, my_run, selected, params_restore_pending, all_text);
+            await postMulti(tab, my_run, selected, params_restore_pending, editor_text);
         } else if (selected.length === 1) {
-            await postSingle(tab, my_run, selected[0].query, all_text, params_restore_pending);
+            await postSingle(tab, my_run, selected[0].query, editor_text, params_restore_pending);
         }
     } else {
-        const query = await getQueryUnderCursor();
-        if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
+        const under = await getQueryUnderCursor(editor_text, sel_start);
+        if (my_run !== tab.reqNum) return;
+        /// Highlight and focus the chosen query only when this tab is still active: a background
+        /// run (the user switched away during the preflight) must not move the foreground editor's
+        /// selection or steal focus.
+        if (tab.id === activeTabId) {
+            if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
+            query_area.focus();
+        }
         /// In multi-query mode, preserve the full textarea content in history/URL
         /// even when running a single query under cursor (so refresh restores all queries).
-        await postSingle(tab, my_run, query, isMultiQuery ? query_area.value : undefined, params_restore_pending);
+        await postSingle(tab, my_run, under.query, isMultiQuery ? editor_text : undefined, params_restore_pending);
     }
 
     /// Reset the run/favicon state only if this run still owns its tab's in-flight state; a newer
@@ -6244,23 +6286,29 @@ async function postAll()
 {
     const tab = getActiveTab();
     if (!tab) return;
-    /// See `postOne` for the `activation_num` (shared editor) vs `my_run` (per-tab) split.
+    /// See `postOne`: snapshot the editor before the lexer await, keep the launched run alive on a
+    /// tab switch, and supersede only on a newer run/cancel in the same tab (`my_run`/`tab.reqNum`).
     const params_restore_pending = params_restore_pending_token === activation_num;
-    const my_activation = ++activation_num;
+    ++activation_num;
     const my_run = ++tab.reqNum;
     document.body.scrollTo(0, 0);
     beginFlight(tab);
 
-    const all_text = query_area.value;
-    const parsed = await splitAllQueries(all_text);
-    if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
+    const editor_text = query_area.value;
+    const sel_start = query_area.selectionStart;
+    const parsed = await splitAllQueries(editor_text);
+    if (my_run !== tab.reqNum) return;
 
     if (parsed.length > 1) {
-        await postMulti(tab, my_run, parsed, params_restore_pending, all_text);
+        await postMulti(tab, my_run, parsed, params_restore_pending, editor_text);
     } else {
-        const query = await getQueryUnderCursor();
-        if (my_activation !== activation_num) { if (my_run === tab.reqNum) endFlight(tab); return; }
-        await postSingle(tab, my_run, query, undefined, params_restore_pending);
+        const under = await getQueryUnderCursor(editor_text, sel_start);
+        if (my_run !== tab.reqNum) return;
+        if (tab.id === activeTabId) {
+            if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
+            query_area.focus();
+        }
+        await postSingle(tab, my_run, under.query, undefined, params_restore_pending);
     }
 
     if (my_run === tab.reqNum) endFlight(tab);
@@ -6606,17 +6654,19 @@ async function tokenize(query) {
 /// Regression coverage for this function lives in
 /// `src/Parsers/tests/gtest_play_get_query_under_cursor.cpp` (a port of the token-walking
 /// algorithm on top of the same `DB::Lexer`). Keep the two in sync when changing the logic.
-async function getQueryUnderCursor() {
-    const all_queries = query_area.value;
-
+/// Pure w.r.t. the DOM: it takes a snapshot of the editor (`all_queries` + `cursor_position`,
+/// captured by the caller before any await) and RETURNS the query to run plus the editor range to
+/// highlight (`{ query, selStart, selEnd }`). `selStart` is null when nothing should be selected
+/// (single query, or the WebAssembly-less fallback). The caller applies the selection/focus, and
+/// only when its tab is still active — so a background run cannot move the foreground editor.
+async function getQueryUnderCursor(all_queries, cursor_position) {
     if (typeof WebAssembly !== 'object' || typeof WebAssembly.instantiate !== 'function') {
-        return all_queries;
+        return { query: all_queries, selStart: null, selEnd: null };
     }
 
     const tokens = await tokenize(all_queries);
     const should_select_query = getQueryBoundaries(tokens, all_queries).length > 1;
 
-    const cursor_position = query_area.selectionStart;
     let current_query_start = 0;
     let current_offset = 0;
     /// Track the most recently completed non-empty query so that if the cursor
@@ -6640,9 +6690,11 @@ async function getQueryUnderCursor() {
             /// do not record it as the last completed query.
             const has_content = current_query_start < offset_before_token;
             if (has_content && current_offset >= cursor_position) {
-                if (should_select_query) query_area.setSelectionRange(current_query_start, current_offset);
-                query_area.focus();
-                return all_queries.substring(current_query_start, current_offset);
+                return {
+                    query: all_queries.substring(current_query_start, current_offset),
+                    selStart: should_select_query ? current_query_start : null,
+                    selEnd: should_select_query ? current_offset : null,
+                };
             }
             if (has_content) {
                 last_query_start = current_query_start;
@@ -6660,16 +6712,19 @@ async function getQueryUnderCursor() {
     /// an empty string. This is what handles the "single query ending in `;`
     /// with the cursor placed after it" case.
     if (current_query_start === current_offset && current_offset === all_queries.length && last_query_end >= 0) {
-        if (should_select_query) query_area.setSelectionRange(last_query_start, last_query_end);
-        query_area.focus();
-        return all_queries.substring(last_query_start, last_query_end);
+        return {
+            query: all_queries.substring(last_query_start, last_query_end),
+            selStart: should_select_query ? last_query_start : null,
+            selEnd: should_select_query ? last_query_end : null,
+        };
     }
 
     /// Cursor is in the last query (no trailing semicolon).
-    const tail = all_queries.substring(current_query_start);
-    if (should_select_query) query_area.setSelectionRange(current_query_start, all_queries.length);
-    query_area.focus();
-    return tail;
+    return {
+        query: all_queries.substring(current_query_start),
+        selStart: should_select_query ? current_query_start : null,
+        selEnd: should_select_query ? all_queries.length : null,
+    };
 }
 
 const PARALLELIZABLE_KEYWORDS = new Set([
@@ -8284,11 +8339,9 @@ async function reconcileStartup() {
                 if (has_url_query && match.query !== url_query) {
                     if (match.lastSavedQuery !== url_query) {
                         /// The URL holds a query this tab was never synced to (a fresh/shared
-                        /// link for an existing tab name): the URL wins, substitute it. Its
-                        /// `color_modes` are authoritative for the substituted result too.
+                        /// link for an existing tab name): the URL wins, substitute it.
                         match.query = url_query;
                         match.result = null;
-                        url_authoritative_colors = true;
                     } else {
                         /// Stale reload: the URL hash is exactly this tab's own last-synced
                         /// query, but the saved tab was edited (and persisted) afterwards
@@ -8303,10 +8356,19 @@ async function reconcileStartup() {
                         run_immediately = false;
                     }
                 }
+                /// Whenever the URL carries a query and this is not a stale reload, the URL is
+                /// authoritative for this tab's color coding — including an EXACT-MATCH reconciliation
+                /// (the URL query equals the saved tab's). A shared/bookmarked link's `color_modes`
+                /// must then replace the saved palette; otherwise `syncHistory` would rewrite the URL
+                /// back to the saved modes and the link would silently lose its encoded colors.
+                if (has_url_query && !preserve_local_query) url_authoritative_colors = true;
                 activeTabId = match.id;
             } else if (has_url_query && !url_tab_name && (match = savedTabs.find(t => t.query === url_query))) {
-                /// Unnamed URL with a query: a tab already holds this exact query, switch to it.
+                /// Unnamed URL with a query: a tab already holds this exact query, switch to it. The
+                /// URL's `color_modes` are still authoritative for it (a shared link), even on this
+                /// exact match, so flag it for the re-apply below.
                 activeTabId = match.id;
+                url_authoritative_colors = true;
             } else {
                 /// Not found: open a new tab carrying the name (if any) and query. A shared/
                 /// bookmarked link's `color_modes` are authoritative for this fresh tab.
@@ -8319,14 +8381,22 @@ async function reconcileStartup() {
         await activateTab(activeTabId);
         activated = true;
         /// `activateTab` → `materializeResult` reset the reconciled tab's `colorModes` from its
-        /// (empty) snapshot, dropping the URL's payload. When the URL is authoritative, re-apply
+        /// snapshot, dropping the URL's payload. When the URL is authoritative, re-apply
         /// `url_color_modes` now — before the deferred auto-run binds them to the result element.
-        /// Rebind the live element's `_colorModes` too, since it aliased the old modes object.
+        /// Mutate the modes object IN PLACE (rather than replacing it) so every element that
+        /// aliases it — the single result element and any restored multi-query result elements —
+        /// stays bound to the same object; then re-run `applyColumnColors` on each so an exact-match
+        /// reconciliation (which already materialized its saved result with the saved palette)
+        /// recolors with the URL's modes. A substituted/new tab has no rendered result yet, so the
+        /// recolor is a no-op there and the modes just carry into its deferred auto-run.
         if (url_authoritative_colors) {
             const t = getActiveTab();
             if (t) {
-                t.colorModes = { ...url_color_modes };
-                if (t.resultEl) t.resultEl._colorModes = t.colorModes;
+                for (const k of Object.keys(t.colorModes)) delete t.colorModes[k];
+                Object.assign(t.colorModes, url_color_modes);
+                const els = t.resultEl ? [t.resultEl] : [];
+                if (t.multiContainer) for (const el of t.multiContainer.querySelectorAll('query-result')) els.push(el);
+                for (const el of els) { el._colorModes = t.colorModes; el.applyColumnColors(); }
             }
         }
     } else if (url_tab_name) {
