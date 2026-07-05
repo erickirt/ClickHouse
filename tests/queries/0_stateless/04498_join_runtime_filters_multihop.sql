@@ -1,3 +1,6 @@
+-- Tests for enable_join_runtime_filters_index_analysis with filter
+-- propogation across multiple tables in the join
+
 DROP TABLE IF EXISTS mh_fact;
 DROP TABLE IF EXISTS mh_d1;
 DROP TABLE IF EXISTS mh_d2;

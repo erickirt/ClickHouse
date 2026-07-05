@@ -1,3 +1,5 @@
+--Tests for enable_join_runtime_filters_index_analysis
+
 DROP TABLE IF EXISTS sales1;
 DROP TABLE IF EXISTS sales2;
 
@@ -118,6 +120,7 @@ WHERE current_database = currentDatabase() AND log_comment = '04490_pe_ckey' AND
 ORDER BY event_time DESC
 LIMIT 1;
 
+-- Make sure to test with a String primary key
 DROP TABLE IF EXISTS str_fact;
 DROP TABLE IF EXISTS str_dim;
 CREATE TABLE str_fact (s String, v UInt64) ENGINE = MergeTree ORDER BY s SETTINGS index_granularity = 16;
@@ -142,6 +145,7 @@ WHERE current_database = currentDatabase() AND log_comment = '04490_pe_str' AND 
 ORDER BY event_time DESC
 LIMIT 1;
 
+-- Date primary key
 DROP TABLE IF EXISTS dt_fact;
 DROP TABLE IF EXISTS dt_dim;
 CREATE TABLE dt_fact (d Date, v UInt64) ENGINE = MergeTree ORDER BY d SETTINGS index_granularity = 16;
@@ -166,6 +170,7 @@ WHERE current_database = currentDatabase() AND log_comment = '04490_pe_dt' AND t
 ORDER BY event_time DESC
 LIMIT 1;
 
+-- LowCardinality primary key
 DROP TABLE IF EXISTS lc_fact;
 DROP TABLE IF EXISTS lc_dim;
 CREATE TABLE lc_fact (s LowCardinality(String), v UInt64) ENGINE = MergeTree ORDER BY s SETTINGS index_granularity = 16;
@@ -190,6 +195,7 @@ WHERE current_database = currentDatabase() AND log_comment = '04490_pe_lc' AND t
 ORDER BY event_time DESC
 LIMIT 1;
 
+-- Bloom filter in skip index
 DROP TABLE IF EXISTS bf_fact;
 DROP TABLE IF EXISTS bf_dim;
 CREATE TABLE bf_fact (id UInt64, k UInt64, v UInt64, INDEX idx_k k TYPE bloom_filter GRANULARITY 1)
