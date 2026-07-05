@@ -3618,9 +3618,12 @@ checkURL();
     user_elem.addEventListener('input', updateDocsURL);
     /// Refresh the `href` before navigation so an open uses the current server URL and user. `#user` is a
     /// browser-autofillable credential field, and autofilling a saved login does not always fire `input`,
-    /// which would otherwise leave `docs_icon.href` stale. `pointerdown` fires before both `click` and the
-    /// middle-button `auxclick` navigation, matching how the Web Terminal link refreshes its `href`.
+    /// which would otherwise leave `docs_icon.href` stale. `pointerdown` fires before the middle-button
+    /// `auxclick` navigation (which produces no `click`), while `click` also covers keyboard activation
+    /// (tab to the link, then Enter) where no pointer event fires at all. Together they refresh the `href`
+    /// on every navigation path, matching how the Web Terminal link refreshes its `href`.
     docs_icon.addEventListener('pointerdown', updateDocsURL);
+    docs_icon.addEventListener('click', updateDocsURL);
     updateDocsURL();
 }
 
