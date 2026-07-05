@@ -2266,6 +2266,13 @@ class QueryResultElement extends HTMLElement
         /// within the same tab), so toggling a color in one tab never repaints another tab's
         /// identically-named columns. Points at the owning tab's `colorModes` object.
         this._colorModes = {};
+        /// Set when a result finished rendering into this element while its tab was hidden: the
+        /// width/height-measuring layout passes (`transposeIfNeeded` / `_changeTableLayout`) read
+        /// `offsetWidth`/`offsetHeight`, which are 0 for a `display:none` panel and would freeze
+        /// every column to minimal width. They are deferred and run by `applyDeferredLayout` once
+        /// the tab is shown. The streamed rows are already in the DOM; only measurement waits.
+        this._pendingTranspose = false;
+        this._pendingChangeLayout = false;
         this._queryText = '';
         /// Object URL backing the displayed image, kept so it can be revoked when the result is cleared.
         this._imageObjectURL = null;
@@ -3086,6 +3093,15 @@ class QueryResultElement extends HTMLElement
         table.removeChild(table.tHead);
         table.removeChild(table.tBodies[0]);
         table.appendChild(new_tbody);
+    }
+
+    /// Run the measurement-based layout passes that were deferred because this element's tab was
+    /// hidden when its query finished (see `_pendingTranspose`/`_pendingChangeLayout`). Called on
+    /// activation, once the panel is visible so `offsetWidth`/`offsetHeight` are meaningful.
+    applyDeferredLayout()
+    {
+        if (this._pendingTranspose) { this._pendingTranspose = false; this.transposeIfNeeded(); }
+        if (this._pendingChangeLayout) { this._pendingChangeLayout = false; this._changeTableLayout(); }
     }
 
     _changeTableLayout()
@@ -4636,10 +4652,15 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
             await targetResultEl.renderGraph(() => posted_request_num === tab.reqNum);
         } else {
             /// Render totals before coloring, so the totals row (which `_colorTargetRows`
-            /// includes) is colored on the first paint too.
+            /// includes) is colored on the first paint too. Totals and coloring are content-only
+            /// (no measurement), so they run even for a hidden tab; the transpose pass measures
+            /// widths, so it is deferred when the tab is hidden (see `applyDeferredLayout`).
             if (is_table) targetResultEl.renderTotals();
             targetResultEl.applyColumnColors();
-            if (is_table) targetResultEl.transposeIfNeeded();
+            if (is_table) {
+                if (tab.id === activeTabId) targetResultEl.transposeIfNeeded();
+                else targetResultEl._pendingTranspose = true;
+            }
         }
 
         /// A tab switch during an awaited renderer (chart/graph loader) makes the render bail
@@ -4726,8 +4747,14 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     }
 
     /// `postImpl` already performed `renderGraph`/`applyColumnColors`/`renderTotals`/`transposeIfNeeded`;
-    /// the only step specific to the single-query path is the final table layout pass.
-    if (result.is_table) el._changeTableLayout();
+    /// the only step specific to the single-query path is the final table layout pass. It measures
+    /// column widths, so defer it (like the transpose) when the tab is hidden — a hidden panel
+    /// measures 0 and would freeze every column to minimal width (`applyDeferredLayout` runs it on
+    /// show).
+    if (result.is_table) {
+        if (tab.id === activeTabId) el._changeTableLayout();
+        else el._pendingChangeLayout = true;
+    }
 
     tab.progressPhase = 'done';
     tab.failed = false;
@@ -5604,6 +5631,11 @@ async function activateTab(id) {
         await materializeResult(tab);
         if (token !== activation_num) return;
     }
+
+    /// Apply any layout passes deferred while this tab's result rendered in the background (its
+    /// panel was hidden, so column widths measured 0). The panel is visible now, so measurements
+    /// are valid; covers the single result element and every multi-query statement element.
+    for (const el of tab.panel.querySelectorAll('query-result')) el.applyDeferredLayout();
 
     syncActiveTabChrome();
     document.documentElement.style.setProperty('--background-color-rotate', queryToColor(tab.query));
