@@ -5509,15 +5509,23 @@ function syncActiveTabChrome() {
     }
     refreshFavicon();
 
+    /// Fully reset the shared widget, then rebuild BOTH of its halves from this tab's own state:
+    /// the live "Read ..." stats + bar (`updateProgress`) and the "N rows in result" line
+    /// (`updateText`). Resetting first is what keeps a half we do not repaint from leaking the
+    /// previously active tab's content (a stale "still running" bar under a done tab, or a stale
+    /// "Read ..." line under a running one).
+    progressEl.clear();
     if (tab.progressPhase === 'running') {
         progressEl.start();
-        if (tab.progress) progressEl.updateProgress(tab.progress);
+        if (tab.progress) {
+            progressEl.updateProgress(tab.progress);
+            progressEl.updateText(tab.progress.rowCount, tab.progress.elapsed_ns, tab.progress.incomplete);
+        }
     } else if (tab.progressPhase === 'done' && tab.finalStats) {
         progressEl.finish();
+        if (tab.progress) progressEl.updateProgress(tab.progress);
         progressEl.updateText(tab.finalStats.rowCount, tab.finalStats.elapsedNs, tab.finalStats.incomplete);
         progressEl.style.setProperty('--progress', '0');
-    } else {
-        progressEl.clear();
     }
 
     logoEl.style.display = tab.logoVisible ? 'block' : 'none';
@@ -6267,6 +6275,13 @@ async function cancel()
     /// see a stale run token and bail out before saving history.
     abortTabQuery(tab);
     endFlight(tab);
+    /// The query was stopped, not completed: drop the 'running' progress state and its live
+    /// snapshot, so reopening this tab does not replay a spinning hourglass / stale "still
+    /// running" bar via `syncActiveTabChrome`. Cancel always targets the active tab, so also
+    /// clear the shared progress widget right away (it still shows the running spinner).
+    tab.progressPhase = 'idle';
+    tab.progress = null;
+    progressEl.clear();
 }
 
 function storeCredentials() {
@@ -8164,6 +8179,10 @@ async function reconcileStartup() {
     /// of an edited-but-not-resynced tab). In that case the URL is NOT authoritative, so we
     /// keep the saved query and skip the URL-driven parameter reconciliation below.
     let preserve_local_query = false;
+    /// Set when the URL is authoritative for the reconciled tab's result (its query was
+    /// substituted from a fresh/shared link, or a new tab was opened for it). In that case the
+    /// URL's `color_modes` payload must be applied to that tab; see the re-apply after activation.
+    let url_authoritative_colors = false;
 
     if (loaded && loaded.records.length) {
         /// Order saved tabs by the persisted order, then restore the id/title counters.
@@ -8265,9 +8284,11 @@ async function reconcileStartup() {
                 if (has_url_query && match.query !== url_query) {
                     if (match.lastSavedQuery !== url_query) {
                         /// The URL holds a query this tab was never synced to (a fresh/shared
-                        /// link for an existing tab name): the URL wins, substitute it.
+                        /// link for an existing tab name): the URL wins, substitute it. Its
+                        /// `color_modes` are authoritative for the substituted result too.
                         match.query = url_query;
                         match.result = null;
+                        url_authoritative_colors = true;
                     } else {
                         /// Stale reload: the URL hash is exactly this tab's own last-synced
                         /// query, but the saved tab was edited (and persisted) afterwards
@@ -8287,14 +8308,27 @@ async function reconcileStartup() {
                 /// Unnamed URL with a query: a tab already holds this exact query, switch to it.
                 activeTabId = match.id;
             } else {
-                /// Not found: open a new tab carrying the name (if any) and query.
+                /// Not found: open a new tab carrying the name (if any) and query. A shared/
+                /// bookmarked link's `color_modes` are authoritative for this fresh tab.
                 const t = makeTab(url_tab_name || undefined, url_query);
                 tabs.push(t);
                 activeTabId = t.id;
+                url_authoritative_colors = true;
             }
         }
         await activateTab(activeTabId);
         activated = true;
+        /// `activateTab` → `materializeResult` reset the reconciled tab's `colorModes` from its
+        /// (empty) snapshot, dropping the URL's payload. When the URL is authoritative, re-apply
+        /// `url_color_modes` now — before the deferred auto-run binds them to the result element.
+        /// Rebind the live element's `_colorModes` too, since it aliased the old modes object.
+        if (url_authoritative_colors) {
+            const t = getActiveTab();
+            if (t) {
+                t.colorModes = { ...url_color_modes };
+                if (t.resultEl) t.resultEl._colorModes = t.colorModes;
+            }
+        }
     } else if (url_tab_name) {
         /// No saved tabs but the URL named a tab: adopt the name for the bootstrap tab.
         const t = getActiveTab();
