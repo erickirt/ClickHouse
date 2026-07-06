@@ -27,7 +27,7 @@ try
         ("extract,x", "extract packed archive")
         ("create,c", "create packed archive")
         ("input,i", po::value<String>()->required(), "input file/directory")
-        ("output,o", po::value<String>()->required(), "output file/directory")
+        ("output,o", po::value<String>(), "output file/directory (required for --extract and --create)")
         ("file-order", po::value<String>(), "File order hint for archive creation. The files listed in the hint will be placed in the archive in the order they are listed."
             " The hint is a space-separated list of file names. The files that are not listed in the hint will be placed after the files listed in the hint.")
         ("recursive,r", R"(list/extract/create packed archive recursively.
@@ -51,16 +51,21 @@ Recursive create traverses input directory and subdirectories, collects all file
 
     po::notify(options);
 
+    if (options.count("extract") + options.count("create") + options.count("list") != 1)
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Exactly one of --list, --extract or --create must be specified");
+
     auto input_path = options.at("input").as<String>();
+
     String output_path;
     if (options.contains("extract") || options.contains("create"))
+    {
+        if (!options.contains("output"))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "--extract and --create require an output path (--output/-o)");
         output_path = options.at("output").as<String>();
+    }
 
     bool recursive = options.contains("recursive");
     auto disk = std::make_shared<DiskLocal>("tmp_local_disk", "./");
-
-    if (options.count("extract") + options.count("create") + options.count("list") != 1)
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Cannot have 'list' or 'extract' or 'create' simultaneously");
 
     if (options.contains("list"))
     {
@@ -85,7 +90,7 @@ Recursive create traverses input directory and subdirectories, collects all file
     }
     else if (options.contains("create"))
     {
-        auto file_order_hint_str = options.at("file-order").as<String>();
+        auto file_order_hint_str = options.contains("file-order") ? options.at("file-order").as<String>() : String();
         Strings files_order_hint;
         boost::split(files_order_hint, file_order_hint_str, isWhitespaceASCII);
 
