@@ -1916,6 +1916,17 @@ class QueryResultElement extends HTMLElement
                     background-color: var(--element-background-color);
                 }
 
+                /* A single-value result is expanded to full height before `_changeTableLayout` freezes
+                   the row height, so a tall value freezes its row at full height. When such a cell is
+                   then selected, the `min-height: calc(100% + 2px)` above resolves against that frozen
+                   full height and, because min-height wins over max-height, would defeat the 50vh bound
+                   and keep the cell full-height. Cap the min-height at 50vh so the selected single-value
+                   cell falls back to the same bounded, internally-scrolling behavior as any other cell. */
+                #data-table.single-value .td-selected .cell-content
+                {
+                    min-height: min(calc(100% + 2px), 50vh);
+                }
+
                 td.empty-result
                 {
                     text-align: center;
