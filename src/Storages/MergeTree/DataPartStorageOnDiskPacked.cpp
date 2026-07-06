@@ -647,7 +647,10 @@ void DataPartStorageOnDiskPacked::finalizeWriter()
 
     /// Data is unchanged.
     if (!writer->hasModifiedFiles())
+    {
+        writer.reset();
         return;
+    }
 
     PackedFilesIO::Index old_index;
     bool file_is_rewriten = false;
