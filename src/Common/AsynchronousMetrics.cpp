@@ -1232,21 +1232,43 @@ void AsynchronousMetrics::update(TimePoint update_time, bool force_update)
     ///     `loadChecksums` and from `MergeTreeDataPartBuilder::build`),
     ///   - per-table metadata (allocations from `MergeTreeData::setProperties`,
     ///     `resetSerializationHints`, `updateSerializationHints`).
+    new_values["jemalloc.mergetree_arena.count"] = { JemallocMergeTreeArena::getArenaIndices().size(),
+        "Number of dedicated jemalloc arenas for long-lived MergeTree metadata, controlled by the "
+        "`jemalloc_merge_tree_arenas` server setting. 0 means the dedicated arena pool is disabled and "
+        "metadata is allocated in the default per-CPU arenas; 1 is a single shared arena; N > 1 is a "
+        "pool sharded by CPU. See `jemalloc.mergetree_arena.active_bytes`." };
+
     if (JemallocMergeTreeArena::isEnabled())
     {
-        unsigned mergetree_arena = JemallocMergeTreeArena::getArenaIndex();
-        auto mt_pactive = saveJemallocMetricImpl<size_t>(new_values,
-            fmt::format("stats.arenas.{}.pactive", mergetree_arena),
-            "jemalloc.mergetree_arena.pactive");
-        auto mt_pdirty = saveJemallocMetricImpl<size_t>(new_values,
-            fmt::format("stats.arenas.{}.pdirty", mergetree_arena),
-            "jemalloc.mergetree_arena.pdirty");
+        /// Sum across every arena in the pool.
+        size_t mt_pactive = 0;
+        size_t mt_pdirty = 0;
+        bool read_ok = true;
+        for (unsigned arena : JemallocMergeTreeArena::getArenaIndices())
+        {
+            size_t pactive = 0;
+            size_t pdirty = 0;
+            if (!Jemalloc::tryGetValue(fmt::format("stats.arenas.{}.pactive", arena).c_str(), pactive)
+                || !Jemalloc::tryGetValue(fmt::format("stats.arenas.{}.pdirty", arena).c_str(), pdirty))
+            {
+                read_ok = false;
+                break;
+            }
+            mt_pactive += pactive;
+            mt_pdirty += pdirty;
+        }
 
-        if (mt_pactive && mt_pdirty)
+        new_values["jemalloc.mergetree_arena.pactive"] = { mt_pactive,
+            "Active pages summed across the dedicated jemalloc MergeTree arena pool." };
+        new_values["jemalloc.mergetree_arena.pdirty"] = { mt_pdirty,
+            "Dirty pages summed across the dedicated jemalloc MergeTree arena pool." };
+
+        if (read_ok)
         {
             const size_t page_size = jemalloc_page_size_mib.getValue();
-            new_values["jemalloc.mergetree_arena.active_bytes"] = { *mt_pactive * page_size,
-                "Active bytes in the dedicated jemalloc MergeTree arena. Holds long-lived MergeTree heap "
+            new_values["jemalloc.mergetree_arena.active_bytes"] = { mt_pactive * page_size,
+                "Active bytes summed across the dedicated jemalloc MergeTree arena pool "
+                "(`jemalloc.mergetree_arena.count` arenas). Holds long-lived MergeTree heap "
                 "state: per-part metadata (`NamesAndTypesList`, `SerializationInfoByName`, the "
                 "`serializations` map, `column_name_to_position`, `MergeTreeDataPartChecksums` tree, the "
                 "`Poco::LRUCache<String, ColumnSize>` delegates inside each `IMergeTreeDataPart`, the "
@@ -1260,8 +1282,9 @@ void AsynchronousMetrics::update(TimePoint update_time, bool force_update)
                 "`system.parts.index_granularity_bytes_in_memory[_allocated]` are subsets of this metric "
                 "(when their values are non-zero — they can also live in `PrimaryIndexCacheBytes` instead, "
                 "which is in the cache arena and not counted here)."};
-            new_values["jemalloc.mergetree_arena.dirty_bytes"] = { *mt_pdirty * page_size,
-                "Dirty bytes in the MergeTree arena that are eligible for purging back to the OS."};
+            new_values["jemalloc.mergetree_arena.dirty_bytes"] = { mt_pdirty * page_size,
+                "Dirty bytes summed across the dedicated jemalloc MergeTree arena pool that are eligible "
+                "for purging back to the OS."};
         }
     }
 #endif
