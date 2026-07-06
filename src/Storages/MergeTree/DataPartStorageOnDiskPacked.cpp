@@ -497,7 +497,10 @@ void DataPartStorageOnDiskPacked::commitTransaction()
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot commit shared transaction");
 
     if (!is_precommitted)
+    {
         finalizeWriter();
+        is_precommitted = true;
+    }
 
     transaction->commit();
 
