@@ -548,7 +548,7 @@ void dumpNodes(DB::KeeperStorage & storage, const std::string & output_file, con
             res_columns[i++]->insert(key);
             res_columns[i++]->insert(stats.czxid);
             res_columns[i++]->insert(stats.mzxid);
-            res_columns[i++]->insert(stats.ctime / 1000);
+            res_columns[i++]->insert(stats.getCTime() / 1000);
             res_columns[i++]->insert(stats.mtime / 1000);
             res_columns[i++]->insert(stats.version);
             res_columns[i++]->insert(stats.cversion);

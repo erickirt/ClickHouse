@@ -125,7 +125,7 @@ static int64_t deserializeStorageData(KeeperMemoryStorage & storage, ReadBuffer 
 
         int64_t ctime = 0;
         Coordination::read(ctime, in);
-        node.stats.ctime = ctime;
+        node.stats.setCTime(ctime);
         Coordination::read(node.stats.mtime, in);
         Coordination::read(node.stats.version, in);
         Coordination::read(node.stats.cversion, in);

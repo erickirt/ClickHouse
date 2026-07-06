@@ -1128,7 +1128,7 @@ bool checkNodeStat(const KeeperNodeStats & verifiable, const Coordination::Stat 
         return false;
     else if (validator.mzxid != -1 && validator.mzxid != verifiable.mzxid)
         return false;
-    else if (validator.ctime != -1 && validator.ctime != verifiable.ctime)
+    else if (validator.ctime != -1 && validator.ctime != verifiable.getCTime())
         return false;
     else if (validator.mtime != -1 && validator.mtime != verifiable.mtime)
         return false;

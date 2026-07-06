@@ -119,7 +119,7 @@ namespace
         /// Serialize stat
         writeBinary(stats.czxid, out);
         writeBinary(stats.mzxid, out);
-        writeBinary(stats.ctime, out);
+        writeBinary(stats.getCTime(), out);
         writeBinary(stats.mtime, out);
         writeBinary(stats.version, out);
         writeBinary(stats.cversion, out);
@@ -1285,9 +1285,14 @@ void KeeperSnapshotReader::Stream::readNodeDataAndStats(std::string_view path, c
     }
 
     /// Deserialize stat
+    /// (Reset flags and children count first, in case the caller reuses `out_stats` across nodes.)
+    out_stats.ctime_and_flags = 0;
+    out_stats.num_children = 0;
     readBinary(out_stats.czxid, *in);
     readBinary(out_stats.mzxid, *in);
-    readBinary(out_stats.ctime, *in);
+    int64_t ctime = 0;
+    readBinary(ctime, *in);
+    out_stats.setCTime(ctime);
     readBinary(out_stats.mtime, *in);
     readBinary(out_stats.version, *in);
     readBinary(out_stats.cversion, *in);
