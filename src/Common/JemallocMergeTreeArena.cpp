@@ -92,8 +92,8 @@ unsigned getArenaIndex()
     if (n == 1)
         return arena_indices[0];
 
-    int32_t cpu = PerCPU::getCurrentCPU();
-    size_t slot = cpu < 0 ? 0 : static_cast<uint32_t>(cpu) % n;
+    Int32 cpu = PerCPU::getCurrentCPU();
+    size_t slot = cpu < 0 ? 0 : static_cast<UInt32>(cpu) % n;
     return arena_indices[slot];
 }
 

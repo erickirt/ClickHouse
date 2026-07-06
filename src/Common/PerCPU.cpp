@@ -11,18 +11,18 @@
 namespace PerCPU
 {
 
-uint32_t getNumCPUs() noexcept
+UInt32 getNumCPUs() noexcept
 {
-    static const uint32_t cached = []
+    static const UInt32 cached = []
     {
 #if defined(OS_LINUX)
-        const long n = get_nprocs_conf();
+        const Int64 n = get_nprocs_conf();
 #else
-        const long n = ::sysconf(_SC_NPROCESSORS_ONLN);
+        const Int64 n = ::sysconf(_SC_NPROCESSORS_ONLN);
 #endif
         if (n <= 0)
-            return uint32_t{1};
-        return std::min(static_cast<uint32_t>(n), MAX_CPUS);
+            return UInt32{1};
+        return std::min(static_cast<UInt32>(n), MAX_CPUS);
     }();
     return cached;
 }
