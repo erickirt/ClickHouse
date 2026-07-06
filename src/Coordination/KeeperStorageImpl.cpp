@@ -823,7 +823,7 @@ static Coordination::Error preprocess(
     int64_t time,
     const KeeperContext & /*keeper_context*/)
 {
-    if (zk_request.path == "/" || Coordination::matchPath(zk_request.path, keeper_system_path) != Coordination::PathMatchResult::NOT_MATCH)
+    if (Coordination::matchPath(zk_request.path, keeper_system_path) != Coordination::PathMatchResult::NOT_MATCH)
     {
         LOG_ERROR(getLogger("KeeperStorage"), "Trying to update an internal Keeper path ({}) which is not allowed", zk_request.path);
         return Coordination::Error::ZBADARGUMENTS;
@@ -848,12 +848,15 @@ static Coordination::Error preprocess(
     new_stats.data_size = static_cast<uint32_t>(zk_request.data.size());
     storage.nodes.prepareUpdateNodeDataAndStat(zk_request.path, std::move(node_ref), new_stats, zk_request.data, storage.staging);
 
-    auto parent_path = Coordination::parentNodePath(zk_request.path);
-    auto parent_node_ref = storage.nodes.getUncommittedNode(parent_path);
-    const auto * parent_node = parent_node_ref.get();
-    KeeperNodeStats new_parent_stats = parent_node->stats;
-    ++new_parent_stats.cversion;
-    storage.nodes.prepareUpdateNodeStat(parent_path, std::move(parent_node_ref), new_parent_stats, storage.staging);
+    if (zk_request.path != "/")
+    {
+        auto parent_path = Coordination::parentNodePath(zk_request.path);
+        auto parent_node_ref = storage.nodes.getUncommittedNode(parent_path);
+        const auto * parent_node = parent_node_ref.get();
+        KeeperNodeStats new_parent_stats = parent_node->stats;
+        ++new_parent_stats.cversion;
+        storage.nodes.prepareUpdateNodeStat(parent_path, std::move(parent_node_ref), new_parent_stats, storage.staging);
+    }
 
     return Coordination::Error::ZOK;
 }
