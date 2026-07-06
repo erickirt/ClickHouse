@@ -276,6 +276,15 @@ DataTypePtr IDataType::getSubcolumnType(std::string_view subcolumn_name) const
 
 ColumnPtr IDataType::tryGetSubcolumn(std::string_view subcolumn_name, const ColumnPtr & column) const
 {
+    /// A subcolumn of a constant column is itself constant. The serialization code that extracts
+    /// subcolumns operates on the concrete column (e.g. SerializationNullable expects ColumnNullable),
+    /// so unwrap the constant, extract from the size-1 inner column and re-wrap into ColumnConst.
+    if (const auto * column_const = checkAndGetColumn<ColumnConst>(column.get()))
+    {
+        auto subcolumn = tryGetSubcolumn(subcolumn_name, column_const->getDataColumnPtr());
+        return subcolumn ? ColumnConst::create(subcolumn, column->size()) : nullptr;
+    }
+
     auto data = SubstreamData(getSerialization(*getSerializationInfo(*column))).withType(getPtr()).withColumn(column);
     auto subcolumn_data = getSubcolumnData(subcolumn_name, data, {}, false);
     return subcolumn_data ? subcolumn_data->column : nullptr;
@@ -283,6 +292,9 @@ ColumnPtr IDataType::tryGetSubcolumn(std::string_view subcolumn_name, const Colu
 
 ColumnPtr IDataType::getSubcolumn(std::string_view subcolumn_name, const ColumnPtr & column) const
 {
+    if (const auto * column_const = checkAndGetColumn<ColumnConst>(column.get()))
+        return ColumnConst::create(getSubcolumn(subcolumn_name, column_const->getDataColumnPtr()), column->size());
+
     auto data = SubstreamData(getSerialization(*getSerializationInfo(*column))).withType(getPtr()).withColumn(column);
     return getSubcolumnData(subcolumn_name, data, {}, true)->column;
 }

@@ -193,6 +193,27 @@ def test_evolved_schema_simple(
         ],
     )
 
+    # Regression for https://github.com/ClickHouse/ClickHouse/issues/104856:
+    # `e` was added after the data files were written, so old rows have no physical
+    # `e` column and it is synthesized as a constant NULL. With
+    # optimize_functions_to_subcolumns=1 (default) `e IS NULL` reads the `e.null`
+    # subcolumn, which used to fail on the constant column with
+    # NOT_FOUND_COLUMN_IN_BLOCK (or "Bad cast ColumnConst to ColumnNullable").
+    assert (
+        instance.query(
+            f"SELECT count() FROM {table_select_expression} WHERE e IS NULL",
+            settings={"optimize_functions_to_subcolumns": "1"},
+        ).strip()
+        == "2"
+    )
+    assert (
+        instance.query(
+            f"SELECT count() FROM {table_select_expression} WHERE e IS NOT NULL",
+            settings={"optimize_functions_to_subcolumns": "1"},
+        ).strip()
+        == "0"
+    )
+
     execute_spark_query(
         f"""
             ALTER TABLE {TABLE_NAME} ALTER COLUMN c TYPE decimal(12, 2);
