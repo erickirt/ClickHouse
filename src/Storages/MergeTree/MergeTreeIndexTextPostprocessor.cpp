@@ -115,13 +115,13 @@ std::optional<MergeTreeIndexTextInlineFilter> tryExtractInlineFilter(const ASTPt
     const auto & condition = function->arguments->children[0];
     const auto & then_branch = function->arguments->children[1];
     const auto & else_branch = function->arguments->children[2];
-    bool drop_on_condition;
+    bool drop_on_condition = false;
     if (isEmptyStringLiteral(then_branch) && isTokenIdentifier(else_branch, token_name)) drop_on_condition = true;
     else if (isTokenIdentifier(then_branch, token_name) && isEmptyStringLiteral(else_branch)) drop_on_condition = false;
     else return {};
     const auto * in_function = condition->as<ASTFunction>();
     if (!in_function || !in_function->arguments || in_function->arguments->children.size() != 2) return {};
-    bool is_not_in;
+    bool is_not_in = false;
     if (in_function->name == "in" || in_function->name == "globalIn") is_not_in = false;
     else if (in_function->name == "notIn" || in_function->name == "globalNotIn") is_not_in = true;
     else return {};
