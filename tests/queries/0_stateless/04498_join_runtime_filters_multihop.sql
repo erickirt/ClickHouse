@@ -74,6 +74,14 @@ WHERE current_database = currentDatabase() AND log_comment = '04498_mh_3hop' AND
 ORDER BY event_time DESC
 LIMIT 1;
 
+-- Correctness: the transferred filter must never change results. Verify feature off == on.
+SELECT
+    (SELECT sum(f.v) FROM mh_fact AS f INNER JOIN mh_d1 ON f.dk = mh_d1.dk INNER JOIN mh_d2 ON mh_d1.k1 = mh_d2.k1 WHERE mh_d2.k2 < 64 SETTINGS enable_join_runtime_filters_index_analysis = 0) =
+    (SELECT sum(f.v) FROM mh_fact AS f INNER JOIN mh_d1 ON f.dk = mh_d1.dk INNER JOIN mh_d2 ON mh_d1.k1 = mh_d2.k1 WHERE mh_d2.k2 < 64 SETTINGS enable_join_runtime_filters_index_analysis = 1);
+SELECT
+    (SELECT sum(f.v) FROM mh_fact AS f INNER JOIN mh_d1 ON f.dk = mh_d1.dk INNER JOIN mh_d2 ON mh_d1.k1 = mh_d2.k1 INNER JOIN mh_d3 ON mh_d2.k2 = mh_d3.k2 WHERE mh_d3.tag = 'hot' SETTINGS enable_join_runtime_filters_index_analysis = 0) =
+    (SELECT sum(f.v) FROM mh_fact AS f INNER JOIN mh_d1 ON f.dk = mh_d1.dk INNER JOIN mh_d2 ON mh_d1.k1 = mh_d2.k1 INNER JOIN mh_d3 ON mh_d2.k2 = mh_d3.k2 WHERE mh_d3.tag = 'hot' SETTINGS enable_join_runtime_filters_index_analysis = 1);
+
 DROP TABLE mh_fact;
 DROP TABLE mh_d1;
 DROP TABLE mh_d2;

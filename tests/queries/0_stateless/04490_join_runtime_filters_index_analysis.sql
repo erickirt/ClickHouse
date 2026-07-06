@@ -282,6 +282,18 @@ WHERE current_database = currentDatabase() AND log_comment = '04490_pe_fht' AND 
 ORDER BY event_time DESC
 LIMIT 1;
 
+-- Correctness: pruning must never change results. For each risky surface, verify feature off == on
+-- (a too-aggressive predicate that dropped matching granules would make these differ).
+SELECT
+    (SELECT sum(f.v) FROM pe_fact2 AS f INNER JOIN pe_dim2 AS d ON f.k = d.k WHERE d.tag = 'hot' SETTINGS enable_join_runtime_filters_index_analysis = 0) =
+    (SELECT sum(f.v) FROM pe_fact2 AS f INNER JOIN pe_dim2 AS d ON f.k = d.k WHERE d.tag = 'hot' SETTINGS enable_join_runtime_filters_index_analysis = 1);
+SELECT
+    (SELECT sum(f.v) FROM bf_fact AS f INNER JOIN bf_dim AS d ON f.k = d.k WHERE d.tag = 'hot' SETTINGS enable_join_runtime_filters_index_analysis = 0) =
+    (SELECT sum(f.v) FROM bf_fact AS f INNER JOIN bf_dim AS d ON f.k = d.k WHERE d.tag = 'hot' SETTINGS enable_join_runtime_filters_index_analysis = 1);
+SELECT
+    (SELECT sum(f.v) FROM jrf_fact AS f INNER JOIN jrf_dim AS d ON f.k = d.k SETTINGS join_algorithm = 'hash', max_bytes_before_external_join = 0, max_bytes_ratio_before_external_join = 0, enable_join_fixed_hash_table_conversion = 1, join_runtime_filter_from_fixed_hash_table = 1, enable_join_runtime_filters_index_analysis = 0) =
+    (SELECT sum(f.v) FROM jrf_fact AS f INNER JOIN jrf_dim AS d ON f.k = d.k SETTINGS join_algorithm = 'hash', max_bytes_before_external_join = 0, max_bytes_ratio_before_external_join = 0, enable_join_fixed_hash_table_conversion = 1, join_runtime_filter_from_fixed_hash_table = 1, enable_join_runtime_filters_index_analysis = 1);
+
 DROP TABLE sales1;
 DROP TABLE sales2;
 DROP TABLE pe_fact;
