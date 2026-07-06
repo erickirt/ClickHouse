@@ -2716,6 +2716,15 @@ class QueryResultElement extends HTMLElement
         this._dataTable.classList.toggle('has-hscroll', overflows);
     }
 
+    /// Whether any column of this table is currently pinned. On resize this decides whether the
+    /// full pinned layout must be recomputed - the sticky `left`/`right` offsets are baked from
+    /// the header widths, which are viewport-dependent - or the cheaper availability refresh is
+    /// enough (nothing pinned means no offsets to update).
+    _hasPinnedColumns()
+    {
+        return Array.isArray(this._header) && this._header.some(col => pinned_columns[col.name]);
+    }
+
     /// Add the icon at the right of a column header that cycles the column's color coding mode.
     _appendColorizeToggle(th, name)
     {
@@ -4600,10 +4609,17 @@ function updateServerInfoVisibility() {
 window.addEventListener('resize', updateServerInfoVisibility);
 
 /// A viewport resize can make a table start or stop overflowing horizontally, which changes
-/// whether the pin option should be offered, so refresh it for every result table.
+/// whether the pin option should be offered; it also changes the header widths that the pinned
+/// columns' sticky `left`/`right` offsets are baked from. So for a table with pinned columns
+/// recompute the whole layout (`applyPinnedColumns` refreshes `has-hscroll` itself), and for the
+/// rest just refresh the pin availability.
 window.addEventListener('resize', () => {
     for (const el of document.querySelectorAll('query-result')) {
-        el._updatePinAvailability();
+        if (el._hasPinnedColumns()) {
+            el.applyPinnedColumns();
+        } else {
+            el._updatePinAvailability();
+        }
     }
 });
 
