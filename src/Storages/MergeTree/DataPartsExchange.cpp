@@ -940,6 +940,17 @@ MergeTreeData::MutableDataPartPtr Fetcher::downloadPartToDisk(
             }
             new_data_part->checksums.checkEqual(data_checksums, false, new_data_part->name);
         }
+        else
+        {
+            /// A packed part is transferred as a single data.packed archive, so the per-file wire
+            /// hashes above only prove the archive arrived intact, not that its logical contents match
+            /// the checksums it advertises (data_checksums is keyed by data.packed, not by the logical
+            /// files in part->checksums, which is why the checkEqual above is limited to full storage).
+            /// Recompute the checksums from the archive and compare them, so a corrupted packed part is
+            /// rejected on fetch instead of being accepted and propagated to this replica.
+            bool is_broken_projection = false;
+            checkDataPart(new_data_part, /*require_checksums=*/ true, is_broken_projection);
+        }
         LOG_DEBUG(log, "Download of part {} onto disk {} finished.", part_name, disk->getName());
     }
 
