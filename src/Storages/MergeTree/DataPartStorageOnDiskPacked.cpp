@@ -394,8 +394,25 @@ std::unique_ptr<WriteBufferFromFileBase> DataPartStorageOnDiskPacked::writeFile(
     throw Exception(ErrorCodes::NOT_INITIALIZED, "Cannot write file {} because writer is not initialized", name);
 }
 
-void DataPartStorageOnDiskPacked::createFile(const String &)
+void DataPartStorageOnDiskPacked::createFile(const String & name)
 {
+    if (isWrittenSeparately(name))
+    {
+        /// Separately written files (e.g. txn_version.txt.tmp) live on disk next to data.packed, so
+        /// delegate to the disk. This preserves the O_EXCL guard callers rely on: createFile throws
+        /// if the file already exists (see VersionMetadataOnDisk::storeInfoToDataPartStorage).
+        auto file_path = fs::path(root_path) / part_dir / name;
+        if (transaction)
+            transaction->createFile(file_path);
+        else
+            volume->getDisk()->createFile(file_path);
+        return;
+    }
+
+    /// Files that belong inside data.packed are produced by the writer and have no empty-file
+    /// placeholder to create; the only createFile caller always targets a separately written file.
+    throw Exception(ErrorCodes::NOT_IMPLEMENTED,
+        "DataPartStorageOnDiskPacked cannot create file {} inside the packed archive", name);
 }
 
 void DataPartStorageOnDiskPacked::moveFile(const String & from_name, const String & to_name)
