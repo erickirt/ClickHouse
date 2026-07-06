@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Tags: zookeeper, no-object-storage, no-encrypted-storage, no-shared-merge-tree, no-replicated-database, no-fasttest
-# zookeeper / no-fasttest: transactions store version metadata via the transaction log in ZooKeeper.
+# Tags: zookeeper, no-object-storage, no-encrypted-storage, no-shared-merge-tree, no-replicated-database
+# zookeeper: transactions store version metadata via the transaction log in ZooKeeper.
 # no-object-storage / no-encrypted-storage: the test writes a raw `txn_version.txt.tmp` next to
 #   `data.packed` on the local filesystem; on object storage or encrypted disks files carry extra
 #   metadata, so a raw write does not reproduce the on-disk state under test.
