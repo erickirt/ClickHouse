@@ -2087,17 +2087,6 @@ class QueryResultElement extends HTMLElement
                     background-color: var(--element-background-color);
                 }
 
-                /* A single-value result is expanded to full height before `_changeTableLayout` freezes
-                   the row height, so a tall value freezes its row at full height. When such a cell is
-                   then selected, the `min-height: calc(100% + 2px)` above resolves against that frozen
-                   full height and, because min-height wins over max-height, would defeat the 50vh bound
-                   and keep the cell full-height. Cap the min-height at 50vh so the selected single-value
-                   cell falls back to the same bounded, internally-scrolling behavior as any other cell. */
-                #data-table.single-value .td-selected .cell-content
-                {
-                    min-height: min(calc(100% + 2px), 50vh);
-                }
-
                 td.empty-result
                 {
                     text-align: center;
@@ -3085,12 +3074,23 @@ class QueryResultElement extends HTMLElement
         });
 
         /* Freeze row heights so that absolutely-positioned cell content
-           does not cause reflow. Read all heights first, then write,
-           to avoid layout thrashing. */
+           does not cause reflow of the following rows. Read all heights first,
+           then write, to avoid layout thrashing.
+           A single-value result is deliberately shown unclamped at its full height
+           (see `expandSingleValueIfNeeded`) and has a single row with nothing below it
+           to reflow. Freezing that full height would keep the row full-height even after
+           the cell is selected and its content collapses to a bounded 50vh overlay,
+           leaving a large blank row; so skip the freeze for single-value tables and let
+           the row follow its content (it then shrinks to the row-number cell's height
+           when the value cell is selected). */
+        const freeze_row_heights = !table.classList.contains('single-value');
         let rowHeights = [];
-        for (let row of table.rows)
+        if (freeze_row_heights)
         {
-            rowHeights.push(row.offsetHeight);
+            for (let row of table.rows)
+            {
+                rowHeights.push(row.offsetHeight);
+            }
         }
 
         table.classList.add('fixed');
@@ -3100,10 +3100,13 @@ class QueryResultElement extends HTMLElement
             header.style.width = `${columnWidths[index]}px`;
         });
 
-        let i = 0;
-        for (let row of table.rows)
+        if (freeze_row_heights)
         {
-            row.style.height = `${rowHeights[i++]}px`;
+            let i = 0;
+            for (let row of table.rows)
+            {
+                row.style.height = `${rowHeights[i++]}px`;
+            }
         }
     }
 
