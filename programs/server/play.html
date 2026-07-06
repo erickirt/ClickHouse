@@ -1711,11 +1711,14 @@ class QueryResultElement extends HTMLElement
                    with its full height, so the whole value is visible without selecting the cell.
                    The rule is scoped to unselected cells: once the cell is selected it falls back
                    to the .td-selected behavior below, which keeps it bounded to 50vh and scrolling
-                   internally instead of expanding into an unbounded absolutely-positioned overlay. */
+                   internally instead of expanding into an unbounded absolutely-positioned overlay.
+                   Only the vertical clamp is dropped (max-height: none): the base `overflow: hidden`
+                   is kept so that with `white-space: pre` a long single line (e.g. `SELECT repeat('x', 100000)`)
+                   is still clipped horizontally at the `40vw` cell cap instead of painting across the page.
+                   With no max-height the box grows to the full content height, so nothing is clipped vertically. */
                 #data-table.single-value td:not(.td-selected) .cell-content
                 {
                     max-height: none;
-                    overflow: visible;
                 }
 
                 td u
