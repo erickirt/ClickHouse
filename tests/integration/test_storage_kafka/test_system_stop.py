@@ -114,15 +114,21 @@ def assert_dst_count_stable(table, expected, seconds=5):
         time.sleep(1)
 
 
-def wait_for_inflight_block(table, n):
-    """Wait until >= `n` rows are polled into an in-flight block but not yet committed, so a following
-    SYSTEM PAUSE/STOP lands mid-block. `num_messages_read` counts rows during assembly, before commit."""
-    instance.query_with_retry(
-        f"SELECT sum(num_messages_read) FROM system.kafka_consumers "
-        f"WHERE database = 'test' AND table = '{table}'",
-        check_callback=lambda res: int(res) >= n,
-        retry_count=120,
-        sleep_time=0.25,
+def count_streaming_starts(table):
+    filename = "/var/log/clickhouse-server/clickhouse-server.log"
+    result = instance.exec_in_container(
+        ["bash", "-c", f"tail -n10000 {filename} | grep -Ec 'test.{table}.*Started streaming to 1 attached views' || true"]
+    )
+    return int(result.strip() or 0)
+
+
+def start_and_wait_for_streaming(table, query=None):
+    """SYSTEM START, then block until a *fresh* consuming cycle has begun (a new "Started streaming" past
+    the current count) - so the verb lands on a claimed cycle, skipping any leftover pre-STOP one."""
+    seen = count_streaming_starts(table)
+    instance.query(query or f"SYSTEM START test.{table}")
+    instance.wait_for_log_line(
+        f"test.{table}.*Started streaming to 1 attached views", repetitions=seen + 1
     )
 
 
@@ -289,14 +295,11 @@ def test_stop_aborts_inflight_block_pause_commits_it(kafka_cluster):
                 """
             )
 
-            # Pre-load the topic while halted, then resume so a fresh cycle opens a block over the 5
-            # rows and holds it for ~kafka_flush_interval_ms (the block does not commit until then).
+            # Pre-load the topic while halted, then resume and wait for a fresh cycle to start streaming
+            # the 5 rows (held ~kafka_flush_interval_ms before committing), so the verb lands mid-cycle.
             instance.query(f"SYSTEM STOP test.{table}")
             produce(kafka_cluster, table, 0, 5)
-            instance.query(f"SYSTEM START test.{table}")
-
-            # Land the verb mid-block rather than racing the consuming cycle's claim.
-            wait_for_inflight_block(table, 5)
+            start_and_wait_for_streaming(table)
             instance.query(f"SYSTEM {verb} test.{table}")
 
             if verb == "PAUSE":
@@ -339,14 +342,11 @@ def test_kafka2_stop_aborts_inflight_block_pause_commits_it(kafka_cluster):
                 settings={"allow_experimental_kafka_offsets_storage_in_keeper": 1},
             )
 
-            # Pre-load the topic while halted, then resume so a fresh cycle opens a block over the 5
-            # rows and holds it for ~kafka_flush_interval_ms (the offset guard does not commit yet).
+            # Pre-load the topic while halted, then resume and wait for a fresh cycle to start streaming
+            # the 5 rows (held ~kafka_flush_interval_ms before the offset guard commits) so the verb lands mid-cycle.
             instance.query(f"SYSTEM STOP test.{table}")
             produce(kafka_cluster, table, 0, 5)
-            instance.query(f"SYSTEM START test.{table}")
-
-            # Land the verb mid-block rather than racing the consuming cycle's claim.
-            wait_for_inflight_block(table, 5)
+            start_and_wait_for_streaming(table)
             instance.query(f"SYSTEM {verb} test.{table}")
 
             if verb == "PAUSE":
