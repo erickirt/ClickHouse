@@ -14,6 +14,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int DIRECTORY_DOESNT_EXIST;
+    extern const int INCORRECT_DATA;
 }
 
 static std::string_view normalizePath(std::string_view path)
@@ -91,8 +92,17 @@ void extractPacked(const DiskPtr & disk_in, const String & input_file, const Dis
 
     for (const auto & file_name : files)
     {
+        /// File names come from the archive index, so a crafted archive could contain an absolute path
+        /// or `..` components to escape output_dir. Reject those before writing anything to disk_out.
+        const fs::path entry_path(file_name);
+        if (entry_path.is_absolute())
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Packed archive entry has an absolute path: {}", file_name);
+        for (const auto & component : entry_path)
+            if (component == "..")
+                throw Exception(ErrorCodes::INCORRECT_DATA, "Packed archive entry escapes the output directory: {}", file_name);
+
         auto in = reader.readFile(disk_in, input_file, file_name, {}, {});
-        auto out = disk_out->writeFile(output_dir / fs::path(file_name));
+        auto out = disk_out->writeFile(output_dir / entry_path);
         copyData(*in, *out);
         out->finalize();
     }
