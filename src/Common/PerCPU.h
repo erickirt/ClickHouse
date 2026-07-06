@@ -28,20 +28,20 @@ ALWAYS_INLINE inline Int32 getCurrentCPU()
     /// TLS read via glibc rseq on modern kernels (see glibc-compatibility/musl/sched_getcpu.c).
     return sched_getcpu();
 #elif defined(OS_DARWIN) && defined(__aarch64__)
-    /// Apple Silicon: XNU keeps the current CPU number in the low bits of TPIDRRO_EL0, the same
-    /// source libplatform's `_os_cpu_number` reads. A single register read. Only ~3 bits are
-    /// meaningful (up to 8 distinct buckets), which is enough to spread work across shards.
-    UInt64 tpidrro;
-    __asm__ volatile("mrs %0, TPIDRRO_EL0" : "=r"(tpidrro));
-    return static_cast<Int32>(tpidrro & 0x7);
+    /// macOS has no `sched_getcpu`. XNU exposes the current CPU number to userspace in the low 12
+    /// bits of a per-CPU register, extracted exactly as libsyscall's `_os_cpu_number` (up to 4096
+    /// CPUs): https://github.com/apple-oss-distributions/xnu/blob/1031c584a5e37aff177559b9f69dbd3c8c3fd30a/libsyscall/os/tsd.h
+    /// The layout is Apple-internal and documented there as "subject to change"; if it ever does,
+    /// callers still bound the value, so the worst case is degraded sharding, not incorrectness.
+    UInt64 tpidr;
+    __asm__ volatile("mrs %0, TPIDR_EL0" : "=r"(tpidr));
+    return static_cast<Int32>(tpidr & 0xfff);
 #elif defined(OS_DARWIN) && defined(__x86_64__)
-    /// x86 macOS has no `sched_getcpu`. `rdtscp` is cheap and its aux register is CPU-correlated on
-    /// platforms that program `IA32_TSC_AUX`; where it is not, callers just collapse to one shard.
-    /// `cpuid` would give the exact APIC id but is serializing, too costly for hot per-event calls.
-    /// `unsigned int` here matches the `__builtin_ia32_rdtscp` signature.
-    unsigned int aux = 0;
-    __builtin_ia32_rdtscp(&aux);
-    return static_cast<Int32>(aux & 0xfff);
+    /// Same source as above (`_os_cpu_number`): the CPU number is in the low 12 bits of the
+    /// per-CPU IDT base, read cheaply via `sidt`.
+    struct { UInt64 limit_and_base_low; UInt64 base_high; } idtr;
+    __asm__ volatile("sidt %0" : "=m"(idtr));
+    return static_cast<Int32>(idtr.limit_and_base_low & 0xfff);
 #else
     return -1;
 #endif
