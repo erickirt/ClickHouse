@@ -59,8 +59,6 @@
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 #include <Common/FailPoint.h>
-#include <Common/Jemalloc.h>
-#include <Common/JemallocMergeTreeArena.h>
 #include <Common/Logger.h>
 #include <Common/ProfileEvents.h>
 #include <Common/logger_useful.h>
@@ -580,10 +578,11 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare() const
     global_ctx->disk = global_ctx->space_reservation->getDisk();
     auto local_tmp_part_basename = local_tmp_prefix + global_ctx->future_part->name + local_tmp_suffix;
 
-    /// Same rationale as `MergeTreeData::loadDataPart`: the per-part `SingleDiskVolume` and
-    /// the resulting `IMergeTreeDataPart` constructed below live for the merged part's lifetime.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
+    /// The persistent part metadata built here is arena-scoped where it is actually produced:
+    /// inside `MergeTreeDataPartBuilder::build` and `IMergeTreeDataPart::setColumns`. The rest of
+    /// `prepare` (storage snapshot, column extraction, pipeline/transform setup) is merge-lifetime
+    /// scratch, so it is deliberately left in the default per-CPU arenas to avoid funneling that
+    /// churn through the single dedicated arena.
     std::optional<MergeTreeDataPartBuilder> builder;
     if (global_ctx->parent_part)
     {

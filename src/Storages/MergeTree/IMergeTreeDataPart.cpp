@@ -1266,13 +1266,15 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
     /// Motivation: memory for index is shared between queries - not belong to the query itself.
     MemoryTrackerBlockerInThread temporarily_disable_memory_tracker;
 
-    /// Everything loaded here (columns, substreams, checksums, index granularity, primary index,
-    /// per-column sizes, rows count, partition / minmax index, TTL infos, projections, default
-    /// compression codec, source parts set) lives for the whole part lifetime. Route the heap
-    /// allocations into the dedicated parts arena. This block is on the hot server-startup path
-    /// (`MergeTreeData::loadDataPart` → `loadColumnsChecksumsIndexes`), so per-part metadata
-    /// allocated at boot also lands in the arena from the start.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+    /// Long-lived per-part metadata (columns substreams, checksums, index granularity, primary
+    /// index, per-column sizes, partition / minmax index, TTL infos, projections) is routed into
+    /// the dedicated parts arena by the inner block below. Deliberately kept OUT of that arena:
+    ///   - `loadColumns`: its file read and text/JSON parsing are short-lived scratch; the
+    ///     persistent columns/serializations it produces are arena-scoped inside `setColumns`.
+    ///   - `checkConsistency`: pure file-existence/size verification, allocates nothing persistent.
+    ///   - `loadDefaultCompressionCodec` / `loadSourcePartsSet`: tiny tail.
+    /// These paths churn many short-lived allocations; keeping them in the default per-CPU arenas
+    /// avoids serializing that churn on the single arena's locks under many concurrent merges.
 
     try
     {
@@ -1280,36 +1282,41 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             loadUUID();
 
         loadColumns(require_columns_checksums, load_metadata_version);
-        loadColumnsSubstreams();
-        loadChecksums(require_columns_checksums);
-        loadIndexGranularity();
 
-        /// It's important to load index after index granularity.
-        if (!(*storage.getSettings())[MergeTreeSetting::primary_key_lazy_load])
-            index = loadIndex();
-
-        if (!(*storage.getSettings())[MergeTreeSetting::columns_and_secondary_indices_sizes_lazy_calculation])
-            calculateColumnsAndSecondaryIndicesSizesOnDisk();
-
-        loadRowsCount(); /// Must be called after loadIndexGranularity() as it uses the value of `index_granularity`.
-
-        /// For constant granularity parts (non-adaptive marks), the last mark granularity
-        /// is assumed to be a full granule because the mark file does not store per-granule
-        /// row counts, and the final mark is not distinguished from data marks.
-        /// Now that we know the actual rows_count, fix the last mark and detect the final mark.
-        if (auto * constant_granularity = dynamic_cast<MergeTreeIndexGranularityConstant *>(index_granularity.get()))
-            constant_granularity->fixFromRowsCount(rows_count);
-
-        loadExistingRowsCount(); /// Must be called after loadRowsCount() as it uses the value of `rows_count`.
-        loadPartitionAndMinMaxIndex();
         bool has_broken_projections = false;
-
-        if (!parent_part)
         {
-            if (!isStoredOnReadonlyDisk())
-                loadTTLInfos();
+            ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
 
-            loadProjections(require_columns_checksums, check_consistency, has_broken_projections, false /* if_not_loaded */);
+            loadColumnsSubstreams();
+            loadChecksums(require_columns_checksums);
+            loadIndexGranularity();
+
+            /// It's important to load index after index granularity.
+            if (!(*storage.getSettings())[MergeTreeSetting::primary_key_lazy_load])
+                index = loadIndex();
+
+            if (!(*storage.getSettings())[MergeTreeSetting::columns_and_secondary_indices_sizes_lazy_calculation])
+                calculateColumnsAndSecondaryIndicesSizesOnDisk();
+
+            loadRowsCount(); /// Must be called after loadIndexGranularity() as it uses the value of `index_granularity`.
+
+            /// For constant granularity parts (non-adaptive marks), the last mark granularity
+            /// is assumed to be a full granule because the mark file does not store per-granule
+            /// row counts, and the final mark is not distinguished from data marks.
+            /// Now that we know the actual rows_count, fix the last mark and detect the final mark.
+            if (auto * constant_granularity = dynamic_cast<MergeTreeIndexGranularityConstant *>(index_granularity.get()))
+                constant_granularity->fixFromRowsCount(rows_count);
+
+            loadExistingRowsCount(); /// Must be called after loadRowsCount() as it uses the value of `rows_count`.
+            loadPartitionAndMinMaxIndex();
+
+            if (!parent_part)
+            {
+                if (!isStoredOnReadonlyDisk())
+                    loadTTLInfos();
+
+                loadProjections(require_columns_checksums, check_consistency, has_broken_projections, false /* if_not_loaded */);
+            }
         }
 
         if (check_consistency && !has_broken_projections)
