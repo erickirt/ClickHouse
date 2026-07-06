@@ -967,7 +967,7 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freezeRemote(
             else
             {
                 /// Transactions doesn't support copy between different metadata storages, so doing it manually
-                auto write_buf = transaction->writeFile(dest_storage->getRelativeDataPath(), DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
+                auto write_buf = dest_storage->transaction->writeFile(dest_storage->getRelativeDataPath(), DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
                 auto read_buf = src_disk->readFile(getRelativeDataPath(), read_settings);
                 copyData(*read_buf, *write_buf);
                 write_buf->finalize();
