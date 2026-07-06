@@ -5920,7 +5920,7 @@ async function persist() {
 /// entries. Connection settings are global; the active tab name is appended so a
 /// shared URL can be reconciled against saved tabs on load.
 /// `fromRun` marks an entry that a genuine run produced (see `writeHistoryEntry`).
-function buildHistoryParams(params, tabName, fromRun, colorModes) {
+function buildHistoryParams(params, tabName, fromRun, colorModes, pinnedColumns) {
     const out = [];
     const user = user_elem.value;
     const server_address = url_elem.value;
@@ -5946,6 +5946,10 @@ function buildHistoryParams(params, tabName, fromRun, colorModes) {
     /// Carry the result's per-column color coding modes so a shared/reloaded URL restores them.
     if (colorModes && Object.keys(colorModes).length > 0) {
         out.push('color_modes=' + encodeURIComponent(JSON.stringify(colorModes)));
+    }
+    /// Likewise carry the result's pinned columns, so a shared/reloaded URL restores them.
+    if (pinnedColumns && Object.keys(pinnedColumns).length > 0) {
+        out.push('pinned_columns=' + encodeURIComponent(JSON.stringify(pinnedColumns)));
     }
     if (tabName) out.push('tab=' + encodeURIComponent(tabName));
     return out;
@@ -5974,7 +5978,7 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         tabName: tab.title,
     };
     const title = "ClickHouse Query: " + (titleForDoc || tab.query);
-    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, tab.result && tab.result.color_modes);
+    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, tab.result && tab.result.color_modes, tab.result && tab.result.pinned_columns);
     let history_url = window.location.pathname;
     if (history_params.length > 0) history_url += '?' + history_params.join('&');
     history_url += '#' + toBase64(tab.query);
@@ -6150,6 +6154,7 @@ window.onpopstate = function(event) {
             data: flat.data ?? null,
             multi: flat.multi ?? null,
             color_modes: flat.color_modes || {},
+            pinned_columns: flat.pinned_columns || {},
             elapsed_ns: flat.elapsed_ns,
         };
     } else {
