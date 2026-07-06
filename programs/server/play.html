@@ -4432,6 +4432,50 @@ function parseExceptionMarker(text)
     return null;
 }
 
+/// Detect a format-level exception that a JSON output format wrote in-band after the response body
+/// had already started (`http_write_exception_in_output_format`, on by default), so the raw branch
+/// can flag the query as failed instead of finishing green. Non-JSON formats (`TSV`, `CSV`,
+/// `Pretty`, ...) do not write exceptions in-band — they signal a mid-stream failure with the
+/// transport-level `__exception__` marker instead — so they are not probed here. Returns the error
+/// message, or null if the output carries no in-band exception.
+function parseInbandException(text, format)
+{
+    if (!format.startsWith('JSON')) return null;
+
+    /// `*WithProgress` formats wrap every row (`{"row":...}`, `{"progress":...}`, ...), so a
+    /// standalone top-level `{"exception":...}` line — always the terminal content line — is
+    /// unambiguously the failure. Bare each-row formats emit unwrapped rows whose shape could
+    /// coincide with that, so they are not probed, to never mistake a successful row for a failure.
+    if (format.includes('WithProgress'))
+    {
+        const trimmed = text.replace(/\s+$/, '');
+        const last_line = trimmed.slice(trimmed.lastIndexOf('\n') + 1);
+        if (last_line.startsWith('{"exception"'))
+        {
+            try {
+                const data = JSON.parse(last_line);
+                if (typeof data.exception === 'string') return data.exception;
+            } catch (e) { /* not a standalone exception line */ }
+        }
+    }
+
+    /// Single-object formats (`JSON`, `JSONCompact`, ...) carry the failure as a top-level
+    /// `exception` field alongside the usual `meta`/`data`; requiring one of those structural keys
+    /// keeps a bare each-row object that merely has an `exception` field from being misread, and the
+    /// cheap substring guard avoids parsing a large successful document that has no exception at all.
+    if (text.includes('"exception"'))
+    {
+        try {
+            const data = JSON.parse(text);
+            if (data && typeof data.exception === 'string'
+                && ('meta' in data || 'data' in data || 'rows' in data))
+                return data.exception;
+        } catch (e) { /* not a single JSON document */ }
+    }
+
+    return null;
+}
+
 let controller = null;
 /// Execute a single query, rendering results into the given targetResultEl.
 /// Returns { format, reply, response_ok, is_table, is_raw, is_chart, is_image, is_error }.
@@ -4616,16 +4660,71 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
+            /// A query can fail after its HTTP response body has already started streaming (the status
+            /// is already committed to 200). This branch renders an explicitly-requested streamed
+            /// format (e.g. `FORMAT JSONEachRowWithProgress`, `TSV`, ...) verbatim, so — like the table
+            /// branch above — it must recognize the same two mid-stream failure signals, otherwise a
+            /// failed query would finish in the success state:
+            ///   1. the format-agnostic transport-level `__exception__` marker (see `EXCEPTION_MARKER`),
+            ///      used by formats that do not write exceptions in-band (`TSV`, `CSV`, `Pretty`, ...);
+            ///   2. the in-band `{"exception":...}` a JSON output format writes when
+            ///      `http_write_exception_in_output_format` is set (the default) — see `parseInbandException`.
+            /// The raw output that arrived before the failure is still shown; the error is rendered beneath.
             let buffer = '';
+            let marker_seen = false;      /// once the `__exception__` block starts, stop echoing raw output
+            let stream_exception = null;
             while (true) {
-                const { done, value } = await reader.read();
+                let done, value;
+                try {
+                    ({ done, value } = await reader.read());
+                } catch (e) {
+                    /// After the `__exception__` block the server intentionally breaks the HTTP framing,
+                    /// so the reader may reject with a `TypeError`; that is expected once the marker was
+                    /// seen (the block is parsed below). Otherwise it is a genuine transport failure.
+                    if (marker_seen && e instanceof TypeError) break;
+                    throw e;
+                }
                 if (done) break;
 
                 let new_content = decoder.decode(value, { stream: true });
                 reply += new_content;
 
                 if (posted_request_num != request_num) { return { cancelled: true }; }
-                targetResultEl.updateRaw(new_content);
+
+                /// Once the marker block started, the rest of the stream is that block, not output:
+                /// keep accumulating `reply` for `parseExceptionMarker` but stop echoing it.
+                if (marker_seen) continue;
+
+                /// The marker occupies whole lines, so echo only complete lines and hold the last
+                /// (possibly partial) line in `buffer` — this matches the marker robustly across
+                /// chunk-boundary splits and never echoes the marker block itself into the raw view.
+                buffer += new_content;
+                let lines = buffer.split('\n');
+                let output = '';
+                for (let idx = 0; idx < lines.length; ++idx) {
+                    if (lines[idx].replace(/\r$/, '') === EXCEPTION_MARKER) { marker_seen = true; break; }
+                    /// The last line may be a partial row or a partial marker; keep it in `buffer`.
+                    if (idx == lines.length - 1) break;
+                    output += lines[idx] + '\n';
+                }
+                if (output) targetResultEl.updateRaw(output);
+                buffer = marker_seen ? '' : lines[lines.length - 1];
+            }
+
+            /// Flush the final line (a stream need not end with a newline) unless it is the marker block.
+            if (!marker_seen && buffer.length) targetResultEl.updateRaw(buffer);
+
+            if (marker_seen) {
+                stream_exception = parseExceptionMarker(reply)
+                    ?? "The query failed after the response body had already started, but the error message could not be parsed.";
+            } else {
+                /// No transport marker: a JSON output format may still have reported the failure in-band.
+                stream_exception = parseInbandException(reply, format);
+            }
+
+            if (stream_exception !== null) {
+                targetResultEl.renderError(stream_exception);
+                return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
             }
         }
 
@@ -4935,10 +5034,11 @@ async function renderSnapshotIntoElement(el, snap, token) {
         }
         if (!has_exception) {
             /// A mid-stream failure is saved as the raw reply, which ends with a low-level
-            /// `__exception__` marker block rather than a `{"exception":...}` line. Recover the
-            /// message so the restored result shows the real error, not the raw framing bytes.
-            const marker_message = parseExceptionMarker(snap.data);
-            el.renderError(marker_message ?? snap.data);
+            /// `__exception__` marker block rather than a `{"exception":...}` line, or (for a
+            /// single-object JSON format) carries the failure as an in-band `exception` field.
+            /// Recover the message so the restored result shows the real error, not the raw bytes.
+            const message = parseExceptionMarker(snap.data) ?? parseInbandException(snap.data, format);
+            el.renderError(message ?? snap.data);
         }
         return;
     }
@@ -5165,10 +5265,11 @@ async function restoreFromHistory(state, token) {
         }
         if (!has_exception) {
             /// A mid-stream failure is saved as the raw reply, which ends with a low-level
-            /// `__exception__` marker block rather than a `{"exception":...}` line. Recover the
-            /// message so the restored result shows the real error, not the raw framing bytes.
-            const marker_message = parseExceptionMarker(result.data);
-            resultEl.renderError(marker_message ?? result.data);
+            /// `__exception__` marker block rather than a `{"exception":...}` line, or (for a
+            /// single-object JSON format) carries the failure as an in-band `exception` field.
+            /// Recover the message so the restored result shows the real error, not the raw bytes.
+            const message = parseExceptionMarker(result.data) ?? parseInbandException(result.data, format);
+            resultEl.renderError(message ?? result.data);
         }
 
         progressEl.clear();
