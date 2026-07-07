@@ -293,6 +293,17 @@ SerializationPtr IDataType::getSubcolumnSerialization(std::string_view subcolumn
     return getSubcolumnData(subcolumn_name, data, {}, true)->serialization;
 }
 
+ColumnPtr tryGetSubcolumnUnwrappingConst(const IDataType & type, std::string_view subcolumn_name, const ColumnPtr & column)
+{
+    if (const auto * column_const = checkAndGetColumn<ColumnConst>(column.get()))
+    {
+        auto subcolumn = tryGetSubcolumnUnwrappingConst(type, subcolumn_name, column_const->getDataColumnPtr());
+        return subcolumn ? ColumnConst::create(subcolumn, column->size()) : nullptr;
+    }
+
+    return type.tryGetSubcolumn(subcolumn_name, column);
+}
+
 Names IDataType::getSubcolumnNames() const
 {
     Names res;

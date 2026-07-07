@@ -366,7 +366,7 @@ std::optional<ColumnWithTypeAndName> Block::findSubcolumnByName(const std::strin
             continue;
 
         auto subcolumn_type = column->type->tryGetSubcolumnType(subcolumn_name);
-        auto subcolumn = column->type->tryGetSubcolumn(subcolumn_name, column->column);
+        auto subcolumn = tryGetSubcolumnUnwrappingConst(*column->type, subcolumn_name, column->column);
         if (subcolumn_type && subcolumn)
             return ColumnWithTypeAndName(subcolumn, subcolumn_type, name);
     }

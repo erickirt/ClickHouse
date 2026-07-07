@@ -366,6 +366,13 @@ protected:
         bool throw_if_null) const;
 };
 
+/// Extract a subcolumn, transparently handling a constant column. ColumnConst is a wrapper (like
+/// ColumnSparse or ColumnReplicated), so unwrap it, extract the subcolumn from the inner column and
+/// re-wrap the result into a ColumnConst of the same size. Callers that may hold a wrapped column
+/// (e.g. a missing schema-evolved column materialized as a ColumnConst) should use this instead of
+/// IDataType::tryGetSubcolumn, which operates on the concrete underlying column.
+ColumnPtr tryGetSubcolumnUnwrappingConst(const IDataType & type, std::string_view subcolumn_name, const ColumnPtr & column);
+
 
 /// Some sugar to check data type of IDataType
 struct WhichDataType
