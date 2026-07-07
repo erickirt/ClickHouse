@@ -4491,6 +4491,13 @@ const SINGLE_DOCUMENT_JSON_FORMATS = new Set([
 /// the transport-level `__exception__` marker instead.
 function parseInbandException(text, format)
 {
+    /// The format may be missing: an error snapshot saved when `fetch` failed before the response
+    /// headers arrived (`Network error`, an early `AbortError`, the direct-browser
+    /// `ERR_INCOMPLETE_CHUNKED_ENCODING`) carries no `X-ClickHouse-Format`, so the restore paths
+    /// call this with `format === undefined`. Bail out before touching string methods on it —
+    /// otherwise the restore would throw a `TypeError` instead of showing the saved error text.
+    if (typeof format !== 'string') return null;
+
     if (format == 'XML')
     {
         /// `XMLRowOutputFormat` writes the in-band failure as a top-level `<exception>` element, indented
