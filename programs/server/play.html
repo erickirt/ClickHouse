@@ -4432,20 +4432,54 @@ function parseExceptionMarker(text)
     return null;
 }
 
-/// Detect a format-level exception that a JSON output format wrote in-band after the response body
-/// had already started (`http_write_exception_in_output_format`, on by default), so the raw branch
-/// can flag the query as failed instead of finishing green. Non-JSON formats (`TSV`, `CSV`,
-/// `Pretty`, ...) do not write exceptions in-band — they signal a mid-stream failure with the
-/// transport-level `__exception__` marker instead — so they are not probed here. Returns the error
-/// message, or null if the output carries no in-band exception.
+/// Reverse the escaping `writeXMLStringForTextElement` applies to an `XML`-format text node: it only
+/// ever produces `&lt;` (for `<`) and `&amp;` (for `&`). Unescape `&amp;` last so a literal `&lt;`
+/// in the message (written as `&amp;lt;`) is not turned into `<`.
+function unescapeXMLText(s)
+{
+    return s.replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+}
+
+/// Formats whose entire response body is a single JSON document, so an in-band failure surfaces as a
+/// top-level `"exception"` string (or, for `GeoJSON`, a trailing `{"exception":...}` element of the
+/// `features` array) that can be read out unambiguously — a successful document of these formats
+/// never carries one. Each-row formats are intentionally absent (see `parseInbandException`).
+const SINGLE_DOCUMENT_JSON_FORMATS = new Set([
+    'JSON', 'JSONStrings', 'JSONCompact', 'JSONCompactStrings',
+    'JSONColumns', 'JSONColumnsWithMetadata', 'JSONObjectEachRow', 'GeoJSON']);
+
+/// Detect a format-level exception that an output format wrote in-band after the response body had
+/// already started (`http_write_exception_in_output_format`, on by default), so the raw branch can
+/// flag the query as failed instead of finishing green. Returns the error message, or null.
+///
+/// ClickHouse writes this exception differently per format, and only some encodings can be told apart
+/// from successful output. This probes exactly the unambiguous ones:
+///   - single-document JSON (`JSON`, `JSONCompact`, `JSONColumns`, `JSONObjectEachRow`, `GeoJSON`, ...):
+///     a top-level `"exception"` string, or a trailing `{"exception":...}` feature for `GeoJSON`;
+///   - `*WithProgress` row streams: a terminal top-level `{"exception":...}` line (every row is
+///     wrapped as `{"row":...}` / `{"progress":...}`, so a bare `{"exception":...}` line is the failure);
+///   - `XML`: an `<exception>` element (field values are XML-escaped, so a raw tag means an error).
+///
+/// It deliberately does NOT probe the bare each-row formats: `JSONEachRow` / `JSONStringsEachRow` /
+/// `JSONLines` write the failure as a `{"exception":...}` object line — identical to a successful row
+/// that happens to have an `exception` column — and `JSONCompactEachRow` / `JSONCompactStringsEachRow`
+/// write it as `["..."]`, identical to a single-column row. Their in-band failure line is byte-for-byte
+/// a valid row, so flagging it could mark a successful query as failed. Non-JSON row formats (`TSV`,
+/// `CSV`, `Pretty`, ...) do not write exceptions in-band at all — they signal a mid-stream failure with
+/// the transport-level `__exception__` marker instead.
 function parseInbandException(text, format)
 {
-    if (!format.startsWith('JSON')) return null;
+    if (format == 'XML')
+    {
+        const m = text.match(/<exception>([\s\S]*?)<\/exception>/);
+        return m ? unescapeXMLText(m[1]) : null;
+    }
 
-    /// `*WithProgress` formats wrap every row (`{"row":...}`, `{"progress":...}`, ...), so a
-    /// standalone top-level `{"exception":...}` line — always the terminal content line — is
-    /// unambiguously the failure. Bare each-row formats emit unwrapped rows whose shape could
-    /// coincide with that, so they are not probed, to never mistake a successful row for a failure.
+    if (!format.startsWith('JSON') && format != 'GeoJSON') return null;
+    if (!text.includes('"exception"')) return null;   /// cheap guard before parsing/scanning the body
+
+    /// `*WithProgress` formats wrap every row, so a standalone top-level `{"exception":...}` line —
+    /// always the terminal content line — is unambiguously the failure.
     if (format.includes('WithProgress'))
     {
         const trimmed = text.replace(/\s+$/, '');
@@ -4457,19 +4491,26 @@ function parseInbandException(text, format)
                 if (typeof data.exception === 'string') return data.exception;
             } catch (e) { /* not a standalone exception line */ }
         }
+        return null;
     }
 
-    /// Single-object formats (`JSON`, `JSONCompact`, ...) carry the failure as a top-level
-    /// `exception` field alongside the usual `meta`/`data`; requiring one of those structural keys
-    /// keeps a bare each-row object that merely has an `exception` field from being misread, and the
-    /// cheap substring guard avoids parsing a large successful document that has no exception at all.
-    if (text.includes('"exception"'))
+    /// Single-document formats: parse the whole body and read the failure out of the one object.
+    if (SINGLE_DOCUMENT_JSON_FORMATS.has(format))
     {
         try {
             const data = JSON.parse(text);
-            if (data && typeof data.exception === 'string'
-                && ('meta' in data || 'data' in data || 'rows' in data))
-                return data.exception;
+            if (data && typeof data === 'object')
+            {
+                if (typeof data.exception === 'string') return data.exception;
+                /// `GeoJSON`: `{"type":"FeatureCollection","features":[..., {"exception":...}]}`. The
+                /// appended element has no `type`, so it cannot be mistaken for a real `Feature`.
+                if (Array.isArray(data.features) && data.features.length)
+                {
+                    const last = data.features[data.features.length - 1];
+                    if (last && typeof last.exception === 'string' && last.type === undefined)
+                        return last.exception;
+                }
+            }
         } catch (e) { /* not a single JSON document */ }
     }
 
@@ -4671,7 +4712,9 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             ///      `http_write_exception_in_output_format` is set (the default) — see `parseInbandException`.
             /// The raw output that arrived before the failure is still shown; the error is rendered beneath.
             let buffer = '';
-            let marker_seen = false;      /// once the `__exception__` block starts, stop echoing raw output
+            let marker_seen = false;      /// a candidate `__exception__` line was seen; stop echoing from it
+            let marker_framing_broken = false;   /// the server broke HTTP framing after the marker (see below)
+            let held_back = '';           /// output withheld from the candidate marker line onward (see below)
             let stream_exception = null;
             while (true) {
                 let done, value;
@@ -4681,7 +4724,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                     /// After the `__exception__` block the server intentionally breaks the HTTP framing,
                     /// so the reader may reject with a `TypeError`; that is expected once the marker was
                     /// seen (the block is parsed below). Otherwise it is a genuine transport failure.
-                    if (marker_seen && e instanceof TypeError) break;
+                    if (marker_seen && e instanceof TypeError) { marker_framing_broken = true; break; }
                     throw e;
                 }
                 if (done) break;
@@ -4691,9 +4734,10 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
 
                 if (posted_request_num != request_num) { return { cancelled: true }; }
 
-                /// Once the marker block started, the rest of the stream is that block, not output:
-                /// keep accumulating `reply` for `parseExceptionMarker` but stop echoing it.
-                if (marker_seen) continue;
+                /// After a candidate marker line, withhold the rest of the stream instead of echoing it:
+                /// it is either the marker block (kept hidden) or — if the framing turns out incomplete —
+                /// ordinary output that is re-echoed after the loop. Keep accumulating `reply` regardless.
+                if (marker_seen) { held_back += new_content; continue; }
 
                 /// The marker occupies whole lines, so echo only complete lines and hold the last
                 /// (possibly partial) line in `buffer` — this matches the marker robustly across
@@ -4702,22 +4746,37 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 let lines = buffer.split('\n');
                 let output = '';
                 for (let idx = 0; idx < lines.length; ++idx) {
-                    if (lines[idx].replace(/\r$/, '') === EXCEPTION_MARKER) { marker_seen = true; break; }
+                    /// A complete line equal to the marker is only a *candidate*: a successful query can
+                    /// legitimately emit one (e.g. `SELECT '__exception__' FORMAT TSV`). Stop echoing from
+                    /// here and decide after the loop, once the full marker framing is known.
+                    if (lines[idx].replace(/\r$/, '') === EXCEPTION_MARKER) {
+                        marker_seen = true;
+                        held_back = lines.slice(idx).join('\n');
+                        break;
+                    }
                     /// The last line may be a partial row or a partial marker; keep it in `buffer`.
                     if (idx == lines.length - 1) break;
                     output += lines[idx] + '\n';
                 }
                 if (output) targetResultEl.updateRaw(output);
-                buffer = marker_seen ? '' : lines[lines.length - 1];
+                if (!marker_seen) buffer = lines[lines.length - 1];
             }
 
-            /// Flush the final line (a stream need not end with a newline) unless it is the marker block.
-            if (!marker_seen && buffer.length) targetResultEl.updateRaw(buffer);
-
             if (marker_seen) {
-                stream_exception = parseExceptionMarker(reply)
-                    ?? "The query failed after the response body had already started, but the error message could not be parsed.";
+                /// A genuine transport marker is a fully-framed `__exception__ <TAG> ... <len> <TAG>
+                /// __exception__` block that `parseExceptionMarker` can extract; if it can, render the
+                /// error. If it cannot, the candidate line was ordinary output that merely equalled the
+                /// marker (the server did not break the framing) — re-echo the withheld output and finish
+                /// normally. The lone exception is a genuine but unparsable block, recognized by the
+                /// broken HTTP framing, for which we still report a generic failure rather than echo it.
+                stream_exception = parseExceptionMarker(reply);
+                if (stream_exception === null && marker_framing_broken)
+                    stream_exception = "The query failed after the response body had already started, but the error message could not be parsed.";
+                else if (stream_exception === null && held_back.length)
+                    targetResultEl.updateRaw(held_back);
             } else {
+                /// Flush the final line (a stream need not end with a newline).
+                if (buffer.length) targetResultEl.updateRaw(buffer);
                 /// No transport marker: a JSON output format may still have reported the failure in-band.
                 stream_exception = parseInbandException(reply, format);
             }
