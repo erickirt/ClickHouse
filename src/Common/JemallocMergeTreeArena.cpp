@@ -74,11 +74,6 @@ void initialize(size_t num_arenas)
 
     arena_indices = std::move(indices);
     initialized.store(true, std::memory_order_release);
-
-    LOG_INFO(
-        &Poco::Logger::get("JemallocMergeTreeArena"),
-        "Configured {} dedicated jemalloc MergeTree metadata arena(s).",
-        arena_indices.size());
 }
 
 unsigned getArenaIndex()
