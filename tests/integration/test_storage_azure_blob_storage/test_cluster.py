@@ -253,7 +253,7 @@ def test_partition_parallel_reading_with_cluster(cluster):
     azure_query(
         node,
         f"INSERT INTO TABLE FUNCTION azureBlobStorage('{storage_account_url}', 'cont', '{filename}', 'devstoreaccount1', "
-        f"'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==', 'CSV', 'auto', '{table_format}', partition_strategy='wildcard') "
+        f"'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==', 'CSV', 'auto', 'wildcard', '{table_format}') "
         f"PARTITION BY {partition_by} VALUES {values}",
         settings={"azure_truncate_on_insert": 1},
     )
