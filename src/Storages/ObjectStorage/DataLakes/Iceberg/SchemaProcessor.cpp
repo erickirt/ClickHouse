@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -129,6 +130,80 @@ String removeWhitespace(const String & s)
     return result;
 }
 
+/// Compare two Iceberg type descriptors for the same field. A type is either a primitive
+/// string ("long", "decimal(20, 0)", ...) or a nested object ("struct" with a fields array,
+/// or "list" / "map" wrappers whose element/key/value members are themselves types).
+/// Primitive type strings are whitespace-insensitive per the Iceberg spec, so recurse into
+/// list/map members instead of comparing the wrapper object textually.
+bool typesAreStructurallyIdentical(
+    const Poco::Dynamic::Var & first_in, const Poco::Dynamic::Var & second_in, const std::unordered_map<String, String> & type_mapping)
+{
+    Poco::Dynamic::Var first = first_in;
+    Poco::Dynamic::Var second = second_in;
+
+    /// Apply configured type aliases (e.g. geography -> binary) to string types.
+    if (first.isString())
+        for (const auto & [prefix, mapped] : type_mapping)
+            if (first.toString().starts_with(prefix))
+                first = mapped;
+    if (second.isString())
+        for (const auto & [prefix, mapped] : type_mapping)
+            if (second.toString().starts_with(prefix))
+                second = mapped;
+
+    /// Primitive type strings: e.g. both "decimal(20,0)" and "decimal(20, 0)" denote the same
+    /// type. Different writers emit different spacing, so ignore ASCII whitespace.
+    if (first.isString() && second.isString())
+        return removeWhitespace(first.toString()) == removeWhitespace(second.toString());
+
+    const bool both_objects
+        = first.type() == typeid(Poco::JSON::Object::Ptr) && second.type() == typeid(Poco::JSON::Object::Ptr);
+    if (both_objects)
+    {
+        const auto first_obj = first.extract<Poco::JSON::Object::Ptr>();
+        const auto second_obj = second.extract<Poco::JSON::Object::Ptr>();
+
+        /// struct: compare nested field list recursively.
+        if (first_obj->isArray(f_fields) || second_obj->isArray(f_fields))
+            return schemasAreIdentical(*first_obj, *second_obj, type_mapping);
+
+        /// list / map wrappers: same member set, with the nested type members (element / key /
+        /// value) compared recursively so their primitive strings are whitespace-insensitive too,
+        /// and the remaining scalar members (ids, required flags) compared textually.
+        auto names_first = first_obj->getNames();
+        auto names_second = second_obj->getNames();
+        std::sort(names_first.begin(), names_first.end());
+        std::sort(names_second.begin(), names_second.end());
+        if (names_first != names_second)
+            return false;
+        for (const auto & name : names_first)
+        {
+            if (name == f_element || name == f_key || name == f_value)
+            {
+                if (!typesAreStructurallyIdentical(first_obj->get(name), second_obj->get(name), type_mapping))
+                    return false;
+            }
+            else
+            {
+                Poco::JSON::Object wrapper_first;
+                wrapper_first.set(name, first_obj->get(name));
+                Poco::JSON::Object wrapper_second;
+                wrapper_second.set(name, second_obj->get(name));
+                if (!equals(wrapper_first, wrapper_second))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// Mismatched shapes (string vs object) or scalar values: compare textually.
+    Poco::JSON::Object wrapper_first;
+    wrapper_first.set(f_type, first);
+    Poco::JSON::Object wrapper_second;
+    wrapper_second.set(f_type, second);
+    return equals(wrapper_first, wrapper_second);
+}
+
 bool schemaFieldsAreStructurallyIdentical(const Poco::JSON::Object & first, const Poco::JSON::Object & second, const std::unordered_map<String, String> & type_mapping)
 {
     static constexpr const char * structural_keys[] = {f_id, f_name, f_required, f_type};
@@ -141,47 +216,17 @@ bool schemaFieldsAreStructurallyIdentical(const Poco::JSON::Object & first, cons
         if (!first_has)
             continue;
 
-        if (key == f_type && first.isObject(key) && second.isObject(key))
+        if (key == f_type)
         {
-            const auto first_type = first.getObject(key);
-            const auto second_type = second.getObject(key);
-            if (first_type->isArray(f_fields) || second_type->isArray(f_fields))
-            {
-                if (!schemasAreIdentical(*first_type, *second_type, type_mapping))
-                    return false;
-                continue;
-            }
-        }
-
-        auto key_first = first.get(key);
-        auto key_second = second.get(key);
-        if (key == f_type && key_first.isString())
-        {
-            for (const auto & [prefix, mapped] : type_mapping)
-                if (key_first.toString().starts_with(prefix))
-                    key_first = mapped;
-        }
-        if (key == f_type && key_second.isString())
-        {
-            for (const auto & [prefix, mapped] : type_mapping)
-                if (key_second.toString().starts_with(prefix))
-                    key_second = mapped;
-        }
-
-        /// Primitive type strings are whitespace-insensitive per the Iceberg spec: e.g. both
-        /// "decimal(20,0)" and "decimal(20, 0)" denote the same type. Different writers emit
-        /// different spacing, so compare parameterized primitive types ignoring ASCII whitespace.
-        if (key == f_type && key_first.isString() && key_second.isString())
-        {
-            if (removeWhitespace(key_first.toString()) != removeWhitespace(key_second.toString()))
+            if (!typesAreStructurallyIdentical(first.get(key), second.get(key), type_mapping))
                 return false;
             continue;
         }
 
         Poco::JSON::Object wrapper_first;
-        wrapper_first.set(key, key_first);
+        wrapper_first.set(key, first.get(key));
         Poco::JSON::Object wrapper_second;
-        wrapper_second.set(key, key_second);
+        wrapper_second.set(key, second.get(key));
         if (!equals(wrapper_first, wrapper_second))
             return false;
     }

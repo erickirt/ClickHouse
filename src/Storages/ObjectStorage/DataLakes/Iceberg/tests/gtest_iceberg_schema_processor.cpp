@@ -159,3 +159,41 @@ TEST(IcebergSchemaProcessor, RebindingSchemaIdToRenamedFieldStillRejected)
     processor.addIcebergTableSchema(first);
     EXPECT_THROW(processor.addIcebergTableSchema(second), DB::Exception);
 }
+
+/// The whitespace-insensitive comparison must reach into list/map wrappers: the nested
+/// element/key/value primitive types (here list<decimal>) can also be serialized with
+/// different spacing across metadata files.
+TEST(IcebergSchemaProcessor, ListElementDecimalWhitespaceIsInsensitive)
+{
+    auto first = parseSchema(
+        R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":{"type":"list","element-id":2,"element-required":false,"element":"decimal(20,0)"}}]})json");
+    auto second = parseSchema(
+        R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":{"type":"list","element-id":2,"element-required":false,"element":"decimal(20, 0)"}}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(first);
+    EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
+}
+
+/// Same for map key/value primitive types (here map<decimal, decimal>).
+TEST(IcebergSchemaProcessor, MapKeyValueDecimalWhitespaceIsInsensitive)
+{
+    auto first = parseSchema(
+        R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":{"type":"map","key-id":2,"key":"decimal(20,0)","value-id":3,"value-required":false,"value":"decimal(10,2)"}}]})json");
+    auto second = parseSchema(
+        R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":{"type":"map","key-id":2,"key":"decimal(20, 0)","value-id":3,"value-required":false,"value":"decimal(10, 2)"}}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(first);
+    EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
+}
+
+/// A genuinely different nested type inside a list wrapper must still be rejected.
+TEST(IcebergSchemaProcessor, RebindingListElementToDifferentTypeStillRejected)
+{
+    auto first = parseSchema(
+        R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":{"type":"list","element-id":2,"element-required":false,"element":"decimal(20,0)"}}]})json");
+    auto second = parseSchema(
+        R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":{"type":"list","element-id":2,"element-required":false,"element":"decimal(20,2)"}}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(first);
+    EXPECT_THROW(processor.addIcebergTableSchema(second), DB::Exception);
+}
