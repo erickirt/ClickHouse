@@ -15,8 +15,9 @@ namespace PerCPU
 /// first `getNumCPUs()` shards are used at runtime (and only those get faulted in).
 constexpr UInt32 MAX_CPUS = 1024;
 
-/// Runtime CPU count, capped at `MAX_CPUS`. Cached on first call.
-/// `get_nprocs_conf()` on Linux, `sysconf(_SC_NPROCESSORS_ONLN)` elsewhere; 1 if unavailable.
+/// Number of CPUs `getCurrentCPU` can route to, capped at `MAX_CPUS`. Cached on first call.
+/// `get_nprocs_conf()` on Linux, `sysconf(_SC_NPROCESSORS_ONLN)` on Darwin; 1 on platforms where
+/// `getCurrentCPU` is unimplemented (routing collapses to one shard there) or if unavailable.
 UInt32 getNumCPUs() noexcept;
 
 /// Current CPU id, or -1 if unavailable (callers must treat a negative value as "unknown" and
