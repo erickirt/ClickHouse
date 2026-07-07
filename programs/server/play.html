@@ -3802,15 +3802,23 @@ const opened_locally = location.protocol == 'file:';
 let run_immediately = current_url.searchParams.has("run");
 
 /// Restore per-column color coding modes from the URL, so a shared/bookmarked link keeps them.
+/// Keep the parsed value around: startup reconciliation reasserts it as authoritative after a
+/// saved tab is activated, because `restoreFromHistory` overwrites the global with that tab's
+/// snapshot and the trailing `syncHistory` would otherwise re-stamp the URL with the wrong set.
 const color_modes_from_url = current_url.searchParams.get('color_modes');
+let url_color_modes = null;
 if (color_modes_from_url) {
-    try { column_color_modes = JSON.parse(color_modes_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    try { url_color_modes = JSON.parse(color_modes_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    if (url_color_modes) { column_color_modes = url_color_modes; }
 }
 
-/// Restore the pinned columns from the URL, so a shared/bookmarked link keeps them.
+/// Restore the pinned columns from the URL, so a shared/bookmarked link keeps them. Kept around
+/// for the same startup reconciliation as the color modes above.
 const pinned_columns_from_url = current_url.searchParams.get('pinned_columns');
+let url_pinned_columns = null;
 if (pinned_columns_from_url) {
-    try { pinned_columns = JSON.parse(pinned_columns_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    try { url_pinned_columns = JSON.parse(pinned_columns_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    if (url_pinned_columns) { pinned_columns = url_pinned_columns; }
 }
 
 let url_elem = document.getElementById('url');
@@ -8379,6 +8387,26 @@ async function reconcileStartup() {
             /// the tab's own reconciled params in place rather than deriving bogus ones.
             queryParamsContainer.innerHTML = '';
             currentQueryParams = [];
+        }
+    }
+
+    /// The active tab was restored via `activateTab`/`restoreFromHistory`, which overwrote the
+    /// shared display state (`pinned_columns` and `column_color_modes`) with the matched saved
+    /// tab's snapshot (or cleared it for a result-less tab). When the URL is authoritative (a
+    /// fresh/shared link, not a stale reload or a live bootstrap edit — the same gate as the
+    /// parameter reconciliation above), reassert the values the link carried, so the shared
+    /// appearance is honored and the trailing `syncHistory`/auto-run re-stamps the URL with the
+    /// link's set rather than the saved tab's. Done symmetrically for pinned columns and color
+    /// modes: the feature persists them the same way, so both must survive a shared link.
+    if (activated && url_query && !preserve_local_query && !bootstrap_dirty) {
+        let reassert_display_state = false;
+        if (url_pinned_columns) { pinned_columns = url_pinned_columns; reassert_display_state = true; }
+        if (url_color_modes) { column_color_modes = url_color_modes; reassert_display_state = true; }
+        /// Re-lay-out every rendered result table so its columns match the reasserted state.
+        /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
+        /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
+        if (reassert_display_state) {
+            for (const el of document.querySelectorAll('query-result')) { el.applyColumnColors(); }
         }
     }
 
