@@ -1,3 +1,4 @@
+#include <Columns/ColumnConst.h>
 #include <Columns/IColumn.h>
 #include <Common/Exception.h>
 #include <Core/Block.h>
@@ -11,6 +12,26 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int NOT_FOUND_COLUMN_IN_BLOCK;
+}
+
+namespace
+{
+
+/// Extract a subcolumn, transparently handling a constant column. Const is just a wrapper (like Sparse
+/// or Replicated), so unwrap it, extract from the inner column and re-wrap into ColumnConst. A missing
+/// schema-evolved column (e.g. read from an Iceberg table) is materialized as a ColumnConst, so this is
+/// hit by `WHERE col IS NULL` under optimize_functions_to_subcolumns.
+ColumnPtr tryGetSubcolumnUnwrappingConst(const IDataType & type, std::string_view subcolumn_name, const ColumnPtr & column)
+{
+    if (const auto * column_const = checkAndGetColumn<ColumnConst>(column.get()))
+    {
+        auto subcolumn = tryGetSubcolumnUnwrappingConst(type, subcolumn_name, column_const->getDataColumnPtr());
+        return subcolumn ? ColumnConst::create(subcolumn, column->size()) : nullptr;
+    }
+
+    return type.tryGetSubcolumn(subcolumn_name, column);
+}
+
 }
 
 ColumnPtr tryGetColumnFromBlock(const Block & block, const NameAndTypePair & requested_column)
@@ -29,7 +50,7 @@ ColumnPtr tryGetColumnFromBlock(const Block & block, const NameAndTypePair & req
     if (requested_column.isSubcolumn())
     {
         auto subcolumn_name = requested_column.getSubcolumnName();
-        elem_column = elem_type->tryGetSubcolumn(subcolumn_name, elem_column);
+        elem_column = tryGetSubcolumnUnwrappingConst(*elem_type, subcolumn_name, elem_column);
         elem_type = elem_type->tryGetSubcolumnType(subcolumn_name);
 
         if (!elem_type || !elem_column)
@@ -51,7 +72,7 @@ ColumnPtr tryGetSubcolumnFromBlock(const Block & block, const DataTypePtr & requ
     if ((elem->type->hasDynamicStructure() || requested_column_type->hasDynamicStructure()) && !elem->type->equals(*requested_column_type))
     {
         auto cast_column = castColumn({elem->column->decompress(), elem->type, ""}, requested_column_type);
-        auto elem_column = requested_column_type->tryGetSubcolumn(subcolumn_name, cast_column);
+        auto elem_column = tryGetSubcolumnUnwrappingConst(*requested_column_type, subcolumn_name, cast_column);
         auto elem_type = requested_column_type->tryGetSubcolumnType(subcolumn_name);
 
         if (!elem_type || !elem_column)
@@ -60,7 +81,7 @@ ColumnPtr tryGetSubcolumnFromBlock(const Block & block, const DataTypePtr & requ
         return elem_column;
     }
 
-    auto elem_column = elem->type->tryGetSubcolumn(subcolumn_name, elem->column->decompress());
+    auto elem_column = tryGetSubcolumnUnwrappingConst(*elem->type, subcolumn_name, elem->column->decompress());
     auto elem_type = elem->type->tryGetSubcolumnType(subcolumn_name);
 
     if (!elem_type || !elem_column)
