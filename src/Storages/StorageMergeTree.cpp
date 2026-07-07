@@ -2622,7 +2622,9 @@ void StorageMergeTree::truncate(const ASTPtr &, const StorageMetadataPtr &, Cont
 
             /// Do not remove parts whose creating transaction has not committed yet:
             /// removing such a part would discard a write that may still commit.
-            std::erase_if(parts, [](const auto & part) { return !part->version->isVisible(Tx::MaxCommittedCSN, Tx::EmptyTID); });
+            /// Only needed when transactions are in use; otherwise every part is already committed.
+            if (transactions_enabled.load(std::memory_order_relaxed))
+                std::erase_if(parts, [](const auto & part) { return !part->version->isVisible(Tx::MaxCommittedCSN, Tx::EmptyTID); });
 
             auto future_parts = initCoverageWithNewEmptyParts(parts);
 
