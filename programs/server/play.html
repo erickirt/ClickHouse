@@ -4404,8 +4404,9 @@ const EXCEPTION_MARKER = '__exception__';
 
 /// Extract the error message from a `__exception__` marker block embedded anywhere in `text`
 /// (typically at the very end of a streamed response). Returns the message string, or null if no
-/// complete block is present. The message is everything between the tag line and the trailing
-/// `<length> <TAG>` line, so it is recovered verbatim regardless of its own content.
+/// complete block is present. A complete block is a tag line, the message, a `<length> <TAG>` trailer
+/// line, and a closing `__exception__` line; the message is everything between the tag and the trailer,
+/// so it is recovered verbatim regardless of its own content.
 function parseExceptionMarker(text)
 {
     const lines = text.split('\n');
@@ -4423,11 +4424,18 @@ function parseExceptionMarker(text)
         for (let j = i + 2; j < lines.length; ++j)
         {
             const stripped = lines[j].replace(/\r$/, '');
-            if (/^\d+$/.test(stripped.slice(0, stripped.length - trailer.length)) && stripped.endsWith(trailer))
+            /// Commit to a failure only for a fully-framed block: the `<length> <TAG>` trailer must be
+            /// immediately followed by the closing `__exception__` line (see the server's
+            /// `WriteBufferFromHTTPServerResponse::cancelWithException`). A lone `<digits> <TAG>` line is
+            /// not proof of a marker — successful output can legitimately contain one, e.g.
+            /// `SELECT arrayJoin(['__exception__', 'x', 'hello', '6 x'])` (tag `x`, trailer `6 x`), which
+            /// without the closing check would be misread as the error "hello".
+            if (/^\d+$/.test(stripped.slice(0, stripped.length - trailer.length)) && stripped.endsWith(trailer)
+                && (lines[j + 1] ?? '').replace(/\r$/, '') === EXCEPTION_MARKER)
                 return message_lines.join('\n');
             message_lines.push(lines[j]);
         }
-        return null;   /// Block started but its trailer has not arrived yet.
+        return null;   /// Block started but its closing trailer + marker have not arrived yet.
     }
     return null;
 }
@@ -4458,7 +4466,8 @@ const SINGLE_DOCUMENT_JSON_FORMATS = new Set([
 ///     a top-level `"exception"` string, or a trailing `{"exception":...}` feature for `GeoJSON`;
 ///   - `*WithProgress` row streams: a terminal top-level `{"exception":...}` line (every row is
 ///     wrapped as `{"row":...}` / `{"progress":...}`, so a bare `{"exception":...}` line is the failure);
-///   - `XML`: an `<exception>` element (field values are XML-escaped, so a raw tag means an error).
+///   - `XML`: the top-level `<exception>` trailer (a one-tab direct child of `<result>`; a row field
+///     named `exception` is far more deeply indented, so it cannot be mistaken for the trailer).
 ///
 /// It deliberately does NOT probe the bare each-row formats: `JSONEachRow` / `JSONStringsEachRow` /
 /// `JSONLines` write the failure as a `{"exception":...}` object line — identical to a successful row
@@ -4471,7 +4480,13 @@ function parseInbandException(text, format)
 {
     if (format == 'XML')
     {
-        const m = text.match(/<exception>([\s\S]*?)<\/exception>/);
+        /// `XMLRowOutputFormat` writes the in-band failure as a top-level `<exception>` element, indented
+        /// with a single tab as a direct child of `<result>` (see `writeException`). A row field that
+        /// happens to be named `exception` is written far more deeply (`\t\t\t<exception>` inside a
+        /// `\t\t<row>`), so anchor to the one-tab top-level element — otherwise a successful
+        /// `SELECT 'ok' AS exception FORMAT XML` would be misread as a failure. The message text is
+        /// XML-escaped (`<` → `&lt;`), so it can never contain a literal `<exception>` / `</exception>`.
+        const m = text.match(/^\t<exception>([\s\S]*?)<\/exception>/m);
         return m ? unescapeXMLText(m[1]) : null;
     }
 
