@@ -11,6 +11,8 @@ SETTINGS min_bytes_for_wide_part = 0;
 INSERT INTO t_json_codec SELECT '{"a":' || toString(number) || ',"b":' || toString(number * 2) || '}'
 FROM numbers(100000);
 
-SELECT * FROM mergeTreeCodecBlockCounts(currentDatabase(), t_json_codec) ORDER BY substream;
+SELECT substream, data_uncompressed_bytes, round(data_compressed_bytes / data_uncompressed_bytes, 2) AS compression_ratio, codec_block_counts
+FROM mergeTreeCodecBlockCounts(currentDatabase(), t_json_codec)
+ORDER BY substream;
 
 DROP TABLE t_json_codec;
