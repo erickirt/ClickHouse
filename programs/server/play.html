@@ -8402,11 +8402,25 @@ async function reconcileStartup() {
         let reassert_display_state = false;
         if (url_pinned_columns) { pinned_columns = url_pinned_columns; reassert_display_state = true; }
         if (url_color_modes) { column_color_modes = url_color_modes; reassert_display_state = true; }
-        /// Re-lay-out every rendered result table so its columns match the reasserted state.
-        /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
-        /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
         if (reassert_display_state) {
+            /// Re-lay-out every rendered result table so its columns match the reasserted state.
+            /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
+            /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
             for (const el of document.querySelectorAll('query-result')) { el.applyColumnColors(); }
+            /// Reasserting the globals fixes the on-screen layout, but the history writers serialize
+            /// the display state from the active tab's result SNAPSHOT (`tab.result.pinned_columns` /
+            /// `tab.result.color_modes`), not the globals. So the trailing `syncHistory` below (the
+            /// non-rerun path) would otherwise re-stamp the URL from the stale saved snapshot and drop
+            /// the link's pinned columns / color modes. Mirror the reasserted values onto the snapshot
+            /// to restore the active-tab invariant that the globals and the snapshot agree — the same
+            /// pairing `saveHistory` establishes when a run produces a result. A result-less tab has no
+            /// snapshot to carry them (matching how color modes already behave), and the reasserted
+            /// globals still feed the eventual run's `saveHistory`, so only update when a result exists.
+            const active = getActiveTab();
+            if (active && active.result) {
+                if (url_pinned_columns) active.result.pinned_columns = url_pinned_columns;
+                if (url_color_modes) active.result.color_modes = url_color_modes;
+            }
         }
     }
 
