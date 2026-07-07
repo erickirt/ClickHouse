@@ -160,8 +160,8 @@ bool typesAreStructurallyIdentical(
         = first.type() == typeid(Poco::JSON::Object::Ptr) && second.type() == typeid(Poco::JSON::Object::Ptr);
     if (both_objects)
     {
-        const auto first_obj = first.extract<Poco::JSON::Object::Ptr>();
-        const auto second_obj = second.extract<Poco::JSON::Object::Ptr>();
+        const auto & first_obj = first.extract<Poco::JSON::Object::Ptr>();
+        const auto & second_obj = second.extract<Poco::JSON::Object::Ptr>();
 
         /// struct: compare nested field list recursively.
         if (first_obj->isArray(f_fields) || second_obj->isArray(f_fields))
