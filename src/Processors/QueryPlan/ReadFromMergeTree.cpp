@@ -3939,11 +3939,9 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
     ProfileEvents::increment(ProfileEvents::SelectedParts, result.selected_parts);
     ProfileEvents::increment(ProfileEvents::SelectedPartsTotal, result.total_parts);
     ProfileEvents::increment(ProfileEvents::SelectedMarksTotal, result.total_marks_pk);
-    if (!supportsSkipIndexesOnDataRead())
-    {
-        ProfileEvents::increment(ProfileEvents::SelectedRanges, result.selected_ranges);
-        ProfileEvents::increment(ProfileEvents::SelectedMarks, result.selected_marks);
-    }
+    /// SelectedRanges / SelectedMarks are accounted below, after we know whether a read-time
+    /// skip-index reader will be installed: such a reader re-counts them post-pruning, so
+    /// incrementing here as well would double-count.
 
     auto query_id_holder = result.checkLimits(*context, data, *data_settings);
 
@@ -4138,6 +4136,16 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
             dynamic_skip_index_filter,
             context,
             getLogger("MergeTreeSkipIndexReader"));
+    }
+
+    /// Account SelectedRanges / SelectedMarks here, once both reader-creation paths above have
+    /// run. When a read-time skip-index reader is installed (either the use_skip_indexes_on_data_read
+    /// path or the join runtime-filter fallback), it increments these ProfileEvents itself after
+    /// read-time pruning, so we must not increment the pre-pruning AnalysisResult counts here too.
+    if (!skip_index_reader)
+    {
+        ProfileEvents::increment(ProfileEvents::SelectedRanges, result.selected_ranges);
+        ProfileEvents::increment(ProfileEvents::SelectedMarks, result.selected_marks);
     }
 
     if (!projection_index_read_desc.read_ranges.empty())
