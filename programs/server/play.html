@@ -4407,7 +4407,17 @@ const EXCEPTION_MARKER = '__exception__';
 /// complete block is present. A complete block is a tag line, the message, a `<length> <TAG>` trailer
 /// line, and a closing `__exception__` line; the message is everything between the tag and the trailer,
 /// so it is recovered verbatim regardless of its own content.
-function parseExceptionMarker(text)
+///
+/// `expected_tag`, when supplied, is the value of the `X-ClickHouse-Exception-Tag` response header. The
+/// server picks a fresh random tag per response and repeats it inside the marker block (see
+/// `WriteBufferFromHTTPServerResponse::cancelWithException`), so a genuine transport marker always
+/// carries exactly that tag. Requiring the match rejects a *successful* query whose own output merely
+/// mimics the marker shape — the client cannot know the random per-response tag. For example
+/// `SELECT arrayJoin(['__exception__','0123456789abcdef','hello','5 0123456789abcdef','__exception__']) FORMAT TSV`
+/// is a fully-framed lookalike, but its tag will not match the header, so it is not treated as a failure.
+/// Callers that already know the query failed and have no header at hand (history/snapshot restore) omit
+/// the argument to extract the message without verifying.
+function parseExceptionMarker(text, expected_tag)
 {
     const lines = text.split('\n');
     for (let i = 0; i < lines.length; ++i)
@@ -4415,7 +4425,10 @@ function parseExceptionMarker(text)
         if (lines[i].replace(/\r$/, '') !== EXCEPTION_MARKER) continue;
 
         const tag = (lines[i + 1] ?? '').replace(/\r$/, '');
-        if (!tag) return null;
+        if (!tag) continue;
+        /// A genuine marker reuses the per-response header tag; a mismatch means this is ordinary output
+        /// that merely looks like a marker, so keep scanning rather than reporting a false failure.
+        if (expected_tag !== undefined && tag !== expected_tag) continue;
 
         /// The message ends at the trailer line `<length> <TAG>`; the length lets the server bound
         /// the message, but here the tag alone is enough to locate the boundary unambiguously.
@@ -4579,6 +4592,10 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         /// Detect image results (e.g. `FORMAT PNG`) by the response `Content-Type` rather than by
         /// parsing the query, so any format that emits an image is rendered inline as a picture.
         const content_type = response.headers.get('Content-Type') ?? '';
+        /// The random per-response tag the server repeats inside a transport `__exception__` marker
+        /// block; passing it to `parseExceptionMarker` tells a genuine marker apart from successful
+        /// output that merely mimics the marker shape (the client cannot know this random tag).
+        const exception_tag = response.headers.get('X-ClickHouse-Exception-Tag');
 
         if (!response.ok) {
             is_error = true;
@@ -4685,7 +4702,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             /// full reply after the stream ended; the format-level `{"exception":...}` line is already
             /// captured in `stream_exception` above.
             if (marker_seen && stream_exception === null) {
-                stream_exception = parseExceptionMarker(reply)
+                stream_exception = parseExceptionMarker(reply, exception_tag)
                     ?? "The query failed after the response body had already started, but the error message could not be parsed.";
             }
 
@@ -4784,7 +4801,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 /// marker (the server did not break the framing) — re-echo the withheld output and finish
                 /// normally. The lone exception is a genuine but unparsable block, recognized by the
                 /// broken HTTP framing, for which we still report a generic failure rather than echo it.
-                stream_exception = parseExceptionMarker(reply);
+                stream_exception = parseExceptionMarker(reply, exception_tag);
                 if (stream_exception === null && marker_framing_broken)
                     stream_exception = "The query failed after the response body had already started, but the error message could not be parsed.";
                 else if (stream_exception === null && held_back.length)
