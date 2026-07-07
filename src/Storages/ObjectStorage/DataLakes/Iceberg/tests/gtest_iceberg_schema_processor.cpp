@@ -4,7 +4,19 @@
 #include <Storages/ObjectStorage/DataLakes/Iceberg/SchemaProcessor.h>
 #include <Common/Exception.h>
 
+#include <Poco/JSON/Object.h>
+#include <Poco/JSON/Parser.h>
+
 using namespace DB::Iceberg;
+
+namespace
+{
+Poco::JSON::Object::Ptr parseSchema(const std::string & json)
+{
+    Poco::JSON::Parser parser;
+    return parser.parse(json).extract<Poco::JSON::Object::Ptr>();
+}
+}
 
 TEST(IcebergSchemaProcessor, GetSimpleTypeBoolean)
 {
@@ -111,4 +123,39 @@ TEST(IcebergSchemaProcessor, GetSimpleTypeDecimal)
 TEST(IcebergSchemaProcessor, GetSimpleTypeUnknownThrows)
 {
     EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("unknown_type"), DB::Exception);
+}
+
+/// Regression test for https://github.com/ClickHouse/ClickHouse/issues/109642
+/// The same schema-id can be serialized by different Iceberg writers with different
+/// whitespace in parameterized primitive type strings, e.g. the table metadata JSON
+/// emits "decimal(20,0)" while the manifest Avro metadata emits "decimal(20, 0)".
+/// Both denote the identical type per the Iceberg spec, so re-adding the schema-id
+/// must NOT be rejected as a rebinding to a different schema.
+TEST(IcebergSchemaProcessor, DecimalTypeWhitespaceIsInsensitive)
+{
+    auto first = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(20,0)"}]})json");
+    auto second = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(20, 0)"}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(first);
+    EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
+}
+
+/// A genuinely different type bound to the same schema-id must still be rejected.
+TEST(IcebergSchemaProcessor, RebindingSchemaIdToDifferentTypeStillRejected)
+{
+    auto first = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(20,0)"}]})json");
+    auto second = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(20,2)"}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(first);
+    EXPECT_THROW(processor.addIcebergTableSchema(second), DB::Exception);
+}
+
+/// A renamed field bound to the same schema-id must still be rejected (issue #107316).
+TEST(IcebergSchemaProcessor, RebindingSchemaIdToRenamedFieldStillRejected)
+{
+    auto first = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"long"}]})json");
+    auto second = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c9","required":false,"type":"long"}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(first);
+    EXPECT_THROW(processor.addIcebergTableSchema(second), DB::Exception);
 }

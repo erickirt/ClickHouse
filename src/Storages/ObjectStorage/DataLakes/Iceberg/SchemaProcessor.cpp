@@ -17,6 +17,7 @@
 #include <Functions/IFunction.h>
 #include <base/types.h>
 #include <Common/SharedLockGuard.h>
+#include <Common/StringUtils.h>
 #include <base/scope_guard.h>
 
 #include <DataTypes/DataTypeArray.h>
@@ -118,6 +119,16 @@ bool equals(const T & first, const T & second)
 
 bool schemasAreIdentical(const Poco::JSON::Object & first, const Poco::JSON::Object & second, const std::unordered_map<String, String> & type_mapping);
 
+String removeWhitespace(const String & s)
+{
+    String result;
+    result.reserve(s.size());
+    for (char c : s)
+        if (!isWhitespaceASCII(c))
+            result.push_back(c);
+    return result;
+}
+
 bool schemaFieldsAreStructurallyIdentical(const Poco::JSON::Object & first, const Poco::JSON::Object & second, const std::unordered_map<String, String> & type_mapping)
 {
     static constexpr const char * structural_keys[] = {f_id, f_name, f_required, f_type};
@@ -155,6 +166,16 @@ bool schemaFieldsAreStructurallyIdentical(const Poco::JSON::Object & first, cons
             for (const auto & [prefix, mapped] : type_mapping)
                 if (key_second.toString().starts_with(prefix))
                     key_second = mapped;
+        }
+
+        /// Primitive type strings are whitespace-insensitive per the Iceberg spec: e.g. both
+        /// "decimal(20,0)" and "decimal(20, 0)" denote the same type. Different writers emit
+        /// different spacing, so compare parameterized primitive types ignoring ASCII whitespace.
+        if (key == f_type && key_first.isString() && key_second.isString())
+        {
+            if (removeWhitespace(key_first.toString()) != removeWhitespace(key_second.toString()))
+                return false;
+            continue;
         }
 
         Poco::JSON::Object wrapper_first;
