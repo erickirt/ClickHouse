@@ -1,5 +1,7 @@
 import shlex
+import sys
 
+from ci.defs.defs import BASE_BRANCH
 from praktika.info import Info
 from praktika.result import Result
 from praktika.utils import Shell
@@ -58,9 +60,16 @@ def regenerate():
 
 
 def _open_bot_pr():
-    """Return the number of the open bot pull request for BRANCH, or "" if none."""
+    """Return the number of the open bot pull request for BRANCH in the base
+    repository, or "" if none.
+
+    `gh pr list --head` matches by bare branch name, so a fork PR opened from a
+    branch also named BRANCH would show up too. Filter to non-cross-repository
+    PRs so we only ever act on the bot's own PR in the base repo, never someone
+    else's fork PR."""
     return Shell.get_output(
-        f"gh pr list --head {BRANCH} --state open --json number --jq '.[0].number // empty'"
+        f"gh pr list --head {BRANCH} --state open --json number,isCrossRepository"
+        " --jq 'map(select(.isCrossRepository == false)) | .[0].number // empty'"
     ).strip()
 
 
@@ -127,19 +136,45 @@ def open_or_refresh_pr():
     if not _push_branch():
         return False
 
-    # Create the PR if none is open for this branch; otherwise the force-push
-    # above already refreshed it, so just ensure it still carries the label.
-    return Shell.check(
-        f"gh pr create --base master --head {BRANCH} "
-        f"--title {shlex.quote(TITLE)} --body {shlex.quote(BODY)} --label {LABEL} "
-        f"|| gh pr edit {BRANCH} --add-label {LABEL}",
-        verbose=True,
-    )
+    pr = _open_bot_pr()
+    if not pr:
+        # First run: no bot PR yet -- create it with the label.
+        return Shell.check(
+            f"gh pr create --base master --head {BRANCH} "
+            f"--title {shlex.quote(TITLE)} --body {shlex.quote(BODY)} --label {LABEL}",
+            verbose=True,
+        )
+    # Existing PR: the force-push above already refreshed it. Ensure the label is
+    # present, addressing the PR by number so a same-named fork PR is untouched.
+    return Shell.check(f"gh pr edit {pr} --add-label {LABEL}", verbose=True)
+
+
+def on_base_branch():
+    """Refuse to run unless the checkout is the base branch (master).
+
+    The workflow is SCHEDULE-triggered, but GitHub also generates a
+    `workflow_dispatch` trigger and reruns replay their original ref/sha. Since
+    this job force-pushes the stable BRANCH and manages a pull request, it must
+    not publish from a manually dispatched feature branch or a stale rerun of
+    unmerged code -- only from master."""
+    branch = Info().git_branch
+    if branch != BASE_BRANCH:
+        print(
+            f"Refusing to run: this workflow force-pushes '{BRANCH}' and manages a"
+            f" pull request, so it must run against '{BASE_BRANCH}', not '{branch}'"
+            " (e.g. a manual workflow_dispatch or a rerun from another ref).",
+            file=sys.stderr,
+        )
+        return False
+    return True
 
 
 if __name__ == "__main__":
-    results = [Result.from_commands_run(name="Regenerate docs", command=regenerate)]
-    # Fail closed: only touch the pull request when regeneration succeeded.
+    results = [Result.from_commands_run(name="Run against master", command=on_base_branch)]
+    # Fail closed: only regenerate / touch the pull request when the guard and
+    # each prior step succeeded.
+    if results[-1].is_ok():
+        results.append(Result.from_commands_run(name="Regenerate docs", command=regenerate))
     if results[-1].is_ok():
         results.append(
             Result.from_commands_run(
