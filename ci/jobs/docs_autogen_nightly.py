@@ -4,8 +4,14 @@ from praktika.info import Info
 from praktika.result import Result
 from praktika.utils import Shell
 
-# The self-extracting master binary downloaded from the CH_ARM_BINARY artifact.
-BINARY = "ci/tmp/build/programs/self-extracting/clickhouse"
+# The self-extracting master binary from the CH_ARM_BINARY artifact. Required
+# artifacts are downloaded into the input dir under their basename, so it lands
+# at ci/tmp/clickhouse (not the producer's build tree), as a plain file that
+# must be made executable before use -- the same convention other consumers
+# follow (e.g. ci/jobs/install_check.py). The generator resolves the path to an
+# absolute one, so a repo-relative value is fine even though it runs the binary
+# from a scratch directory.
+BINARY = "ci/tmp/clickhouse"
 GENERATOR = "ci/jobs/scripts/docs/autogenerate/autogenerate_docs.py"
 
 # A stable branch, force-pushed each run, so the bot keeps a single open PR that
@@ -41,9 +47,12 @@ regenerates the artifacts.
 
 
 def regenerate():
-    """Regenerate the docs tree in place from the master binary."""
+    """Regenerate the docs tree in place from the master binary.
+
+    The artifact downloader materializes a plain file, so make it executable
+    before invoking the generator."""
     return Shell.check(
-        f"python3 {GENERATOR} --write --binary {BINARY} --docs-dir docs",
+        f"chmod +x {BINARY} && python3 {GENERATOR} --write --binary {BINARY} --docs-dir docs",
         verbose=True,
     )
 
