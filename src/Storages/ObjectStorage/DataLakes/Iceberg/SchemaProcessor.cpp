@@ -565,7 +565,10 @@ std::shared_ptr<ActionsDAG> IcebergSchemaProcessor::getSchemaTransformationDag(
                 String new_type = field->getValue<String>(f_type);
 
                 const ActionsDAG::Node * node = old_node;
-                if (old_type == new_type)
+                /// Parameterized primitive types (decimal, geography, ...) can be serialized with
+                /// different spacing across metadata files, so compare ignoring ASCII whitespace:
+                /// a whitespace-only difference is the same type and needs only a rename, not a cast.
+                if (removeWhitespace(old_type) == removeWhitespace(new_type))
                 {
                     if (old_json->getValue<String>(f_name) != name)
                     {

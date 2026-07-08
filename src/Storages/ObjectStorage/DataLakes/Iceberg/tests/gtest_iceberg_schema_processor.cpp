@@ -199,6 +199,25 @@ TEST(IcebergSchemaProcessor, GeographyTypeWhitespaceIsInsensitive)
     EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
 }
 
+/// Schema-evolution path: renaming a geo field across two schema-ids while only changing the
+/// whitespace of its parameterized type string must resolve to a rename, so the transform DAG
+/// exposes the NEW column name. Without whitespace-insensitive comparison the old node is kept
+/// unchanged and the DAG would still expose the old name.
+TEST(IcebergSchemaProcessor, RenameGeoFieldAcrossSchemaIdsWithWhitespaceIsRename)
+{
+    auto old_schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"a","required":false,"type":"geography(C,A)"}]})json");
+    auto new_schema = parseSchema(R"json({"schema-id":1,"fields":[{"id":1,"name":"b","required":false,"type":"geography(C, A)"}]})json");
+    IcebergSchemaProcessor processor(/*allow_geo_parser_=*/true);
+    processor.addIcebergTableSchema(old_schema);
+    processor.addIcebergTableSchema(new_schema);
+
+    auto dag = processor.getSchemaTransformationDagByIds(0, 1);
+    ASSERT_TRUE(dag);
+    const auto & outputs = dag->getOutputs();
+    ASSERT_EQ(outputs.size(), 1u);
+    EXPECT_EQ(outputs[0]->result_name, "b");
+}
+
 /// A genuinely different nested type inside a list wrapper must still be rejected.
 TEST(IcebergSchemaProcessor, RebindingListElementToDifferentTypeStillRejected)
 {
