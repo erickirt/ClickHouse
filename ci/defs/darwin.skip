@@ -37,10 +37,8 @@
 03394_distributed_sort
 04105_distributed_final_replacing
 
-# Sampling query profiler is timer-based and Linux/FreeBSD-only: it needs timer_create + SIGEV_THREAD_ID
-# to deliver a periodic per-thread signal, which macOS lacks. (The synchronous trace sources - memory
-# sampling and ProfileEvent tracing - do work on macOS.) 03150 also needs Mach-O build-id/symbolization.
-01569_query_profiler_big_query_id
+# Needs source-line symbolization (file:line:col in trace_log.lines), which reads DWARF debug info and
+# is not implemented for Mach-O on macOS. The query profiler and build_id do work on macOS now.
 03150_trace_log_add_build_id
 
 # Merge OS-CPU accounting (OSCPUVirtualTimeMicroseconds etc.) is not populated for merges on macOS;
