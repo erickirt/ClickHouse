@@ -249,8 +249,8 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
     /// call dl_iterate_phdr in the signal handler, so the PHDR cache is not needed for
     /// stack capture. Symbolization happens later in a normal thread context.
 #if !defined(THREAD_SANITIZER)
-    if (!hasPHDRCache())
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "QueryProfiler cannot be used without PHDR cache in this build");
+    if (!hasAsyncSignalSafeUnwind())
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "QueryProfiler cannot be used without async-signal-safe stack unwinding in this build");
 #endif
 
     /// `sigaction` is `#define sigaction __sigaction` on some platforms, and
