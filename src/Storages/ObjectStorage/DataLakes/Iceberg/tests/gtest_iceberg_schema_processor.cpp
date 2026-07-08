@@ -273,3 +273,25 @@ TEST(IcebergSchemaProcessor, RebindingListElementToDifferentTypeStillRejected)
     processor.addIcebergTableSchema(first);
     EXPECT_THROW(processor.addIcebergTableSchema(second), DB::Exception);
 }
+
+/// Spacing normalization only removes whitespace adjacent to the delimiters '(', ')', '[', ']', ','.
+/// Whitespace embedded inside a numeric token is not formatting, so malformed spellings such as
+/// "decimal(2 0,0)" or "fixed[1 6]" must NOT canonicalize to a valid type and must still be rejected.
+TEST(IcebergSchemaProcessor, GetSimpleTypeDecimalMalformedInnerTokenWhitespaceThrows)
+{
+    EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("decimal(2 0,0)"), DB::Exception);
+}
+
+TEST(IcebergSchemaProcessor, GetSimpleTypeFixedMalformedInnerTokenWhitespaceThrows)
+{
+    EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("fixed[1 6]"), DB::Exception);
+}
+
+/// The same malformed spelling must be rejected when it appears as an initial schema type, i.e. the
+/// broadened normalization must not let invalid metadata pass through addIcebergTableSchema.
+TEST(IcebergSchemaProcessor, InitialSchemaDecimalMalformedInnerTokenWhitespaceThrows)
+{
+    auto schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(2 0,0)"}]})json");
+    IcebergSchemaProcessor processor;
+    EXPECT_THROW(processor.addIcebergTableSchema(schema), DB::Exception);
+}

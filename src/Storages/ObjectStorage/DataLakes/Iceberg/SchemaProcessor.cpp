@@ -120,13 +120,33 @@ bool equals(const T & first, const T & second)
 
 bool schemasAreIdentical(const Poco::JSON::Object & first, const Poco::JSON::Object & second, const std::unordered_map<String, String> & type_mapping);
 
-String removeWhitespace(const String & s)
+/// Canonicalize spacing in an Iceberg primitive type string by removing ASCII whitespace that is
+/// only optional formatting around the delimiters '(', ')', '[', ']', ',' (and at the string edges).
+/// Whitespace embedded inside a token (e.g. between the digits of "decimal(2 0,0)") is preserved so
+/// that malformed spellings remain malformed and are still rejected by the parser.
+String canonicalizeTypeSpacing(const String & s)
 {
+    auto is_delimiter = [](char c) { return c == '(' || c == ')' || c == '[' || c == ']' || c == ','; };
     String result;
     result.reserve(s.size());
-    for (char c : s)
-        if (!isWhitespaceASCII(c))
-            result.push_back(c);
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        if (!isWhitespaceASCII(s[i]))
+        {
+            result.push_back(s[i]);
+            continue;
+        }
+        const char prev = result.empty() ? '\0' : result.back();
+        size_t j = i + 1;
+        while (j < s.size() && isWhitespaceASCII(s[j]))
+            ++j;
+        const char next = j < s.size() ? s[j] : '\0';
+        /// Drop whitespace only when it is next to a delimiter or at the start/end of the string;
+        /// keep it when it sits between two token characters.
+        const bool drop = prev == '\0' || next == '\0' || is_delimiter(prev) || is_delimiter(next);
+        if (!drop)
+            result.push_back(s[i]);
+    }
     return result;
 }
 
@@ -154,7 +174,7 @@ bool typesAreStructurallyIdentical(
     /// Primitive type strings: e.g. both "decimal(20,0)" and "decimal(20, 0)" denote the same
     /// type. Different writers emit different spacing, so ignore ASCII whitespace.
     if (first.isString() && second.isString())
-        return removeWhitespace(first.toString()) == removeWhitespace(second.toString());
+        return canonicalizeTypeSpacing(first.toString()) == canonicalizeTypeSpacing(second.toString());
 
     const bool both_objects
         = first.type() == typeid(Poco::JSON::Object::Ptr) && second.type() == typeid(Poco::JSON::Object::Ptr);
@@ -364,7 +384,7 @@ DataTypePtr IcebergSchemaProcessor::getSimpleType(const String & type_name_arg, 
     /// Parameterized primitive type strings (decimal(P, S), fixed[N], geography(...)) can be
     /// serialized with different inner whitespace across metadata files. Canonicalize by removing
     /// ASCII whitespace so parsing accepts every spelling the whitespace-insensitive comparison does.
-    const String type_name = removeWhitespace(type_name_arg);
+    const String type_name = canonicalizeTypeSpacing(type_name_arg);
 
     if (type_name == f_boolean)
         return DataTypeFactory::instance().get("Bool");
@@ -407,6 +427,9 @@ DataTypePtr IcebergSchemaProcessor::getSimpleType(const String & type_name_arg, 
         ReadBufferFromString buf(std::string_view(type_name.begin() + 6, type_name.end() - 1));
         size_t n = 0;
         readIntText(n, buf);
+        /// Reject trailing garbage such as embedded whitespace ("fixed[1 6]"): the canonicalized
+        /// form of a valid spelling has no characters left after the size.
+        assertEOF(buf);
         return std::make_shared<DataTypeFixedString>(n);
     }
 
@@ -506,8 +529,8 @@ bool IcebergSchemaProcessor::allowPrimitiveTypeConversion(const String & old_typ
 {
     /// Match the whitespace-insensitive rules of the comparison and the parser: a whitespace-only
     /// difference in a parameterized type string denotes the identical type.
-    const String old_type = removeWhitespace(old_type_arg);
-    const String new_type = removeWhitespace(new_type_arg);
+    const String old_type = canonicalizeTypeSpacing(old_type_arg);
+    const String new_type = canonicalizeTypeSpacing(new_type_arg);
 
     bool allowed_type_conversion = (old_type == new_type);
     allowed_type_conversion |= (old_type == f_int) && (new_type == f_long);
@@ -578,7 +601,7 @@ std::shared_ptr<ActionsDAG> IcebergSchemaProcessor::getSchemaTransformationDag(
                 /// Parameterized primitive types (decimal, geography, ...) can be serialized with
                 /// different spacing across metadata files, so compare ignoring ASCII whitespace:
                 /// a whitespace-only difference is the same type and needs only a rename, not a cast.
-                if (removeWhitespace(old_type) == removeWhitespace(new_type))
+                if (canonicalizeTypeSpacing(old_type) == canonicalizeTypeSpacing(new_type))
                 {
                     if (old_json->getValue<String>(f_name) != name)
                     {
