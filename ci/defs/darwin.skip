@@ -37,10 +37,6 @@
 03394_distributed_sort
 04105_distributed_final_replacing
 
-# Needs source-line symbolization (file:line:col in trace_log.lines), which reads DWARF debug info and
-# is not implemented for Mach-O on macOS. The query profiler and build_id do work on macOS now.
-03150_trace_log_add_build_id
-
 # Merge OS-CPU accounting (OSCPUVirtualTimeMicroseconds etc.) is not populated for merges on macOS;
 # unrelated to the query profiler.
 03221_merge_profile_events
