@@ -15,6 +15,17 @@
 #include <Common/thread_local_rng.h>
 #include <csignal>
 
+#if defined(OS_DARWIN)
+#include <condition_variable>
+#include <map>
+#include <mutex>
+#include <thread>
+#include <utility>
+#include <pthread.h>
+#include <mach/mach.h>
+#include <mach/thread_act.h>
+#endif
+
 #include "config.h"
 
 
@@ -239,12 +250,171 @@ void Timer::cleanup()
 }
 #endif
 
+#if defined(OS_DARWIN)
+namespace
+{
+    UInt64 nowMonotonicNs()
+    {
+        struct timespec ts{};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<UInt64>(ts.tv_sec) * TIMER_PRECISION + static_cast<UInt64>(ts.tv_nsec);
+    }
+
+    /// Sum of user + system CPU time consumed by a thread, in nanoseconds, via the Mach kernel.
+    /// macOS has no per-thread CPU timer (CLOCK_THREAD_CPUTIME_ID is self-only), so the sampler
+    /// polls this to drive the CPU profiler.
+    UInt64 threadCpuNs(mach_port_t mach_thread)
+    {
+        thread_basic_info_data_t info{};
+        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+        if (thread_info(mach_thread, THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS)
+            return 0;
+        auto to_ns = [](const time_value_t & t)
+        { return static_cast<UInt64>(t.seconds) * TIMER_PRECISION + static_cast<UInt64>(t.microseconds) * 1000; };
+        return to_ns(info.user_time) + to_ns(info.system_time);
+    }
+
+    /// macOS has neither timer_create nor SIGEV_THREAD_ID, so per-thread periodic sampling is driven
+    /// by a single background thread that delivers the pause signal to each registered thread via
+    /// pthread_kill. This is the centralized equivalent of the Linux per-thread POSIX timer: the
+    /// signal handler is identical, only the "who fires it" mechanism differs.
+    class ProfilerSampler
+    {
+    public:
+        static ProfilerSampler & instance()
+        {
+            static ProfilerSampler sampler;
+            return sampler;
+        }
+
+        void add(pthread_t thread, int clock_type, UInt64 period_ns, int signal)
+        {
+            std::lock_guard lock(mutex);
+            auto & reg = registrations[{reinterpret_cast<uintptr_t>(thread), signal}];
+            reg.thread = thread;
+            reg.mach_thread = pthread_mach_thread_np(thread);
+            reg.signal = signal;
+            reg.is_cpu = (clock_type == CLOCK_THREAD_CPUTIME_ID);
+            reg.period_ns = clampPeriod(period_ns);
+            reg.next_real_ns = nowMonotonicNs() + reg.period_ns;
+            reg.last_cpu_ns = reg.is_cpu ? threadCpuNs(reg.mach_thread) : 0;
+            ensureThreadStarted();
+            cond.notify_all();
+        }
+
+        void setPeriod(pthread_t thread, int signal, UInt64 period_ns)
+        {
+            std::lock_guard lock(mutex);
+            auto it = registrations.find({reinterpret_cast<uintptr_t>(thread), signal});
+            if (it != registrations.end())
+                it->second.period_ns = clampPeriod(period_ns);
+        }
+
+        void remove(pthread_t thread, int signal)
+        {
+            std::lock_guard lock(mutex);
+            registrations.erase({reinterpret_cast<uintptr_t>(thread), signal});
+        }
+
+        ~ProfilerSampler()
+        {
+            {
+                std::lock_guard lock(mutex);
+                shutdown = true;
+            }
+            cond.notify_all();
+            if (sampler_thread.joinable())
+                sampler_thread.join();
+        }
+
+    private:
+        struct Registration
+        {
+            pthread_t thread{};
+            mach_port_t mach_thread = 0;
+            int signal = 0;
+            bool is_cpu = false;
+            UInt64 period_ns = 0;
+            UInt64 next_real_ns = 0;
+            UInt64 last_cpu_ns = 0;
+        };
+
+        /// Cap frequency at 1000 signals/sec, matching the Linux Timer::set floor.
+        static UInt64 clampPeriod(UInt64 period_ns) { return std::max<UInt64>(period_ns, 1'000'000); }
+
+        void ensureThreadStarted()
+        {
+            if (!thread_started)
+            {
+                sampler_thread = std::thread([this] { run(); });
+                thread_started = true;
+            }
+        }
+
+        void run()
+        {
+            pthread_setname_np("QueryProfiler");
+
+            std::unique_lock lock(mutex);
+            while (!shutdown)
+            {
+                if (registrations.empty())
+                {
+                    cond.wait(lock);
+                    continue;
+                }
+
+                UInt64 now = nowMonotonicNs();
+                for (auto & [key, reg] : registrations)
+                {
+                    bool fire = false;
+                    if (reg.is_cpu)
+                    {
+                        /// Approximate a per-thread CPU timer: fire once the thread has consumed
+                        /// another period's worth of CPU time since the last sample.
+                        UInt64 cpu = threadCpuNs(reg.mach_thread);
+                        if (cpu - reg.last_cpu_ns >= reg.period_ns)
+                        {
+                            fire = true;
+                            reg.last_cpu_ns = cpu;
+                        }
+                    }
+                    else if (now >= reg.next_real_ns)
+                    {
+                        fire = true;
+                        reg.next_real_ns = now + reg.period_ns;
+                    }
+
+                    /// pthread_kill returns ESRCH if the thread is already gone; the owning
+                    /// QueryProfiler removes its registration before the thread exits, so this is benign.
+                    if (fire)
+                        pthread_kill(reg.thread, reg.signal);
+                }
+
+                /// Poll at a fixed granularity. Real timers still fire on their own schedule via
+                /// next_real_ns; CPU timers need periodic polling of thread_info.
+                cond.wait_for(lock, std::chrono::milliseconds(1));
+            }
+        }
+
+        std::mutex mutex;
+        std::condition_variable cond;
+        /// Keyed by (thread, signal): one thread can run both a Real (SIGUSR1) and a CPU (SIGUSR2)
+        /// profiler at once, so the signal must be part of the key or one would overwrite the other.
+        std::map<std::pair<uintptr_t, int>, Registration> registrations;
+        std::thread sampler_thread;
+        bool thread_started = false;
+        std::atomic<bool> shutdown = false;
+    };
+}
+#endif
+
 template <typename ProfilerImpl>
 QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
     [[maybe_unused]] UInt64 thread_id, [[maybe_unused]] int clock_type, [[maybe_unused]] UInt64 period, [[maybe_unused]] int pause_signal_)
     : log(getLogger("QueryProfiler")), pause_signal(pause_signal_)
 {
-#if defined(SIGEV_THREAD_ID)
+#if defined(SIGEV_THREAD_ID) || defined(OS_DARWIN)
     /// Under TSan we use frame-pointer-based unwinding (via abseil) which does not
     /// call dl_iterate_phdr in the signal handler, so the PHDR cache is not needed for
     /// stack capture. Symbolization happens later in a normal thread context.
@@ -274,13 +444,22 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
 
     try
     {
+#if defined(SIGEV_THREAD_ID)
         timer.createIfNecessary(thread_id, clock_type, pause_signal);
         timer.set(period);
+#else
+        /// macOS: a shared background thread delivers the signal via pthread_kill (see ProfilerSampler).
+        ProfilerSampler::instance().add(pthread_self(), clock_type, period, pause_signal);
+#endif
         signal_handler_disarmed = false;
     }
     catch (...)
     {
+#if defined(SIGEV_THREAD_ID)
         timer.cleanup();
+#else
+        ProfilerSampler::instance().remove(pthread_self(), pause_signal);
+#endif
         throw;
     }
 #else
@@ -294,6 +473,8 @@ void QueryProfilerBase<ProfilerImpl>::setPeriod([[maybe_unused]] UInt64 period_)
 {
 #if defined(SIGEV_THREAD_ID)
     timer.set(period_);
+#elif defined(OS_DARWIN)
+    ProfilerSampler::instance().setPeriod(pthread_self(), pause_signal, period_);
 #else
     throw Exception(ErrorCodes::NOT_IMPLEMENTED, "QueryProfiler requires SIGEV_THREAD_ID");
 #endif
@@ -317,6 +498,9 @@ void QueryProfilerBase<ProfilerImpl>::cleanup()
 {
 #if defined(SIGEV_THREAD_ID)
     timer.stop();
+    signal_handler_disarmed = true;
+#elif defined(OS_DARWIN)
+    ProfilerSampler::instance().remove(pthread_self(), pause_signal);
     signal_handler_disarmed = true;
 #endif
 }

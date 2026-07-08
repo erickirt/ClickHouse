@@ -19,7 +19,9 @@ class Context;
 #ifdef OS_LINUX
 const int STACK_TRACE_SERVICE_SIGNAL = SIGRTMIN;
 #else
-const int STACK_TRACE_SERVICE_SIGNAL = SIGUSR1;
+/// macOS has no real-time signals; SIGUSR1/SIGUSR2 are the query profiler's, so use the free
+/// virtual-timer signal here.
+const int STACK_TRACE_SERVICE_SIGNAL = SIGVTALRM;
 #endif
 
 /// Allows to introspect stack trace of all server threads.
