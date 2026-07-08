@@ -24,14 +24,15 @@ namespace DB::JemallocMergeTreeArena
 /// subsequent calls are ignored.
 ///   num_arenas == 0 -> disabled: `getArenaIndex` returns 0 (default arena selection), a no-op.
 ///   num_arenas == 1 -> one shared arena.
-///   num_arenas  > 1 -> a pool sharded by CPU (`cpu_id % N`). Capped at the CPU count, since
-///                      routing is per-CPU and any arena beyond that would never be selected;
-///                      pass a large value (or the core count) to get one arena per CPU.
+///   num_arenas  > 1 -> a per-CPU pool. Capped at the number of CPUs the process may run on (its
+///                      affinity mask); a large value (or the core count) yields one arena per
+///                      allowed CPU. A dense CPU->slot map keeps every created arena reachable even
+///                      under a restrictive or sparse affinity mask.
 void initialize(size_t num_arenas);
 
 /// Arena index for the calling thread's current CPU, or 0 (default arena) when disabled or not
-/// yet initialized. Resolved per call from the current CPU rather than cached per thread, so a
-/// thread that migrates CPUs follows its CPU's arena instead of pinning a foreign one.
+/// yet initialized. Resolved per call from the current CPU (via the CPU->slot map) rather than
+/// cached per thread, so a thread that migrates CPUs follows its CPU's arena.
 unsigned getArenaIndex();
 
 /// All arena indices in the pool (empty when disabled). For metrics aggregation and purge.

@@ -13,9 +13,14 @@
 #include <algorithm>
 #include <atomic>
 #include <optional>
+#include <vector>
 
 #include <fmt/format.h>
 #include <jemalloc/jemalloc.h>
+
+#if defined(OS_LINUX)
+#include <sched.h>
+#endif
 
 namespace ProfileEvents
 {
@@ -31,6 +36,9 @@ namespace
 
 /// Written once by `initialize` before `initialized` is published; read-only afterwards.
 std::vector<unsigned> arena_indices;
+/// Maps an absolute CPU id (from `getCurrentCPU`) to a slot in `arena_indices`. Sized to
+/// `MAX_CPUS`. Built so every created arena is reachable regardless of the CPU-affinity mask.
+std::vector<UInt32> slot_by_cpu;
 std::atomic<bool> initialized = false;
 
 std::optional<unsigned> createArena()
@@ -50,6 +58,30 @@ std::optional<unsigned> createArena()
     return arena_index;
 }
 
+/// CPUs this process may run on, in ascending order. Honors the affinity mask on Linux, so a
+/// cpuset-limited process only routes to the CPUs it actually uses; falls back to
+/// [0, getNumCPUs()) elsewhere.
+std::vector<UInt32> getAllowedCPUs()
+{
+    std::vector<UInt32> cpus;
+#if defined(OS_LINUX)
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (sched_getaffinity(0, sizeof(set), &set) == 0)
+    {
+        for (UInt32 cpu = 0; cpu < PerCPU::MAX_CPUS; ++cpu)
+            if (CPU_ISSET(cpu, &set))
+                cpus.push_back(cpu);
+    }
+#endif
+    if (cpus.empty())
+    {
+        for (UInt32 cpu = 0; cpu < PerCPU::getNumCPUs(); ++cpu)
+            cpus.push_back(cpu);
+    }
+    return cpus;
+}
+
 }
 
 void initialize(size_t num_arenas)
@@ -58,21 +90,38 @@ void initialize(size_t num_arenas)
     if (initialized.load(std::memory_order_acquire))
         return;
 
-    /// Routing is `cpu_id % N`, so arenas beyond the CPU count would never be selected.
-    if (num_arenas > 1)
-        num_arenas = std::min(num_arenas, static_cast<size_t>(PerCPU::getNumCPUs()));
-
-    std::vector<unsigned> indices;
-    indices.reserve(num_arenas);
-    for (size_t i = 0; i < num_arenas; ++i)
+    if (num_arenas > 0)
     {
-        auto index = createArena();
-        if (!index)
-            break; /// Keep whatever we managed to create; the rest falls back to the default arena.
-        indices.push_back(*index);
+        /// Size the pool to the CPUs we can actually route to and build a dense CPU->slot map, so
+        /// every created arena receives allocations even under a restrictive or sparse affinity
+        /// mask (`cpu_id % N` alone would leave arenas unreachable and overstate the count).
+        const std::vector<UInt32> allowed_cpus = getAllowedCPUs();
+        num_arenas = std::min(num_arenas, allowed_cpus.size());
+
+        std::vector<unsigned> indices;
+        indices.reserve(num_arenas);
+        for (size_t i = 0; i < num_arenas; ++i)
+        {
+            auto index = createArena();
+            if (!index)
+                break; /// Keep whatever we managed to create; the rest falls back to the default arena.
+            indices.push_back(*index);
+        }
+
+        if (!indices.empty())
+        {
+            slot_by_cpu.assign(PerCPU::MAX_CPUS, 0);
+            for (size_t dense = 0; dense < allowed_cpus.size(); ++dense)
+            {
+                const UInt32 cpu = allowed_cpus[dense];
+                if (cpu < PerCPU::MAX_CPUS)
+                    slot_by_cpu[cpu] = static_cast<UInt32>(dense % indices.size());
+            }
+        }
+
+        arena_indices = std::move(indices);
     }
 
-    arena_indices = std::move(indices);
     initialized.store(true, std::memory_order_release);
 }
 
@@ -87,9 +136,10 @@ unsigned getArenaIndex()
     if (n == 1)
         return arena_indices[0];
 
-    Int32 cpu = PerCPU::getCurrentCPU();
-    size_t slot = cpu < 0 ? 0 : static_cast<UInt32>(cpu) % n;
-    return arena_indices[slot];
+    const Int32 cpu = PerCPU::getCurrentCPU();
+    if (cpu < 0 || static_cast<size_t>(cpu) >= slot_by_cpu.size())
+        return arena_indices[0];
+    return arena_indices[slot_by_cpu[cpu]];
 }
 
 const std::vector<unsigned> & getArenaIndices()
