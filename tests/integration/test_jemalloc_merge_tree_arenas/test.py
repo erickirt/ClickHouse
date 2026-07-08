@@ -8,6 +8,8 @@
 #     (0 disabled, 1 single, N sharded, capped at the CPU core count),
 #   - routing follows the count (disabled -> no active_bytes metric; a pool -> arena fills up).
 
+import re
+
 import pytest
 
 from helpers.cluster import ClickHouseCluster
@@ -113,3 +115,56 @@ def test_pool_arena_accumulates(started_cluster):
         ).strip()
     )
     assert active_bytes > 0
+
+
+def manual_arena_active_bytes(node):
+    # Per-arena live ("active") bytes for the manually-created arenas from malloc_stats_print. Those
+    # are the dedicated MergeTree pool plus the cache/JIT arenas; the auto (per-CPU) arenas used for
+    # transient allocations are excluded.
+    text = node.query("SELECT stats FROM system.jemalloc_stats FORMAT TSVRaw")
+    result = {}
+    for block in re.split(r"\narenas\[", text)[1:]:
+        index_match = re.match(r"(\d+)\]", block)
+        if not index_match or not re.search(r'name:\s*"manual', block):
+            continue
+        active_match = re.search(r"\nactive:\s+(\d+)", block)
+        if active_match:
+            result[int(index_match.group(1))] = int(active_match.group(1))
+    return result
+
+
+def test_pool_shards_across_arenas(started_cluster):
+    if not jemalloc_built_in(node_pool):
+        pytest.skip("built without jemalloc")
+    if arena_count(node_pool) < 2:
+        pytest.skip("pool collapsed to a single arena (fewer than 2 routable CPUs)")
+
+    node_pool.query("DROP TABLE IF EXISTS t_shard SYNC")
+    node_pool.query(
+        "CREATE TABLE t_shard (id UInt64, "
+        + ", ".join(f"c{i} String" for i in range(40))
+        + ") ENGINE = MergeTree ORDER BY id "
+        "SETTINGS min_bytes_for_wide_part = 0, min_rows_for_wide_part = 0"
+    )
+
+    before = manual_arena_active_bytes(node_pool)
+
+    # Many small wide parts produce many concurrent background merges, which run on the merge thread
+    # pool spread across CPUs, so per-part metadata is allocated from several pool arenas rather than
+    # a single one.
+    cols = ", ".join(f"toString(number + {i})" for i in range(40))
+    for batch in range(20):
+        node_pool.query(
+            f"INSERT INTO t_shard SELECT number + {batch} * 100000, {cols} FROM numbers(1500)",
+            settings={"max_insert_block_size": 150, "min_insert_block_size_rows": 150},
+        )
+    for _ in range(5):
+        node_pool.query("OPTIMIZE TABLE t_shard FINAL", ignore_error=True)
+
+    after = manual_arena_active_bytes(node_pool)
+    node_pool.query("DROP TABLE t_shard SYNC")
+
+    # Dedicated arenas that gained a non-trivial amount of live metadata. If routing were broken
+    # (every allocation to arena 0) at most one would grow beyond the small cache-arena churn.
+    grew = sorted(idx for idx, after_bytes in after.items() if after_bytes > before.get(idx, 0) + 1024 * 1024)
+    assert len(grew) >= 2, f"metadata landed in only {len(grew)} dedicated arena(s): {grew}"
