@@ -1,5 +1,6 @@
 import shlex
 
+from praktika.info import Info
 from praktika.result import Result
 from praktika.utils import Shell
 
@@ -54,6 +55,33 @@ def _open_bot_pr():
     ).strip()
 
 
+def _push_branch():
+    """Force-push HEAD to BRANCH authenticated as the GitHub App.
+
+    `actions/checkout` persists the workflow `GITHUB_TOKEN` in
+    `http.https://github.com/.extraheader`, and pushes authenticated that way do
+    not re-trigger workflows -- so the pull request's `synchronize` CI would never
+    run on refreshed docs. Push with the App token from `enable_gh_auth` instead
+    (read from the gh session and kept out of the logs via `verbose=False`), and
+    clear the inherited extraheader so the tokenized URL is what authenticates.
+    Mirrors the workflow-YAML push in `ci/praktika/native_jobs.py`.
+
+    The token expands at runtime, so its literal `${token}` is kept out of the
+    f-string and the URL is assembled by concatenation."""
+    repo_url = (
+        "https://x-access-token:${token}@github.com/"
+        + shlex.quote(Info().repo_name)
+        + ".git"
+    )
+    push_cmd = (
+        'token="$(gh auth token)" && '
+        "git -c http.https://github.com/.extraheader= push -f "
+        + repo_url
+        + f" HEAD:refs/heads/{BRANCH}"
+    )
+    return Shell.check(push_cmd, verbose=False)
+
+
 def open_or_refresh_pr():
     """Commit the regenerated docs and open (or refresh) the bot's pull request.
 
@@ -83,9 +111,11 @@ def open_or_refresh_pr():
         f"git checkout -B {BRANCH}",
         "git add -A docs/",
         f"git commit -m {shlex.quote(TITLE)}",
-        f"git push -f origin {BRANCH}",
     ]
     if not Shell.check(" && ".join(commit), verbose=True):
+        return False
+
+    if not _push_branch():
         return False
 
     # Create the PR if none is open for this branch; otherwise the force-push
