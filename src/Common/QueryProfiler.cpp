@@ -13,6 +13,7 @@
 #include <Common/TraceSender.h>
 #include <Common/logger_useful.h>
 #include <Common/thread_local_rng.h>
+#include <Common/setThreadName.h>
 #include <csignal>
 
 #if defined(OS_DARWIN)
@@ -353,7 +354,7 @@ namespace
 
         void run()
         {
-            pthread_setname_np("QueryProfiler");
+            setThreadName(ThreadName::QUERY_PROFILER);
 
             std::unique_lock lock(mutex);
             while (!shutdown)
