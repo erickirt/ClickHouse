@@ -37,10 +37,6 @@
 03394_distributed_sort
 04105_distributed_final_replacing
 
-# Merge OS-CPU accounting (OSCPUVirtualTimeMicroseconds etc.) is not populated for merges on macOS;
-# unrelated to the query profiler.
-03221_merge_profile_events
-
 # Transactions are not supported on this build (experimental, NOT_IMPLEMENTED).
 03803_transaction_mutation_race
 03916_attach_as_replicated_implicit_transaction
