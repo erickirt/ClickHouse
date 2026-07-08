@@ -1285,7 +1285,9 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
     ///   - `loadColumns`: its file read and text/JSON parsing are short-lived scratch; the
     ///     persistent columns/serializations it produces are arena-scoped inside `setColumns`.
     ///   - `checkConsistency`: pure file-existence/size verification, allocates nothing persistent.
-    ///   - `loadDefaultCompressionCodec` / `loadSourcePartsSet`: tiny tail.
+    ///   - `loadDefaultCompressionCodec`: a tiny per-part codec pointer.
+    /// (`loadSourcePartsSet` runs after this block but scopes itself into the arena, as its
+    /// patch-part metadata is part-lifetime.)
     /// These paths churn many short-lived allocations; keeping them in the default per-CPU arenas
     /// avoids serializing that churn on the single arena's locks under many concurrent merges.
 
@@ -1643,6 +1645,10 @@ void IMergeTreeDataPart::loadSourcePartsSet()
 {
     if (!info.isPatch())
         return;
+
+    /// For patch parts `source_parts_set` (`min_max_versions_by_part` / `source_parts_by_version`)
+    /// is part-lifetime metadata, so route it into the dedicated arena like the other loaders.
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
 
     if (auto in = readFileIfExists(SourcePartsSetForPatch::FILENAME))
         source_parts_set.readBinary(*in);
