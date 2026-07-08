@@ -77,3 +77,17 @@
 -- empty input field into Nullable(Tuple(Int32)): NULL, "(5)" parses
 \N
 (5)
+-- backward-compat input: legacy separate-columns encoding (1,"a") reads into Nullable(Tuple)
+(1,'a')
+-- backward-compat input: new single-field encoding still reads (with NULL rows)
+(1,'a')
+\N
+(2,'b')
+-- backward-compat input: legacy separate-columns followed by a trailing plain column (\N NULL row too)
+(1,'a')	5
+\N	7
+-- backward-compat input: CSVWithNames, legacy flattened header + separate-columns data, use_header = 0
+(1,'a')
+\N
+-- backward-compat input off: with the setting = 0 only the single-field encoding is accepted
+(3,'c')

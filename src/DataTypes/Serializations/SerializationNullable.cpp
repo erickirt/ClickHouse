@@ -12,7 +12,6 @@
 #include <Formats/FormatSettings.h>
 #include <Formats/ParseError.h>
 
-#include <optional>
 #include <IO/ReadBuffer.h>
 #include <IO/ReadHelpers.h>
 #include <IO/WriteBuffer.h>
@@ -822,27 +821,50 @@ ReturnType deserializeTextCSVImpl(IColumn & column, ReadBuffer & istr, const For
     return deserializeImpl<ReturnType>(column, peekable_buf, check_for_null, deserialize_nested_with_check, is_null);
 }
 
-/// A Nullable(Tuple) value is written as a single CSV field (see serializeTextCSV), so it must be
-/// read back as one field too. Disable separate-columns parsing for the nested tuple to keep the
-/// input symmetric with the output (issue #107342).
-static void adjustCSVSettingsForNullableTuple(
-    const SerializationPtr & nested, const FormatSettings & settings, std::optional<FormatSettings> & storage)
+/// A Nullable(Tuple) value is written as a single CSV field (see serializeTextCSV). On input we
+/// accept BOTH encodings so data written by any version round-trips: the new single quoted field,
+/// and - when input_format_csv_deserialize_separate_columns_into_tuple = 1 - the legacy
+/// separate-columns encoding older versions emitted for non-null rows. Try the single-field
+/// encoding first (it also handles the \N NULL field); on a parse failure roll back and read the
+/// legacy separate-columns encoding (issue #107342).
+template <typename ReturnType>
+static ReturnType deserializeNullableTupleTextCSV(
+    IColumn & nested_column, ReadBuffer & istr, const FormatSettings & settings,
+    const SerializationPtr & nested, bool & is_null)
 {
-    if (settings.csv.deserialize_separate_columns_into_tuple && typeid_cast<const SerializationTuple *>(nested.get()))
+    FormatSettings single_field_settings = settings;
+    single_field_settings.csv.deserialize_separate_columns_into_tuple = false;
+
+    PeekableReadBuffer peekable_buf(istr, true);
+    peekable_buf.setCheckpoint();
+
+    bool single_field_is_null = false;
+    if (deserializeTextCSVImpl<bool>(nested_column, peekable_buf, single_field_settings, nested, single_field_is_null))
     {
-        storage = settings;
-        storage->csv.deserialize_separate_columns_into_tuple = false;
+        peekable_buf.dropCheckpoint();
+        is_null = single_field_is_null;
+        return ReturnType(true);
     }
+
+    /// The single-field encoding did not parse: roll back and read the legacy separate-columns
+    /// encoding with the original settings (deserialize_separate_columns_into_tuple = true).
+    peekable_buf.rollbackToCheckpoint(true);
+    return deserializeTextCSVImpl<ReturnType>(nested_column, peekable_buf, settings, nested, is_null);
+}
+
+static bool isNullableTupleWithSeparateColumns(const SerializationPtr & nested, const FormatSettings & settings)
+{
+    return settings.csv.deserialize_separate_columns_into_tuple && typeid_cast<const SerializationTuple *>(nested.get());
 }
 
 void SerializationNullable::deserializeTextCSV(IColumn & column, ReadBuffer & istr, const FormatSettings & settings) const
 {
     ColumnNullable & col = assert_cast<ColumnNullable &>(column);
     bool is_null = false;
-    std::optional<FormatSettings> settings_storage;
-    adjustCSVSettingsForNullableTuple(nested, settings, settings_storage);
-    const FormatSettings & effective_settings = settings_storage ? *settings_storage : settings;
-    deserializeTextCSVImpl<void>(col.getNestedColumn(), istr, effective_settings, nested, is_null);
+    if (isNullableTupleWithSeparateColumns(nested, settings))
+        deserializeNullableTupleTextCSV<void>(col.getNestedColumn(), istr, settings, nested, is_null);
+    else
+        deserializeTextCSVImpl<void>(col.getNestedColumn(), istr, settings, nested, is_null);
     safeAppendToNullMap<void>(col, is_null);
 }
 
@@ -850,10 +872,10 @@ bool SerializationNullable::tryDeserializeTextCSV(IColumn & column, ReadBuffer &
 {
     ColumnNullable & col = assert_cast<ColumnNullable &>(column);
     bool is_null = false;
-    std::optional<FormatSettings> settings_storage;
-    adjustCSVSettingsForNullableTuple(nested, settings, settings_storage);
-    const FormatSettings & effective_settings = settings_storage ? *settings_storage : settings;
-    return deserializeTextCSVImpl<bool>(col.getNestedColumn(), istr, effective_settings, nested, is_null) && safeAppendToNullMap<bool>(col, is_null);
+    bool ok = isNullableTupleWithSeparateColumns(nested, settings)
+        ? deserializeNullableTupleTextCSV<bool>(col.getNestedColumn(), istr, settings, nested, is_null)
+        : deserializeTextCSVImpl<bool>(col.getNestedColumn(), istr, settings, nested, is_null);
+    return ok && safeAppendToNullMap<bool>(col, is_null);
 }
 
 bool SerializationNullable::deserializeNullAsDefaultOrNestedTextCSV(DB::IColumn & nested_column, DB::ReadBuffer & istr, const DB::FormatSettings & settings, const DB::SerializationPtr & nested_serialization)
