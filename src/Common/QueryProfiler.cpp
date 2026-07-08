@@ -264,7 +264,7 @@ namespace
     /// Sum of user + system CPU time consumed by a thread, in nanoseconds, via the Mach kernel.
     /// macOS has no per-thread CPU timer (CLOCK_THREAD_CPUTIME_ID is self-only), so the sampler
     /// polls this to drive the CPU profiler.
-    UInt64 threadCpuNs(mach_port_t mach_thread)
+    UInt64 threadCPUNs(mach_port_t mach_thread)
     {
         thread_basic_info_data_t info{};
         mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
@@ -298,7 +298,7 @@ namespace
             reg.is_cpu = (clock_type == CLOCK_THREAD_CPUTIME_ID);
             reg.period_ns = clampPeriod(period_ns);
             reg.next_real_ns = nowMonotonicNs() + reg.period_ns;
-            reg.last_cpu_ns = reg.is_cpu ? threadCpuNs(reg.mach_thread) : 0;
+            reg.last_cpu_ns = reg.is_cpu ? threadCPUNs(reg.mach_thread) : 0;
             ensureThreadStarted();
             cond.notify_all();
         }
@@ -373,7 +373,7 @@ namespace
                     {
                         /// Approximate a per-thread CPU timer: fire once the thread has consumed
                         /// another period's worth of CPU time since the last sample.
-                        UInt64 cpu = threadCpuNs(reg.mach_thread);
+                        UInt64 cpu = threadCPUNs(reg.mach_thread);
                         if (cpu - reg.last_cpu_ns >= reg.period_ns)
                         {
                             fire = true;
