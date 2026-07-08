@@ -17,6 +17,11 @@
 struct taskstats {};
 #endif
 
+#if defined(OS_DARWIN)
+#include <mach/mach.h>
+#include <mach/thread_act.h>
+#endif
+
 /** Implement ProfileEvents with statistics about resource consumption of the current thread.
   */
 
@@ -27,6 +32,9 @@ namespace ProfileEvents
     extern const Event SystemTimeMicroseconds;
     extern const Event SoftPageFaults;
     extern const Event HardPageFaults;
+#if defined(OS_DARWIN)
+    extern const Event OSCPUVirtualTimeMicroseconds;
+#endif
 }
 
 namespace DB
@@ -73,13 +81,23 @@ struct RUsageCounters
     static RUsageCounters current()
     {
         ::rusage rusage {};
-#if !defined(OS_DARWIN)
-#if defined(OS_SUNOS)
+#if defined(OS_DARWIN)
+        /// macOS has no RUSAGE_THREAD; read per-thread user/system CPU time from the Mach kernel.
+        /// pthread_mach_thread_np does not add a port reference, so nothing needs to be deallocated.
+        thread_basic_info_data_t info{};
+        mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+        if (thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) == KERN_SUCCESS)
+        {
+            rusage.ru_utime.tv_sec = info.user_time.seconds;
+            rusage.ru_utime.tv_usec = info.user_time.microseconds;
+            rusage.ru_stime.tv_sec = info.system_time.seconds;
+            rusage.ru_stime.tv_usec = info.system_time.microseconds;
+        }
+#elif defined(OS_SUNOS)
         ::getrusage(RUSAGE_LWP, &rusage);
 #else
         ::getrusage(RUSAGE_THREAD, &rusage);
-#endif // OS_SUNOS
-#endif // __APPLE
+#endif
         return RUsageCounters(rusage, getClockMonotonic());
     }
 
@@ -97,6 +115,14 @@ struct RUsageCounters
 
         profile_events.increment(ProfileEvents::SoftPageFaults, curr.soft_page_faults - prev.soft_page_faults);
         profile_events.increment(ProfileEvents::HardPageFaults, curr.hard_page_faults - prev.hard_page_faults);
+
+#if defined(OS_DARWIN)
+        /// On Linux OSCPUVirtualTimeMicroseconds comes from taskstats (the scheduler's on-CPU "run
+        /// virtual" time), which macOS does not provide. user+system CPU time from the Mach kernel is
+        /// not exactly the same quantity, but it is the closest available equivalent.
+        profile_events.increment(ProfileEvents::OSCPUVirtualTimeMicroseconds,
+            (curr.user_time - prev.user_time + curr.sys_time - prev.sys_time) / 1000U);
+#endif
     }
 
     static void updateProfileEvents(RUsageCounters & last_counters, ProfileEvents::Counters & profile_events)
