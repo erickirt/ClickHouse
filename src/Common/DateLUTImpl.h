@@ -223,6 +223,7 @@ private:
     Time offset_at_start_of_lut;
     bool offset_is_whole_number_of_hours_during_epoch;
     bool offset_is_whole_number_of_minutes_during_epoch;
+    bool offset_is_fixed;
 
     /// Time zone name.
     std::string time_zone;
@@ -343,6 +344,11 @@ public:
     // Methods only for unit-testing, it makes very little sense to use it from user code.
     auto getOffsetAtStartOfEpoch() const { return offset_at_start_of_epoch; }
     auto getTimeOffsetAtStartOfLUT() const { return offset_at_start_of_lut; }
+
+    /// Whether the UTC offset never changes within the range of the LUT (UTC and other fixed-offset
+    /// time zones). When true, every calendar day is exactly 86400 seconds, so adding days or weeks
+    /// reduces to arithmetic on the unix timestamp.
+    bool hasFixedOffset() const { return offset_is_fixed; }
 
     static constexpr auto getDayNumOffsetEpoch()  { return daynum_offset_epoch; }
 
