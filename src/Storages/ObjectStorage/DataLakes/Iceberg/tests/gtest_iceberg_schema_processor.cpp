@@ -186,6 +186,19 @@ TEST(IcebergSchemaProcessor, MapKeyValueDecimalWhitespaceIsInsensitive)
     EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
 }
 
+/// The Iceberg geography/geometry primitives carry parameters too, e.g.
+/// "geography(crs, algorithm)", so their serialization can also differ by whitespace
+/// across metadata files. With the geo parser enabled, re-adding the same schema-id with
+/// different spacing must not be rejected.
+TEST(IcebergSchemaProcessor, GeographyTypeWhitespaceIsInsensitive)
+{
+    auto first = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"geography(C,A)"}]})json");
+    auto second = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"geography(C, A)"}]})json");
+    IcebergSchemaProcessor processor(/*allow_geo_parser_=*/true);
+    processor.addIcebergTableSchema(first);
+    EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
+}
+
 /// A genuinely different nested type inside a list wrapper must still be rejected.
 TEST(IcebergSchemaProcessor, RebindingListElementToDifferentTypeStillRejected)
 {
