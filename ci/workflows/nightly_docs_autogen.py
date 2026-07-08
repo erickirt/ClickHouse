@@ -16,14 +16,15 @@ arm_binary_build = next(
     job for job in JobConfigs.build_jobs if ArtifactNames.CH_ARM_BINARY in job.provides
 )
 
-# Runs in the docs-builder image (the docs tree + Mintlify tooling) with the built
-# binary; `enable_gh_auth` provides the GitHub App token used to push the branch
-# and open the pull request. Requiring the artifact orders it after the build.
+# Runs directly on the runner (no container), matching the other `enable_gh_auth`
+# jobs: the generator only needs python3 and the built `clickhouse` binary, and
+# the pull-request management needs `gh`, which the runner provides. `enable_gh_auth`
+# supplies the GitHub App token used to push the branch and open the pull request.
+# Requiring the artifact orders it after the build.
 docs_autogen_job = Job.Config(
     name="Docs autogenerate",
     runs_on=RunnerLabels.FUNC_TESTER_ARM,
     command="python3 ./ci/jobs/docs_autogen_nightly.py",
-    run_in_docker="clickhouse/docs-builder",
     requires=[ArtifactNames.CH_ARM_BINARY],
     enable_gh_auth=True,
 )
