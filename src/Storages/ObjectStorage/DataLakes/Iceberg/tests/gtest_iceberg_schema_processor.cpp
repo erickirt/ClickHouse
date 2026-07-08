@@ -125,6 +125,22 @@ TEST(IcebergSchemaProcessor, GetSimpleTypeUnknownThrows)
     EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("unknown_type"), DB::Exception);
 }
 
+/// The primitive parser must accept the same inner-whitespace spellings that the
+/// whitespace-insensitive comparison treats as equivalent. Without canonicalizing the type string
+/// before parsing, readIntText does not skip the leading space, so "decimal( 20, 0 )" and
+/// "fixed[ 16 ]" fail to parse even though they denote decimal(20, 0) / fixed[16].
+TEST(IcebergSchemaProcessor, GetSimpleTypeDecimalInnerWhitespace)
+{
+    auto type = IcebergSchemaProcessor::getSimpleType("decimal( 20, 0 )");
+    EXPECT_EQ(type->getName(), "Decimal(20, 0)");
+}
+
+TEST(IcebergSchemaProcessor, GetSimpleTypeFixedInnerWhitespace)
+{
+    auto type = IcebergSchemaProcessor::getSimpleType("fixed[ 16 ]");
+    EXPECT_EQ(type->getName(), "FixedString(16)");
+}
+
 /// Regression test for https://github.com/ClickHouse/ClickHouse/issues/109642
 /// The same schema-id can be serialized by different Iceberg writers with different
 /// whitespace in parameterized primitive type strings, e.g. the table metadata JSON
@@ -216,6 +232,34 @@ TEST(IcebergSchemaProcessor, RenameGeoFieldAcrossSchemaIdsWithWhitespaceIsRename
     const auto & outputs = dag->getOutputs();
     ASSERT_EQ(outputs.size(), 1u);
     EXPECT_EQ(outputs[0]->result_name, "b");
+}
+
+/// A whitespace-heavy type string must be accepted in the INITIAL/current schema (not just the
+/// repeated-same-schema-id path): the parser runs before any comparison, so it has to tolerate the
+/// same spellings on its own.
+TEST(IcebergSchemaProcessor, InitialSchemaDecimalInnerWhitespaceAccepted)
+{
+    auto schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal( 20, 0 )"}]})json");
+    IcebergSchemaProcessor processor;
+    EXPECT_NO_THROW(processor.addIcebergTableSchema(schema));
+}
+
+/// Schema-evolution across two schema-ids where a decimal widens (allowed conversion) while its
+/// type string also carries inner whitespace. allowPrimitiveTypeConversion must canonicalize the
+/// spacing so the widening is still recognized and the DAG casts to the new type under the new name.
+TEST(IcebergSchemaProcessor, WidenDecimalAcrossSchemaIdsWithInnerWhitespace)
+{
+    auto old_schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(10,2)"}]})json");
+    auto new_schema = parseSchema(R"json({"schema-id":1,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal( 20, 2 )"}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(old_schema);
+    processor.addIcebergTableSchema(new_schema);
+
+    auto dag = processor.getSchemaTransformationDagByIds(0, 1);
+    ASSERT_TRUE(dag);
+    const auto & outputs = dag->getOutputs();
+    ASSERT_EQ(outputs.size(), 1u);
+    EXPECT_EQ(outputs[0]->result_type->getName(), "Nullable(Decimal(20, 2))");
 }
 
 /// A genuinely different nested type inside a list wrapper must still be rejected.

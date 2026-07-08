@@ -359,8 +359,13 @@ NamesAndTypesList IcebergSchemaProcessor::tryGetFieldsCharacteristics(Int32 sche
     return fields;
 }
 
-DataTypePtr IcebergSchemaProcessor::getSimpleType(const String & type_name, bool allow_geo_parser)
+DataTypePtr IcebergSchemaProcessor::getSimpleType(const String & type_name_arg, bool allow_geo_parser)
 {
+    /// Parameterized primitive type strings (decimal(P, S), fixed[N], geography(...)) can be
+    /// serialized with different inner whitespace across metadata files. Canonicalize by removing
+    /// ASCII whitespace so parsing accepts every spelling the whitespace-insensitive comparison does.
+    const String type_name = removeWhitespace(type_name_arg);
+
     if (type_name == f_boolean)
         return DataTypeFactory::instance().get("Bool");
     if (type_name == f_int)
@@ -497,8 +502,13 @@ DataTypePtr IcebergSchemaProcessor::getFieldType(
 * decimal(P, S) -> decimal(P', S) where P' > P
 * This function checks if `old_type` and `new_type` satisfy to one of these conditions.
 **/
-bool IcebergSchemaProcessor::allowPrimitiveTypeConversion(const String & old_type, const String & new_type)
+bool IcebergSchemaProcessor::allowPrimitiveTypeConversion(const String & old_type_arg, const String & new_type_arg)
 {
+    /// Match the whitespace-insensitive rules of the comparison and the parser: a whitespace-only
+    /// difference in a parameterized type string denotes the identical type.
+    const String old_type = removeWhitespace(old_type_arg);
+    const String new_type = removeWhitespace(new_type_arg);
+
     bool allowed_type_conversion = (old_type == new_type);
     allowed_type_conversion |= (old_type == f_int) && (new_type == f_long);
     allowed_type_conversion |= (old_type == f_float) && (new_type == f_double);
