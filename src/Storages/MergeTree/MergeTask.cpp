@@ -59,6 +59,8 @@
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 #include <Common/FailPoint.h>
+#include <Common/Jemalloc.h>
+#include <Common/JemallocMergeTreeArena.h>
 #include <Common/Logger.h>
 #include <Common/ProfileEvents.h>
 #include <Common/logger_useful.h>
@@ -578,29 +580,33 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare() const
     global_ctx->disk = global_ctx->space_reservation->getDisk();
     auto local_tmp_part_basename = local_tmp_prefix + global_ctx->future_part->name + local_tmp_suffix;
 
-    /// The persistent part metadata built here is arena-scoped where it is actually produced:
-    /// inside `MergeTreeDataPartBuilder::build` and `IMergeTreeDataPart::setColumns`. The rest of
+    /// The `SingleDiskVolume`, `DataPartStorageOnDiskFull`, and `IMergeTreeDataPart` constructed
+    /// here are stored on the merged part and live for its whole lifetime, so route them into the
+    /// dedicated arena (same as `MergeTreeData::loadDataPart` / `DataPartsExchange`). The rest of
     /// `prepare` (storage snapshot, column extraction, pipeline/transform setup) is merge-lifetime
-    /// scratch, so it is deliberately left in the default per-CPU arenas to avoid funneling that
-    /// churn through the single dedicated arena.
-    std::optional<MergeTreeDataPartBuilder> builder;
-    if (global_ctx->parent_part)
+    /// scratch and is deliberately left in the default per-CPU arenas.
     {
-        auto data_part_storage = global_ctx->parent_part->getDataPartStorage().getProjection(local_tmp_part_basename,  /* use parent transaction */ false);
-        builder.emplace(*global_ctx->data, global_ctx->future_part->name, data_part_storage, getReadSettings());
-        builder->withParentPart(global_ctx->parent_part);
-    }
-    else
-    {
-        auto local_single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + global_ctx->future_part->name, global_ctx->disk, 0);
-        builder.emplace(global_ctx->data->getDataPartBuilder(global_ctx->future_part->name, local_single_disk_volume, local_tmp_part_basename, getReadSettings()));
-        builder->withPartStorageType(global_ctx->future_part->part_format.storage_type);
-    }
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
 
-    builder->withPartInfo(global_ctx->future_part->part_info);
-    builder->withPartType(global_ctx->future_part->part_format.part_type);
+        std::optional<MergeTreeDataPartBuilder> builder;
+        if (global_ctx->parent_part)
+        {
+            auto data_part_storage = global_ctx->parent_part->getDataPartStorage().getProjection(local_tmp_part_basename,  /* use parent transaction */ false);
+            builder.emplace(*global_ctx->data, global_ctx->future_part->name, data_part_storage, getReadSettings());
+            builder->withParentPart(global_ctx->parent_part);
+        }
+        else
+        {
+            auto local_single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + global_ctx->future_part->name, global_ctx->disk, 0);
+            builder.emplace(global_ctx->data->getDataPartBuilder(global_ctx->future_part->name, local_single_disk_volume, local_tmp_part_basename, getReadSettings()));
+            builder->withPartStorageType(global_ctx->future_part->part_format.storage_type);
+        }
 
-    global_ctx->new_data_part = std::move(*builder).build();
+        builder->withPartInfo(global_ctx->future_part->part_info);
+        builder->withPartType(global_ctx->future_part->part_format.part_type);
+
+        global_ctx->new_data_part = std::move(*builder).build();
+    }
     auto data_part_storage = global_ctx->new_data_part->getDataPartStoragePtr();
 
     if (data_part_storage->exists())
