@@ -1277,7 +1277,10 @@ bool BackupImpl::tryRemoveAllFiles() noexcept
             files_to_remove.push_back(".backup");
             coordination->forEachFileInfoForAllHosts([&](const BackupFileInfo & file_info)
             {
-                files_to_remove.push_back(file_info.data_file_name);
+                /// Skip entries without a data file (empty file or base-backup reference): an empty name
+                /// could resolve to the backup root.
+                if (!file_info.data_file_name.empty())
+                    files_to_remove.push_back(file_info.data_file_name);
             });
         }
 
