@@ -162,7 +162,19 @@ void signalHandler(int, siginfo_t * info, void * context)
 
     /// All these methods are signal-safe.
     const ucontext_t signal_context = *reinterpret_cast<ucontext_t *>(context);
+#if defined(THREAD_SANITIZER)
     stack_trace = StackTrace(signal_context);
+#else
+    /// The async unwind can fault (SIGSEGV, or SIGBUS on macOS when the target thread is parked in
+    /// frame-pointer-less libsystem code); recover by dropping this trace instead of crashing the
+    /// server, mirroring the query profiler. SignalHandlers.cpp performs the siglongjmp.
+    asynchronous_stack_unwinding = true;
+    if (0 == sigsetjmp(asynchronous_stack_unwinding_signal_jump_buffer, 1))
+        stack_trace = StackTrace(signal_context);
+    else
+        stack_trace = StackTrace(NoCapture{});
+    asynchronous_stack_unwinding = false;
+#endif
 
     auto query_id = CurrentThread::getQueryId();
     query_id_size = std::min(query_id.size(), max_query_id_size);
