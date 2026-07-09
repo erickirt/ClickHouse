@@ -23,7 +23,11 @@ SELECT 1;
 -- must still load via ATTACH under the 26.6 `hive` default — the same code path the server
 -- takes for every such table at startup and during upgrades. Before the fix this threw
 -- `BAD_ARGUMENTS` and aborted server startup.
+-- The explicit `hive` below is required: `SET compatibility` does not override the
+-- explicitly-set `file_like_engine_default_partition_strategy = 'wildcard'` above, and the
+-- ATTACH must run with the `hive` default in effect to be a real regression test.
 SET compatibility = '26.6';
+SET file_like_engine_default_partition_strategy = 'hive';
 DETACH TABLE old_export_compat_265;
 ATTACH TABLE old_export_compat_265;
 SELECT 2;
