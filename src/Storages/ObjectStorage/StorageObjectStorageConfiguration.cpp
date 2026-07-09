@@ -190,19 +190,33 @@ void StorageObjectStorageConfiguration::initPartitionStrategy(ASTPtr partition_b
     /// `partition_columns_in_data_file = 0` combined with strategy `none`) keep raising.
     if (partition_by && partition_strategy_type == PartitionStrategyFactory::StrategyType::NONE && !isDataLakeConfiguration())
     {
-        switch (context->getSettingsRef()[Setting::file_like_engine_default_partition_strategy].value)
+        if (!is_create_query && getRawPath().hasPartitionWildcard())
         {
-            case FileLikeEngineDefaultPartitionStrategy::WILDCARD:
+            /// Backward compatibility on ATTACH / server startup / RESTORE / replicated-DDL replay:
+            /// a table whose path carries `{_partition_id}` can only ever have been created under the
+            /// wildcard strategy (`hive` forbids the placeholder, so a `hive` table with this path
+            /// cannot exist). Re-deriving the strategy from the current
+            /// `file_like_engine_default_partition_strategy` default (`hive` from 26.6) would throw
+            /// `BAD_ARGUMENTS` and refuse to load a legitimately created pre-26.6 table, aborting
+            /// server startup and breaking upgrades. Only a user-issued `CREATE` applies the default.
+            partition_strategy_type = PartitionStrategyFactory::StrategyType::WILDCARD;
+        }
+        else
+        {
+            switch (context->getSettingsRef()[Setting::file_like_engine_default_partition_strategy].value)
             {
-                /// Set the strategy unconditionally; `PartitionStrategyFactory::get` will raise
-                /// `BAD_ARGUMENTS` if the path is missing the `{_partition_id}` placeholder.
-                partition_strategy_type = PartitionStrategyFactory::StrategyType::WILDCARD;
-                break;
-            }
-            case FileLikeEngineDefaultPartitionStrategy::HIVE:
-            {
-                partition_strategy_type = PartitionStrategyFactory::StrategyType::HIVE;
-                break;
+                case FileLikeEngineDefaultPartitionStrategy::WILDCARD:
+                {
+                    /// Set the strategy unconditionally; `PartitionStrategyFactory::get` will raise
+                    /// `BAD_ARGUMENTS` if the path is missing the `{_partition_id}` placeholder.
+                    partition_strategy_type = PartitionStrategyFactory::StrategyType::WILDCARD;
+                    break;
+                }
+                case FileLikeEngineDefaultPartitionStrategy::HIVE:
+                {
+                    partition_strategy_type = PartitionStrategyFactory::StrategyType::HIVE;
+                    break;
+                }
             }
         }
 
