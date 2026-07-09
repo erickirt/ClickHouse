@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 # Tags: no-tsan, no-asan, no-msan, no-ubsan, no-sanitize-coverage, no-llvm-coverage
 
-# Focused check that the CPU query profiler emits trace_type='CPU' rows in system.trace_log.
-# On macOS the CPU profiler is a separate implementation (a sampler thread that polls per-thread CPU
-# time via Mach thread_info and delivers the pause signal with pthread_kill), so this guards that path
-# specifically, on top of the real-time profiler coverage elsewhere.
+# Check that the CPU query profiler emits trace_type='CPU' rows (a separate sampler-thread path on macOS).
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -12,13 +9,16 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 query_id="04509_cpu_profiler_${CLICKHOUSE_DATABASE}"
 
-# CPU-bound query with a small CPU-time period; trace_profile_events is disabled because it can
-# inhibit the sampling profiler (it competes for the same trace pipe).
+# CPU-bound query bounded to ~1s (break, not throw); settings pinned so randomized ones can't slow it.
 ${CLICKHOUSE_CLIENT} --query_id="$query_id" --query "
-    SELECT count() FROM numbers_mt(1000000000)
+    SELECT count() FROM numbers(1000000000000)
     SETTINGS query_profiler_real_time_period_ns = 0,
              query_profiler_cpu_time_period_ns = 1000000,
              trace_profile_events = 0,
+             max_execution_time = 1,
+             timeout_overflow_mode = 'break',
+             max_threads = 1,
+             max_block_size = 65505,
              max_rows_to_read = 0
     FORMAT Null"
 
