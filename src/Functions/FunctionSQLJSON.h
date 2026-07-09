@@ -10,6 +10,7 @@
 #include <Columns/ColumnTuple.h>
 #include <Core/Settings.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeNullable.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypeTuple.h>
@@ -412,9 +413,25 @@ public:
         }
     };
 
-    /// Build a return type that mirrors the path argument structure,
-    /// replacing each String leaf with `leaf_type`.
-    static DataTypePtr buildReturnType(const DataTypePtr & path_type, const DataTypePtr & leaf_type)
+    /// Normalize the path argument exactly as the function framework does before executeImpl (and
+    /// thus before buildPlan): LowCardinality is removed recursively
+    /// (defaultImplementationForLowCardinalityColumns), while Nullable is removed only at the top
+    /// level (createBlockWithNestedColumns strips the outer Nullable but leaves any Nullable nested
+    /// inside a Tuple/Array intact). On Dynamic arguments the raw path type reaches the return-type
+    /// helpers unstripped (e.g. a scalar subquery (SELECT tuple('$.a','$.b')) has type
+    /// Nullable(Tuple(String,String))), so applying the same normalization here keeps the declared
+    /// return type in agreement with what the runtime plan accepts and produces. Nested wrapped
+    /// nodes (e.g. Tuple(Nullable(Tuple(...)), String)) are deliberately NOT unwrapped: the runtime
+    /// buildPlan rejects them, and so does the normal (non-Dynamic) path, so they must be classified
+    /// as non-multi-path here too.
+    static DataTypePtr normalizePathArgument(const DataTypePtr & type)
+    {
+        return removeNullable(recursiveRemoveLowCardinality(type));
+    }
+
+    /// Raw recursion mirroring MultiPathExecutor::buildPlan: only bare String/Tuple/Array nodes are
+    /// accepted. Wrappers are handled once at the top level by normalizePathArgument.
+    static DataTypePtr buildReturnTypeImpl(const DataTypePtr & path_type, const DataTypePtr & leaf_type)
     {
         if (isString(path_type))
             return leaf_type;
@@ -424,23 +441,25 @@ public:
             DataTypes element_types;
             element_types.reserve(tuple_type->getElements().size());
             for (const auto & elem : tuple_type->getElements())
-                element_types.push_back(buildReturnType(elem, leaf_type));
+                element_types.push_back(buildReturnTypeImpl(elem, leaf_type));
             if (tuple_type->hasExplicitNames())
                 return std::make_shared<DataTypeTuple>(element_types, tuple_type->getElementNames());
             return std::make_shared<DataTypeTuple>(element_types);
         }
 
         if (const auto * array_type = checkAndGetDataType<DataTypeArray>(path_type.get()))
-            return std::make_shared<DataTypeArray>(buildReturnType(array_type->getNestedType(), leaf_type));
+            return std::make_shared<DataTypeArray>(buildReturnTypeImpl(array_type->getNestedType(), leaf_type));
 
         throw Exception(ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT,
             "JSONPath structure must contain only String, Tuple, or Array elements, got {}",
             path_type->getName());
     }
 
-    /// Check whether a type is a nested structure (Tuple/Array) with String leaves,
-    /// i.e., suitable as a multi-path argument.
-    static bool isMultiPathType(const DataTypePtr & type)
+    /// Raw recursion mirroring MultiPathExecutor::buildPlan: only bare String/Tuple/Array leaves
+    /// count. A nested wrapped node (Nullable(...) that survives top-level stripping) is not a
+    /// String and not a Tuple/Array, so it makes the structure non-multi-path, consistent with the
+    /// runtime rejecting it.
+    static bool isMultiPathTypeImpl(const DataTypePtr & type)
     {
         if (isString(type))
             return false; /// A plain String is not multi-path, it's the normal single-path case.
@@ -450,15 +469,29 @@ public:
             if (tuple_type->getElements().empty())
                 return false; /// Empty Tuple() is not a valid multi-path structure.
             for (const auto & elem : tuple_type->getElements())
-                if (!isString(elem) && !isMultiPathType(elem))
+                if (!isString(elem) && !isMultiPathTypeImpl(elem))
                     return false;
             return true;
         }
 
         if (const auto * array_type = checkAndGetDataType<DataTypeArray>(type.get()))
-            return isString(array_type->getNestedType()) || isMultiPathType(array_type->getNestedType());
+            return isString(array_type->getNestedType()) || isMultiPathTypeImpl(array_type->getNestedType());
 
         return false;
+    }
+
+    /// Build a return type that mirrors the path argument structure,
+    /// replacing each String leaf with `leaf_type`.
+    static DataTypePtr buildReturnType(const DataTypePtr & path_type_, const DataTypePtr & leaf_type)
+    {
+        return buildReturnTypeImpl(normalizePathArgument(path_type_), leaf_type);
+    }
+
+    /// Check whether a type is a nested structure (Tuple/Array) with String leaves,
+    /// i.e., suitable as a multi-path argument.
+    static bool isMultiPathType(const DataTypePtr & type_)
+    {
+        return isMultiPathTypeImpl(normalizePathArgument(type_));
     }
 };
 
