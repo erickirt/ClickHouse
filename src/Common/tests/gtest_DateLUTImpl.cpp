@@ -93,6 +93,45 @@ TEST(DateLUTTest, hasFixedOffset)
     EXPECT_FALSE(DateLUT::instance("Asia/Kolkata").hasFixedOffset());
 }
 
+TEST(DateLUTTest, dayShiftStaysWithinLUT)
+{
+    const DateLUTImpl & lut = DateLUT::instance("UTC");
+    const time_t lut_min = -2208988800; /// 1900-01-01 00:00:00 UTC, the first second of the LUT
+    const time_t lut_max = 10413792000 - 1; /// 2300-01-01 23:59:59 UTC, the last second of the LUT
+
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(0, 1));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(0, -1));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 0));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 1));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_max, -1));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 146096)); /// 1900-01-01 -> 2300-01-01, the last LUT day
+
+    /// Input outside the LUT.
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min - 1, 0));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_max + 1, 0));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(std::numeric_limits<time_t>::min(), 0));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(std::numeric_limits<time_t>::max(), 0));
+
+    /// Result outside the LUT.
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min, -1));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_max, 1));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min, 146097));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(0, std::numeric_limits<Int64>::min()));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(0, std::numeric_limits<Int64>::max()));
+
+    /// Scaled values (raw DateTime64 representation).
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min * 1000, 1, 1000));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min * 1000, -1, 1000));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min * 1000 - 1000, 0, 1000));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT((lut_max + 1) * 1000 - 1, -1, 1000));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT((lut_max + 1) * 1000, 0, 1000));
+    /// For scale 9 the end of the LUT exceeds Int64, so only the lower bound and Int64 overflow apply.
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(0, 1, 1000000000));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(0, -25568, 1000000000));
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(std::numeric_limits<Int64>::max() - 86400 * 1000000000L, 1, 1000000000));
+    EXPECT_FALSE(lut.dayShiftStaysWithinLUT(std::numeric_limits<Int64>::max(), 1, 1000000000));
+}
+
 TEST(DateLUTTest, makeDayNumTest)
 {
     const DateLUTImpl & lut = DateLUT::instance("UTC");

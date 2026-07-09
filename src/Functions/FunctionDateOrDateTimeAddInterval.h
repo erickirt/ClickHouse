@@ -324,7 +324,7 @@ struct AddDaysImpl
     static NO_SANITIZE_UNDEFINED DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
-        if (time_zone.hasFixedOffset())
+        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta, multiplier))
             return t + delta * DATE_SECONDS_PER_DAY * multiplier;
         auto d = std::div(t, multiplier);
         return time_zone.addDays(d.quot, delta) * multiplier + d.rem;
@@ -332,14 +332,14 @@ struct AddDaysImpl
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
-        if (time_zone.hasFixedOffset())
+        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta, multiplier))
             return t + delta * DATE_SECONDS_PER_DAY * multiplier;
         auto d = std::div(t, multiplier);
         return time_zone.addDays(d.quot, delta) * multiplier + d.rem;
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
-        if (time_zone.hasFixedOffset())
+        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta))
             return static_cast<UInt32>(t + delta * DATE_SECONDS_PER_DAY);
         return static_cast<UInt32>(time_zone.addDays(t, delta));
     }
@@ -375,7 +375,7 @@ struct AddWeeksImpl
     static NO_SANITIZE_UNDEFINED DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
-        if (time_zone.hasFixedOffset())
+        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta * 7, multiplier))
             return t + delta * 7 * DATE_SECONDS_PER_DAY * multiplier;
         auto d = std::div(t, multiplier);
         return time_zone.addDays(d.quot, delta * 7) * multiplier + d.rem;
@@ -383,14 +383,14 @@ struct AddWeeksImpl
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
-        if (time_zone.hasFixedOffset())
+        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta * 7, multiplier))
             return t + delta * 7 * DATE_SECONDS_PER_DAY * multiplier;
         auto d = std::div(t, multiplier);
         return time_zone.addDays(d.quot, delta * 7) * multiplier + d.rem;
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
-        if (time_zone.hasFixedOffset())
+        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta * 7))
             return static_cast<UInt32>(t + delta * 7 * DATE_SECONDS_PER_DAY);
         return static_cast<UInt32>(time_zone.addWeeks(t, delta));
     }

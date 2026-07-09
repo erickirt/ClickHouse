@@ -350,6 +350,38 @@ public:
     /// reduces to arithmetic on the unix timestamp.
     bool hasFixedOffset() const { return offset_is_fixed; }
 
+    /// Whether both t and t shifted by `days` days stay inside the LUT, so that in a fixed-offset
+    /// time zone addDays(t, days) equals t + days * 86400. Outside the LUT addDays clamps the day
+    /// index to its boundaries (via findIndex and normalizeLUTIndex), and the arithmetic shortcut
+    /// would diverge. t is given in units of 1/scale_multiplier of a second, like a raw DateTime64
+    /// value. The check works on the scaled values to avoid a division on the hot path; it may
+    /// return a false negative within one second of the LUT boundaries, which merely sends such
+    /// values to the exact calendar path.
+    bool dayShiftStaysWithinLUT(Int64 t, Int64 days, Int64 scale_multiplier = 1) const
+    {
+        const Int64 seconds_per_day_scaled = DATE_SECONDS_PER_DAY * scale_multiplier;
+        const Int64 lut_min_scaled = lut[0].date * scale_multiplier;
+
+        /// For the largest scales the end of the LUT does not fit in Int64. Every representable
+        /// value is then below the end, and only the lower bound needs checking.
+        Int64 lut_size_scaled = 0;
+        Int64 lut_end_scaled = 0;
+        const bool lut_end_representable =
+            !__builtin_mul_overflow(static_cast<Int64>(DATE_LUT_SIZE), seconds_per_day_scaled, &lut_size_scaled)
+            && !__builtin_add_overflow(lut_min_scaled, lut_size_scaled, &lut_end_scaled);
+
+        if (t < lut_min_scaled || (lut_end_representable && t >= lut_end_scaled))
+            return false;
+
+        Int64 shift_scaled;
+        Int64 result;
+        if (__builtin_mul_overflow(days, seconds_per_day_scaled, &shift_scaled)
+            || __builtin_add_overflow(t, shift_scaled, &result))
+            return false;
+
+        return result >= lut_min_scaled && (!lut_end_representable || result < lut_end_scaled);
+    }
+
     static constexpr auto getDayNumOffsetEpoch()  { return daynum_offset_epoch; }
 
     /// All functions below are thread-safe; arguments are not checked.
