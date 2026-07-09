@@ -203,10 +203,9 @@ target_compile_options(_jemalloc PRIVATE ${WITHOUT_COVERAGE_FLAGS_LIST})
 
 target_compile_definitions(_jemalloc PRIVATE -DJEMALLOC_PROF=1)
 
-# jemalloc provides several unwind flavors for the profiler backtrace:
+# jemalloc provides support two unwind flavors:
 # - JEMALLOC_PROF_LIBUNWIND - unw_backtrace() - gnu libunwind (compatible with llvm libunwind)
 # - JEMALLOC_PROF_LIBGCC - _Unwind_Backtrace() - the original HP libunwind and the one coming with gcc / g++ / libstdc++.
-# - JEMALLOC_PROF_GCC - __builtin_return_address() - a plain frame-pointer walk, no DWARF/unwinder.
 #
 # But for JEMALLOC_PROF_LIBGCC it also calls _Unwind_Backtrace() during
 # bootstraping of jemalloc, which may lead to deadlock, if the dlsym will do
@@ -216,16 +215,8 @@ target_compile_definitions(_jemalloc PRIVATE -DJEMALLOC_PROF=1)
 #
 # And since ClickHouse unwind already supports unw_backtrace() we can safely
 # switch to it to avoid this deadlock.
-if (OS_DARWIN)
-    # On macOS the profiler samples inside the malloc hook and unwinds the current stack, which on
-    # arm64 includes frame-pointer-less libsystem frames (e.g. the malloc-zone shims). llvm libunwind's
-    # DWARF stepper null-derefs on those, crashing the server. Use the frame-pointer backtrace instead
-    # (ClickHouse builds with -fno-omit-frame-pointer); it needs no unwinder and cannot fault that way.
-    target_compile_definitions (_jemalloc PRIVATE -DJEMALLOC_PROF_GCC=1)
-else ()
-    target_compile_definitions (_jemalloc PRIVATE -DJEMALLOC_PROF_LIBUNWIND=1)
-    target_link_libraries (_jemalloc PRIVATE unwind)
-endif ()
+target_compile_definitions (_jemalloc PRIVATE -DJEMALLOC_PROF_LIBUNWIND=1)
+target_link_libraries (_jemalloc PRIVATE unwind)
 
 # for RTLD_NEXT
 target_compile_options(_jemalloc PRIVATE -D_GNU_SOURCE)
