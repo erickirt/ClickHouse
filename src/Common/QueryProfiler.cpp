@@ -297,7 +297,7 @@ namespace
             reg.signal = signal;
             reg.is_cpu = (clock_type == CLOCK_THREAD_CPUTIME_ID);
             reg.period_ns = clampPeriod(period_ns);
-            reg.next_real_ns = nowMonotonicNs() + reg.period_ns;
+            reg.next_real_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
             reg.last_cpu_ns = reg.is_cpu ? threadCPUNs(reg.mach_thread) : 0;
             ensureThreadStarted();
             cond.notify_all();
@@ -307,8 +307,17 @@ namespace
         {
             std::lock_guard lock(mutex);
             auto it = registrations.find({reinterpret_cast<uintptr_t>(thread), signal});
-            if (it != registrations.end())
-                it->second.period_ns = clampPeriod(period_ns);
+            if (it == registrations.end())
+                return;
+            auto & reg = it->second;
+            reg.period_ns = clampPeriod(period_ns);
+            /// Re-arm from now with the new period (like the Linux Timer::set), so lowering the period
+            /// takes effect immediately instead of waiting out the previous, possibly much larger,
+            /// deadline (e.g. the 10s default global profiler before a query sets a smaller period).
+            reg.next_real_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
+            if (reg.is_cpu)
+                reg.last_cpu_ns = threadCPUNs(reg.mach_thread);
+            cond.notify_all();
         }
 
         void remove(pthread_t thread, int signal)
@@ -342,6 +351,13 @@ namespace
 
         /// Cap frequency at 1000 signals/sec, matching the Linux Timer::set floor.
         static UInt64 clampPeriod(UInt64 period_ns) { return std::max<UInt64>(period_ns, 1'000'000); }
+
+        /// Randomized first-fire offset in [0, period], so queries shorter than the period still have a
+        /// chance to be sampled (mirrors the randomized `it_value` in the Linux Timer::set).
+        static UInt64 randomizedOffset(UInt64 period_ns)
+        {
+            return std::uniform_int_distribution<UInt64>(0, period_ns)(thread_local_rng);
+        }
 
         void ensureThreadStarted()
         {
@@ -392,9 +408,20 @@ namespace
                         pthread_kill(reg.thread, reg.signal);
                 }
 
-                /// Poll at a fixed granularity. Real timers still fire on their own schedule via
-                /// next_real_ns; CPU timers need periodic polling of thread_info.
-                cond.wait_for(lock, std::chrono::milliseconds(1));
+                /// Sleep until the nearest deadline rather than on a fixed tick, so a coarse profiler
+                /// (e.g. the default 10s global CPU profiler) does not wake the sampler - and call
+                /// thread_info for every registered thread - a thousand times a second. A real timer is
+                /// due at next_real_ns; a CPU timer is polled at its period granularity. add()/setPeriod()
+                /// wake us early via notify when a shorter period appears.
+                UInt64 sleep_ns = 3600ULL * TIMER_PRECISION;
+                for (const auto & [key, reg] : registrations)
+                {
+                    UInt64 due_in = reg.is_cpu
+                        ? reg.period_ns
+                        : (reg.next_real_ns > now ? reg.next_real_ns - now : 0);
+                    sleep_ns = std::min(sleep_ns, due_in);
+                }
+                cond.wait_for(lock, std::chrono::nanoseconds(sleep_ns));
             }
         }
 
