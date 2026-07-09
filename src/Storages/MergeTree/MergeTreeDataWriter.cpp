@@ -945,6 +945,11 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
 
     new_data_part->ttl_infos.update(move_ttl_infos);
 
+    /// partition / ttl_infos / minmax (and patch source parts) are built above outside any
+    /// dedicated-arena scope, so they were allocated in the default arenas. Re-home them into the
+    /// dedicated arena, matching the merge / mutation / load paths.
+    new_data_part->moveMetadataToDedicatedArena();
+
     /// Pass empty TTL infos so that `RECOMPRESS` codecs are not selected at insert time;
     /// recompression should happen during merges, not on the initial write path.
     auto compression_codec = data.getCompressionCodecForPart(0, {}, time(nullptr));

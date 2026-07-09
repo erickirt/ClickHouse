@@ -2184,6 +2184,21 @@ void IMergeTreeDataPart::setColumnsSubstreams(const ColumnsSubstreams & columns_
     columns_substreams = columns_substreams_;
 }
 
+void IMergeTreeDataPart::moveMetadataToDedicatedArena()
+{
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+
+    /// `auto v = x; x = std::move(v)` re-allocates `v` under the arena scope and then adopts it,
+    /// freeing the original storage.
+    { auto v = partition; partition = std::move(v); }
+    { auto v = ttl_infos; ttl_infos = std::move(v); }
+    { auto v = expired_columns; expired_columns = std::move(v); }
+    if (auto minmax = getMinMaxIndex())
+        setMinMaxIndex(std::make_shared<MinMaxIndex>(*minmax));
+    if (info.isPatch())
+        setSourcePartsSet(SourcePartsSetForPatch(source_parts_set));
+}
+
 void IMergeTreeDataPart::loadColumnsSubstreams()
 {
     if (auto in = readFileIfExists(COLUMNS_SUBSTREAMS_FILE_NAME))
