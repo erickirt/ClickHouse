@@ -159,26 +159,20 @@ namespace
             const SymbolIndex & symbol_index = SymbolIndex::instance();
 
 #if defined(OS_DARWIN)
-            /// On macOS the DWARF is not in the binary (the Mach-O linker leaves it in the .o files);
-            /// it is only available if a .dSYM bundle was produced next to the binary. We don't ship
-            /// one, so file/line resolution is best-effort: without a dSYM we fall back to the object
-            /// name (the `symbols` column is still populated from the symbol table by the caller).
+            /// DWARF for source locations lives in a .dSYM bundle on macOS (the Mach-O linker leaves it
+            /// out of the binary). Without a dSYM there is no file:line info, so `lines` stays empty for
+            /// this frame (the `symbols` column is still filled from the symbol table by the caller).
             const auto * object = symbol_index.findObject(reinterpret_cast<const void *>(addr));
-            if (!object)
+            if (!object || !object->dsym)
                 return {};
-            if (!object->dsym)
-                return object->name;
-
             auto dwarf_it = dwarfs.try_emplace(object->name, object->dsym).first;
             /// Convert the runtime address to the linked (pre-ASLR) address the dSYM's DWARF uses.
             const uintptr_t dwarf_addr = addr - object->slide;
 #else
             const auto * object = symbol_index.thisObject();
-            if (!object)
+            if (!object || !std::filesystem::exists(object->name))
                 return {};
             auto dwarf_it = dwarfs.try_emplace(object->name, object->elf).first;
-            if (!std::filesystem::exists(object->name))
-                return {};
             const uintptr_t dwarf_addr = addr;
 #endif
             Dwarf::LocationInfo location;
@@ -189,7 +183,9 @@ namespace
                 setResult(result, location, frames);
                 return result;
             }
-            return object->name;
+            /// `lines` holds source locations only; an unresolved frame stays empty rather than
+            /// borrowing the object path (that would violate the file:line:col column contract).
+            return {};
         }
 
         std::string_view implCached(uintptr_t addr)

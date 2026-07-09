@@ -297,7 +297,7 @@ namespace
             reg.signal = signal;
             reg.is_cpu = (clock_type == CLOCK_THREAD_CPUTIME_ID);
             reg.period_ns = clampPeriod(period_ns);
-            reg.next_real_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
+            reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
             reg.last_cpu_ns = reg.is_cpu ? threadCPUNs(reg.mach_thread) : 0;
             ensureThreadStarted();
             cond.notify_all();
@@ -314,7 +314,7 @@ namespace
             /// Re-arm from now with the new period (like the Linux Timer::set), so lowering the period
             /// takes effect immediately instead of waiting out the previous, possibly much larger,
             /// deadline (e.g. the 10s default global profiler before a query sets a smaller period).
-            reg.next_real_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
+            reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
             if (reg.is_cpu)
                 reg.last_cpu_ns = threadCPUNs(reg.mach_thread);
             cond.notify_all();
@@ -345,7 +345,7 @@ namespace
             int signal = 0;
             bool is_cpu = false;
             UInt64 period_ns = 0;
-            UInt64 next_real_ns = 0;
+            UInt64 next_deadline_ns = 0;
             UInt64 last_cpu_ns = 0;
         };
 
@@ -384,11 +384,18 @@ namespace
                 UInt64 now = nowMonotonicNs();
                 for (auto & [key, reg] : registrations)
                 {
+                    /// Each registration has its own wall-clock deadline, so a coarse profiler is only
+                    /// touched at its own cadence even when a fine one keeps the sampler busy. In
+                    /// particular, thread_info is not called for a long-period CPU registration until it
+                    /// is actually due - no shared amplification from the shortest configured period.
+                    if (now < reg.next_deadline_ns)
+                        continue;
+
                     bool fire = false;
                     if (reg.is_cpu)
                     {
                         /// Approximate a per-thread CPU timer: fire once the thread has consumed
-                        /// another period's worth of CPU time since the last sample.
+                        /// another period's worth of CPU time since the last poll.
                         UInt64 cpu = threadCPUNs(reg.mach_thread);
                         if (cpu - reg.last_cpu_ns >= reg.period_ns)
                         {
@@ -396,11 +403,12 @@ namespace
                             reg.last_cpu_ns = cpu;
                         }
                     }
-                    else if (now >= reg.next_real_ns)
-                    {
+                    else
                         fire = true;
-                        reg.next_real_ns = now + reg.period_ns;
-                    }
+
+                    /// Real timers fire every period; CPU timers poll thread_info every period and fire
+                    /// only when enough CPU time was consumed.
+                    reg.next_deadline_ns = now + reg.period_ns;
 
                     /// pthread_kill returns ESRCH if the thread is already gone; the owning
                     /// QueryProfiler removes its registration before the thread exits, so this is benign.
@@ -408,19 +416,12 @@ namespace
                         pthread_kill(reg.thread, reg.signal);
                 }
 
-                /// Sleep until the nearest deadline rather than on a fixed tick, so a coarse profiler
-                /// (e.g. the default 10s global CPU profiler) does not wake the sampler - and call
-                /// thread_info for every registered thread - a thousand times a second. A real timer is
-                /// due at next_real_ns; a CPU timer is polled at its period granularity. add()/setPeriod()
-                /// wake us early via notify when a shorter period appears.
+                /// Sleep until the nearest per-registration deadline rather than on a fixed tick, so a
+                /// coarse profiler (e.g. the default 10s global CPU profiler) does not wake the sampler a
+                /// thousand times a second. add()/setPeriod() wake us early via notify for a shorter period.
                 UInt64 sleep_ns = 3600ULL * TIMER_PRECISION;
                 for (const auto & [key, reg] : registrations)
-                {
-                    UInt64 due_in = reg.is_cpu
-                        ? reg.period_ns
-                        : (reg.next_real_ns > now ? reg.next_real_ns - now : 0);
-                    sleep_ns = std::min(sleep_ns, due_in);
-                }
+                    sleep_ns = std::min(sleep_ns, reg.next_deadline_ns > now ? reg.next_deadline_ns - now : UInt64(0));
                 cond.wait_for(lock, std::chrono::nanoseconds(sleep_ns));
             }
         }
