@@ -125,9 +125,8 @@ TEST(DateLUTTest, dayShiftStaysWithinLUT)
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min * 1000 - 1000, 0, 1000));
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT((lut_max + 1) * 1000 - 1, -1, 1000));
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT((lut_max + 1) * 1000, 0, 1000));
-    /// A negative sub-second value shifted to the upper LUT edge: the calendar path divides towards zero
-    /// and clamps the day index, so the fast path must decline. 1969-12-31 23:59:59.999 + 120530 days,
-    /// and the addWeeks form 1969-12-28 23:59:59.999 + 17219 weeks (120533 days).
+    /// Negative sub-second values shifted to the upper LUT edge: the calendar path truncates the
+    /// division towards zero and clamps the day index, so the fast path must decline.
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT(-1, 120530, 1000));
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT(-259200001, 17219 * 7, 1000));
     /// For scale 9 the end of the LUT exceeds Int64, so only the lower bound and Int64 overflow apply.

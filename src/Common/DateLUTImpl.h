@@ -351,20 +351,10 @@ public:
     bool hasFixedOffset() const { return offset_is_fixed; }
 
     /// Whether both t and t shifted by `days` days stay inside the LUT, so that in a fixed-offset
-    /// time zone addDays(t, days) equals t + days * 86400. Outside the LUT addDays clamps the day
-    /// index to its boundaries (via findIndex and normalizeLUTIndex), and the arithmetic shortcut
-    /// would diverge. t is given in units of 1/scale_multiplier of a second, like a raw DateTime64
-    /// value. The check works on the scaled values to avoid a division on the hot path; it may
-    /// return a false negative within one second of the LUT boundaries, which merely sends such
-    /// values to the exact calendar path.
-    ///
-    /// The scaled value is not exactly what the calendar path shifts: for a DateTime64 the calendar
-    /// path first does std::div(t, scale_multiplier) and shifts the quotient, which truncates towards
-    /// zero. For a negative t with a nonzero sub-second remainder the quotient is one second higher
-    /// than the raw value's own day, so near the upper LUT edge the calendar path clamps the day index
-    /// while the raw value still fits. Any such mismatch has a scaled result within one second of the
-    /// upper bound (result >= lut_end_scaled + remainder, and remainder > -scale_multiplier), so
-    /// keeping the fast path one second clear of the upper bound rejects all of them.
+    /// time zone addDays(t, days) equals t + days * 86400 (outside the LUT addDays clamps the day
+    /// index to the boundaries instead). t is given in units of 1/scale_multiplier of a second,
+    /// like a raw DateTime64 value. May return a false negative within one second of the LUT
+    /// boundaries, which merely sends such values to the exact calendar path.
     bool dayShiftStaysWithinLUT(Int64 t, Int64 days, Int64 scale_multiplier = 1) const
     {
         const Int64 seconds_per_day_scaled = DATE_SECONDS_PER_DAY * scale_multiplier;
@@ -378,8 +368,9 @@ public:
             !__builtin_mul_overflow(static_cast<Int64>(DATE_LUT_SIZE), seconds_per_day_scaled, &lut_size_scaled)
             && !__builtin_add_overflow(lut_min_scaled, lut_size_scaled, &lut_end_scaled);
 
-        /// One-second margin below the upper bound, so that the towards-zero truncation of a negative
-        /// remainder cannot flip a value from inside the LUT to a clamped day index on the calendar path.
+        /// One-second margin below the upper bound: the calendar path shifts std::div(t, scale_multiplier).quot,
+        /// which truncates towards zero, so a negative t with a sub-second remainder lands one second higher
+        /// than the raw value and can hit a clamped day index while the raw result still fits.
         const Int64 lut_end_guard = lut_end_scaled - (scale_multiplier - 1);
 
         if (t < lut_min_scaled || (lut_end_representable && t >= lut_end_scaled))
