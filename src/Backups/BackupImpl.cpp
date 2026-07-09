@@ -7,6 +7,7 @@
 #include <Backups/getBackupDataFileName.h>
 #include <Common/CurrentThread.h>
 #include <Common/ProfileEvents.h>
+#include <Common/FailPoint.h>
 #include <Common/StackTrace.h>
 #include <Common/StringUtils.h>
 #include <base/hex.h>
@@ -45,6 +46,11 @@ namespace ProfileEvents
 namespace DB
 {
 
+namespace FailPoints
+{
+    extern const char backup_fail_before_writing_metadata[];
+}
+
 namespace ErrorCodes
 {
     extern const int BACKUP_NOT_FOUND;
@@ -60,6 +66,7 @@ namespace ErrorCodes
     extern const int FAILED_TO_SYNC_BACKUP_OR_RESTORE;
     extern const int LOGICAL_ERROR;
     extern const int INSECURE_PATH;
+    extern const int FAULT_INJECTED;
 }
 
 namespace fs = std::filesystem;
@@ -1196,6 +1203,10 @@ void BackupImpl::finalizeWriting()
     if (!params.is_internal_backup)
     {
         LOG_TRACE(log, "Finalizing backup {}", backup_name_for_logging);
+        fiu_do_on(FailPoints::backup_fail_before_writing_metadata,
+        {
+            throw Exception(ErrorCodes::FAULT_INJECTED, "Failpoint backup_fail_before_writing_metadata is triggered");
+        });
         writeBackupMetadata();
         closeArchive(/* finalize= */ true);
         setCompressedSize();
