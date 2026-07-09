@@ -874,6 +874,24 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare() const
 
     global_ctx->new_data_part->setColumns(global_ctx->storage_columns, infos, global_ctx->metadata_snapshot->getMetadataVersion());
 
+    /// `partition`, `ttl_infos`, the minmax index and `expired_columns` (and, for patch parts,
+    /// `source_parts_set`) are populated above interleaved with merge-only scratch, so they were
+    /// allocated in the default arenas. Re-home these small, part-lifetime members into the
+    /// dedicated arena in one place — a cheap copy of small objects — instead of scattering scopes
+    /// through the merge logic. `auto v = x; x = std::move(v)` re-allocates `v` under the arena
+    /// scope and then adopts it, freeing the original default-arena storage.
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        auto & part = *global_ctx->new_data_part;
+        { auto v = part.partition;       part.partition = std::move(v); }
+        { auto v = part.ttl_infos;       part.ttl_infos = std::move(v); }
+        { auto v = part.expired_columns; part.expired_columns = std::move(v); }
+        if (auto minmax = part.getMinMaxIndex())
+            part.setMinMaxIndex(std::make_shared<IMergeTreeDataPart::MinMaxIndex>(*minmax));
+        if (part.info.isPatch())
+            part.setSourcePartsSet(SourcePartsSetForPatch(part.getSourcePartsSet()));
+    }
+
     ctx->sum_input_rows_upper_bound = global_ctx->merge_list_element_ptr->total_rows_count;
     ctx->sum_compressed_bytes_upper_bound = global_ctx->merge_list_element_ptr->total_size_bytes_compressed;
     ctx->sum_uncompressed_bytes_upper_bound = global_ctx->merge_list_element_ptr->total_size_bytes_uncompressed;
