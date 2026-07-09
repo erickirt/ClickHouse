@@ -189,18 +189,22 @@ ClickHouse documentation can be divided up by the audience for the following par
 
 <a name="templates"/>
 
-### Description Templates
+### Templates
 
-When writing docs, you can use prepared templates. Copy the code of a template and use it in your contribution. Sometimes you just need to change level of headers.
+When writing docs, you can use prepared templates. Copy the code of a template and use it in your contribution. Sometimes you just need to change level of headers. See [`_templates/README.md`](_templates/README.md) for when to use each section and component.
 
-Templates:
+Reference templates (paste a section into a page):
 
-- [Function](_description_templates/template-function.md)
-- [Server Setting](_description_templates/template-server-setting.md)
-- [Database or Table engine](_description_templates/template-engine.md)
-- [System table](_description_templates/template-system-table.md)
-- [Data type](_description_templates/template-data-type.md)
-- [Statement](_description_templates/template-statement.md)
+- [Function](_templates/template-function.md)
+- [Server Setting](_templates/template-server-setting.md)
+- [Database or Table engine](_templates/template-engine.md)
+- [System table](_templates/template-system-table.md)
+- [Data type](_templates/template-data-type.md)
+- [Statement](_templates/template-statement.md)
+
+Narrative templates (full page):
+
+- [Guide](_templates/template-guide.mdx) — how-to and setup guides
 
 
 <a name="how-to-build-docs"/>

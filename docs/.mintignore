@@ -28,6 +28,6 @@ _site/styles/
 # these match only the top-level dirs -- an unanchored `changelogs/` also matched
 # `resources/changelogs/` (gitignore any-depth semantics) and hid the real,
 # published changelog pages, which docs.json still references.
-/_description_templates/
+/_templates/
 /changelogs/
 /en/
