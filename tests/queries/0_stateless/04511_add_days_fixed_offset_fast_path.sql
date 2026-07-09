@@ -47,6 +47,12 @@ SELECT subtractWeeks(toDateTime64('1900-01-01 00:00:00', 0, 'UTC'), 1) AS x, rei
 SELECT subtractDays(toDateTime64('1900-01-01 00:00:00', 0, 'Etc/GMT-5'), 1) AS x, reinterpretAsInt64(x);
 SELECT addDays(toDateTime64('2299-12-31 23:59:59.999', 3, 'UTC'), 2) AS x, reinterpretAsInt64(x);
 SELECT addWeeks(toDateTime64('2299-12-31 00:00:00', 0, 'Etc/GMT+5'), 52) AS x, reinterpretAsInt64(x);
+-- Negative sub-second value shifted to the upper LUT edge. The calendar path divides towards zero, so
+-- it shifts second 0 (not -0.001) and clamps the day index; the fast path must match, not the raw value.
+SELECT addDays(toDateTime64('1969-12-31 23:59:59.999', 3, 'UTC'), 120530) AS x, reinterpretAsInt64(x);
+SELECT addDays(materialize(toDateTime64('1969-12-31 23:59:59.999', 3, 'UTC')), 120530) AS x, reinterpretAsInt64(x);
+SELECT addWeeks(toDateTime64('1969-12-28 23:59:59.999', 3, 'UTC'), 17219) AS x, reinterpretAsInt64(x);
+SELECT addWeeks(materialize(toDateTime64('1969-12-28 23:59:59.999', 3, 'UTC')), 17219) AS x, reinterpretAsInt64(x);
 -- Huge deltas take the calendar path as well.
 SELECT addDays(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), 9223372036854775807) AS x, reinterpretAsInt64(x);
 SELECT subtractDays(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), 9223372036854775807) AS x, reinterpretAsInt64(x);
