@@ -190,16 +190,20 @@ void StorageObjectStorageConfiguration::initPartitionStrategy(ASTPtr partition_b
     /// `partition_columns_in_data_file = 0` combined with strategy `none`) keep raising.
     if (partition_by && partition_strategy_type == PartitionStrategyFactory::StrategyType::NONE && !isDataLakeConfiguration())
     {
-        if (!is_create_query && getRawPath().hasPartitionWildcard())
+        if (!is_create_query)
         {
             /// Backward compatibility on ATTACH / server startup / RESTORE / replicated-DDL replay:
-            /// a table whose path carries `{_partition_id}` can only ever have been created under the
-            /// wildcard strategy (`hive` forbids the placeholder, so a `hive` table with this path
-            /// cannot exist). Re-deriving the strategy from the current
-            /// `file_like_engine_default_partition_strategy` default (`hive` from 26.6) would throw
-            /// `BAD_ARGUMENTS` and refuse to load a legitimately created pre-26.6 table, aborting
-            /// server startup and breaking upgrades. Only a user-issued `CREATE` applies the default.
-            partition_strategy_type = PartitionStrategyFactory::StrategyType::WILDCARD;
+            /// for a table loaded from existing metadata the implicit strategy is deterministically
+            /// recoverable from the path alone, because the two strategies are mutually exclusive on
+            /// path shape — wildcard REQUIRES `{_partition_id}` in the path, hive FORBIDS it. Consulting
+            /// the mutable `file_like_engine_default_partition_strategy` default here instead would
+            /// refuse to load legitimately created tables whenever the default has changed since
+            /// creation (pre-26.6 wildcard tables under the 26.6 `hive` default, or implicit-hive
+            /// tables loaded under a `wildcard` default after a downgrade), aborting server startup
+            /// and breaking upgrades. Only a user-issued `CREATE` applies the default.
+            partition_strategy_type = getRawPath().hasPartitionWildcard()
+                ? PartitionStrategyFactory::StrategyType::WILDCARD
+                : PartitionStrategyFactory::StrategyType::HIVE;
         }
         else
         {

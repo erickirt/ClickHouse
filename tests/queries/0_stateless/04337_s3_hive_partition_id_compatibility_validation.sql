@@ -35,3 +35,18 @@ SELECT 2;
 DROP TABLE IF EXISTS old_export; -- never created: the first CREATE above is expected to throw
 DROP TABLE old_export_compat_265;
 DROP TABLE old_export2;
+
+-- Mirror case: an implicit-`hive` table (created under the 26.6 default, no `{_partition_id}`
+-- in the path) must still load via ATTACH when the effective default is `wildcard`
+-- (e.g. a downgrade or a `compatibility = '26.5'` session). The strategy on load is derived
+-- from the path shape, never from the mutable default.
+SET compatibility = '26.6';
+SET file_like_engine_default_partition_strategy = 'hive';
+CREATE TABLE hive_export (d Date, x UInt64)
+ENGINE = S3('s3://bucket/export2', 'Parquet')
+PARTITION BY d;
+SET file_like_engine_default_partition_strategy = 'wildcard';
+DETACH TABLE hive_export;
+ATTACH TABLE hive_export;
+SELECT 3;
+DROP TABLE hive_export;
