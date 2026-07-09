@@ -373,8 +373,8 @@ public:
         if (t < lut_min_scaled || (lut_end_representable && t >= lut_end_scaled))
             return false;
 
-        Int64 shift_scaled;
-        Int64 result;
+        Int64 shift_scaled = 0;
+        Int64 result = 0;
         if (__builtin_mul_overflow(days, seconds_per_day_scaled, &shift_scaled)
             || __builtin_add_overflow(t, shift_scaled, &result))
             return false;
