@@ -199,7 +199,6 @@ Reference templates (paste a section into a page):
 - [Server Setting](_templates/template-server-setting.md)
 - [Database or Table engine](_templates/template-engine.md)
 - [System table](_templates/template-system-table.md)
-- [Data type](_templates/template-data-type.md)
 - [Statement](_templates/template-statement.md)
 
 Narrative templates (full page):
