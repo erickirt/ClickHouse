@@ -111,7 +111,17 @@ void childSignalHandler(int sig, siginfo_t * info, void *)
 /// Handler for "fault" or diagnostic signals. Send data about fault to separate thread to write into log.
 static void signalHandler(int sig, siginfo_t * info, void * context)
 {
-    if (asynchronous_stack_unwinding && sig == SIGSEGV)
+    /// A fault while asynchronously unwinding another thread's stack (the query profiler) must be
+    /// recovered by dropping the sample, not crash the server. On Linux a bad unwind faults with
+    /// SIGSEGV; on macOS the frame-pointer walk in backtrace() can also hit a misaligned address (e.g.
+    /// when the profiler interrupts a thread parked in frame-pointer-less libsystem code) and raise
+    /// SIGBUS, so recover from that too there.
+    if (asynchronous_stack_unwinding
+        && (sig == SIGSEGV
+#if defined(OS_DARWIN)
+            || sig == SIGBUS
+#endif
+        ))
         siglongjmp(asynchronous_stack_unwinding_signal_jump_buffer, 1);
 
     DENY_ALLOCATIONS_IN_SCOPE;

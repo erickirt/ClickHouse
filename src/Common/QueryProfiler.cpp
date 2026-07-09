@@ -465,6 +465,15 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
 
     if (sigaddset(&sa.sa_mask, pause_signal))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Failed to add signal to mask for query profiler");
+
+#if defined(OS_DARWIN)
+    /// The Real (SIGUSR1) and CPU (SIGUSR2) profilers share one thread-local stack-unwinding recovery
+    /// (the asynchronous_stack_unwinding flag + sigjmp_buf). Block the sibling profiler signal while a
+    /// handler runs so the two cannot nest and clobber that buffer - a corrupted siglongjmp jumps to a
+    /// garbage address and faults. (On Linux the per-thread POSIX timers don't require this.)
+    if (sigaddset(&sa.sa_mask, QueryProfilerReal::PAUSE_SIGNAL) || sigaddset(&sa.sa_mask, QueryProfilerCPU::PAUSE_SIGNAL))
+        throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Failed to add profiler signals to mask for query profiler");
+#endif
 #pragma clang diagnostic pop
 
     if (sigaction(pause_signal, &sa, nullptr))
