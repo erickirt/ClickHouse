@@ -30,7 +30,7 @@ ${CLICKHOUSE_CLIENT} --query "SYSTEM ENABLE FAILPOINT backup_fail_before_writing
 
 # Unchanged incremental: every entry is fully base-backed, so each has an empty data_file_name. The
 # backup fails before finalization; cleanup must skip the empty names instead of unlinking the root.
-${CLICKHOUSE_CLIENT} --query "BACKUP TABLE ${CLICKHOUSE_DATABASE}.t TO $inc_backup SETTINGS id='$inc_id', base_backup=$base_backup" 2>&1 | grep -o "FAULT_INJECTED"
+${CLICKHOUSE_CLIENT} --query "BACKUP TABLE ${CLICKHOUSE_DATABASE}.t TO $inc_backup SETTINGS id='$inc_id', base_backup=$base_backup" 2>&1 | grep -o "FAULT_INJECTED" | head -n1
 
 ${CLICKHOUSE_CLIENT} --query "SYSTEM DISABLE FAILPOINT backup_fail_before_writing_metadata"
 
