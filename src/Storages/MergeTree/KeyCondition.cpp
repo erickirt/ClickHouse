@@ -1092,7 +1092,7 @@ static const ActionsDAG::Node * tryRewriteIsTrueCondition(
     const ContextPtr & context)
 {
     /// `X IS TRUE` -> `X <=> true` (const 1); `X != false` -> `X != 0` (const 0).
-    UInt64 expected_const;
+    UInt64 expected_const = 0;
     if (name == "isNotDistinctFrom")
         expected_const = 1;
     else if (name == "notEquals")
