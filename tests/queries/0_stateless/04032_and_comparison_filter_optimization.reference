@@ -1502,3 +1502,50 @@ sole_survivor_float
 sole_survivor_bool
 2
 2
+derived_nested_subsumed
+SELECT count() AS `count()`
+FROM
+(
+    SELECT
+        __table2.number AS x,
+        multiply(__table2.number, 2) AS y
+    FROM numbers(10) AS __table2
+) AS __table1
+WHERE and(and(less(__table1.x, 2), less(__table1.x, __table1.y)), less(__table1.y, 3))
+SETTINGS optimize_redundant_comparisons = 1
+1
+1
+derived_flat_subsumed
+SELECT count() AS `count()`
+FROM
+(
+    SELECT
+        __table2.number AS x,
+        multiply(__table2.number, 2) AS y
+    FROM numbers(10) AS __table2
+) AS __table1
+WHERE and(less(__table1.x, 2), less(__table1.x, __table1.y), less(__table1.y, 3))
+SETTINGS optimize_redundant_comparisons = 1
+derived_kept
+SELECT count() AS `count()`
+FROM
+(
+    SELECT
+        __table2.number AS x,
+        multiply(__table2.number, 2) AS y
+    FROM numbers(10) AS __table2
+) AS __table1
+WHERE and(less(__table1.x, __table1.y), less(__table1.y, 3), less(__table1.x, 3))
+SETTINGS optimize_redundant_comparisons = 1
+1
+derived_conflict
+SELECT count() AS `count()`
+FROM
+(
+    SELECT
+        __table2.number AS x,
+        __table2.number AS y
+    FROM numbers(10) AS __table2
+) AS __table1
+WHERE 0
+SETTINGS optimize_redundant_comparisons = 1

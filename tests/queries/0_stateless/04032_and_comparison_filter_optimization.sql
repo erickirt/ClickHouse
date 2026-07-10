@@ -653,4 +653,39 @@ SELECT 'sole_survivor_bool';
 SELECT count() FROM (SELECT number % 2 = 0 AS b, toInt8(number) AS i FROM numbers(3)) WHERE b AND i < 300 SETTINGS optimize_redundant_comparisons = 0;
 SELECT count() FROM (SELECT number % 2 = 0 AS b, toInt8(number) AS i FROM numbers(3)) WHERE b AND i < 300 SETTINGS optimize_redundant_comparisons = 1;
 
+-- =====================================================================
+-- Section 20: transitive inference must not append implied conditions
+-- =====================================================================
+
+-- The nested `x < 2` implies the derived `x < 3`; the pruning pass sees only the direct
+-- arguments of the outer AND, so the implied conjunct must not be appended at all.
+SELECT 'derived_nested_subsumed';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number AS x, number * 2 AS y FROM numbers(10))
+WHERE (x < 2 AND x < y) AND y < 3
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT number AS x, number * 2 AS y FROM numbers(10)) WHERE (x < 2 AND x < y) AND y < 3 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT number AS x, number * 2 AS y FROM numbers(10)) WHERE (x < 2 AND x < y) AND y < 3 SETTINGS optimize_redundant_comparisons = 1;
+
+SELECT 'derived_flat_subsumed';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number AS x, number * 2 AS y FROM numbers(10))
+WHERE x < 2 AND x < y AND y < 3
+SETTINGS optimize_redundant_comparisons = 1;
+
+-- The inference still works when it adds information: `x < 3` is derived and kept.
+SELECT 'derived_kept';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number AS x, number * 2 AS y FROM numbers(10))
+WHERE x < y AND y < 3
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT number AS x, number * 2 AS y FROM numbers(10)) WHERE x < y AND y < 3 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Contradictory derived conditions still collapse the AND to false.
+SELECT 'derived_conflict';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number AS x, number AS y FROM numbers(10))
+WHERE x = 3 AND x = y AND y = 5
+SETTINGS optimize_redundant_comparisons = 1;
+
 DROP TABLE IF EXISTS 04032_t;

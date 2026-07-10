@@ -2071,6 +2071,12 @@ private:
         ComparePairs greater_pairs;
         ComparePairs less_pairs;
 
+        /// Filters of the existing `expr op constant` conjuncts (seeded from the flattened view, so
+        /// nested ANDs participate) plus the already-derived conjuncts. A derived conjunct implied
+        /// by one of them is not appended: the later pruning pass sees only the direct arguments of
+        /// this AND and could not remove e.g. `x < 3` derived for `(x < 2 AND x < y) AND y < 3`.
+        ComparisonFilterMap derived_conjunct_filters;
+
         auto flattened_and_node = getFlattenedLogicalExpression(function_node, getContext());
         const auto & arguments = flattened_and_node ? flattened_and_node->getArguments().getNodes()
                                                     : function_node.getArguments().getNodes();
@@ -2102,6 +2108,19 @@ private:
             /// it would derive `number % 2 = 1`), which the conflict detector then folds away.
             if (hasNonDeterministicFunction(lhs) || hasNonDeterministicFunction(rhs))
                 continue;
+
+            const auto * lhs_constant = lhs->as<ConstantNode>();
+            const auto * rhs_constant = rhs->as<ConstantNode>();
+            if (static_cast<bool>(lhs_constant) != static_cast<bool>(rhs_constant))
+            {
+                const auto * constant_node = lhs_constant ? lhs_constant : rhs_constant;
+                const auto & expression_node = lhs_constant ? rhs : lhs;
+                auto comparison_func = toComparisonFunction(function_name);
+                chassert(comparison_func);
+                auto normalized = lhs_constant ? flipComparisonFunction(*comparison_func) : *comparison_func;
+                ComparisonFilterInfo seed_filter{constant_node, normalized, argument, {}, 0};
+                addComparisonFilter(derived_conjunct_filters, expression_node, std::move(seed_filter), true, getContext());
+            }
 
             if (function_name == "less")
             {
@@ -2225,7 +2244,17 @@ private:
                         and_node->resolveAsFunction(
                             FunctionFactory::instance().get(compare_function_name, getContext()));
                         if (existing_conjuncts.emplace(and_node).second)
-                            function_node.getArguments().getNodes().push_back(and_node);
+                        {
+                            /// Do not append a derived conjunct implied by an existing or already-derived
+                            /// one; contradictions are appended so the next pass folds the AND to `false`.
+                            auto derived_func = toComparisonFunction(compare_function_name);
+                            chassert(derived_func);
+                            ComparisonFilterInfo derived_filter{constant, *derived_func, and_node, {}, 0};
+                            auto add_result = addComparisonFilter(
+                                derived_conjunct_filters, left.first, std::move(derived_filter), true, getContext());
+                            if (add_result != AddComparisonFilterResult::ALWAYS_TRUE)
+                                function_node.getArguments().getNodes().push_back(and_node);
+                        }
                     }
 
                     /// Don't recurse through constant intermediate nodes — any inference would be
