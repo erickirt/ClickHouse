@@ -701,7 +701,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greaterOrEquals(__table1.u, 255), greater(__table1.i, 0))
+WHERE and(equals(__table1.u, 255), greater(__table1.i, 0))
 SETTINGS optimize_redundant_comparisons = 1
 boundary_at_max_le
 1	10	1.5	a	x	2024-01-01 00:00:00
@@ -770,7 +770,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(lessOrEquals(__table1.u, 0), greater(__table1.i, 0))
+WHERE and(equals(__table1.u, 0), greater(__table1.i, 0))
 SETTINGS optimize_redundant_comparisons = 1
 boundary_at_min_ge
 1	10	1.5	a	x	2024-01-01 00:00:00
@@ -839,7 +839,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE greaterOrEquals(__table1.u, 255)
+WHERE equals(__table1.u, 255)
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_gt
 5	50	5.5	e	z	2025-01-01 00:00:00
@@ -862,7 +862,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greater(__table1.i, 3.5), greater(__table1.u, 0))
+WHERE and(greaterOrEquals(__table1.i, 4), greater(__table1.u, 0))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_lt
 1	10	1.5	a	x	2024-01-01 00:00:00
@@ -887,7 +887,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(less(__table1.i, 3.5), greater(__table1.u, 0))
+WHERE and(lessOrEquals(__table1.i, 3), greater(__table1.u, 0))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_ge
 5	50	5.5	e	z	2025-01-01 00:00:00
@@ -910,7 +910,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greaterOrEquals(__table1.i, 3.5), greater(__table1.u, 0))
+WHERE and(greaterOrEquals(__table1.i, 4), greater(__table1.u, 0))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_le
 1	10	1.5	a	x	2024-01-01 00:00:00
@@ -935,7 +935,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(lessOrEquals(__table1.i, 3.5), greater(__table1.u, 0))
+WHERE and(lessOrEquals(__table1.i, 3), greater(__table1.u, 0))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_eq
 SELECT
@@ -1027,7 +1027,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greater(__table1.u, 254.5), greater(__table1.i, 0))
+WHERE and(equals(__table1.u, 255), greater(__table1.i, 0))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_range
 3	30	3	c	y	2024-06-15 12:00:00
@@ -1050,7 +1050,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greater(__table1.i, 1.5), less(__table1.i, 4.5))
+WHERE and(greaterOrEquals(__table1.i, 2), lessOrEquals(__table1.i, 4))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_conflict
 SELECT
@@ -1094,7 +1094,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE greater(__table1.i, 3.5)
+WHERE greaterOrEquals(__table1.i, 4)
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_point
 3	30	3	c	y	2024-06-15 12:00:00
@@ -1117,7 +1117,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greater(__table1.i, 2.5), less(__table1.i, 3.5))
+WHERE and(greaterOrEquals(__table1.i, 3), lessOrEquals(__table1.i, 3))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_eq_conflict
 SELECT
@@ -1654,7 +1654,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE less(__table1.i, 3.5)
+WHERE lessOrEquals(__table1.i, 3)
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_lt_gt_keep_both
 [3]
@@ -1677,7 +1677,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(less(__table1.i, 3.5), greater(__table1.i, 1))
+WHERE and(lessOrEquals(__table1.i, 3), greater(__table1.i, 1))
 SETTINGS optimize_redundant_comparisons = 1
 float_rewrite_below_min_conflict
 []

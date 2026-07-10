@@ -873,7 +873,7 @@ SELECT
     __table1.lc AS lc,
     __table1.dt AS dt
 FROM default.`04032_t` AS __table1
-WHERE and(greater(__table1.i, 1), less(__table1.i, 5.5))
+WHERE and(greater(__table1.i, 1), lessOrEquals(__table1.i, 5))
 SETTINGS optimize_redundant_comparisons = 1
 flip_less
 3	30	3	c	y	2024-06-15 12:00:00
@@ -1549,3 +1549,34 @@ FROM
 ) AS __table1
 WHERE 0
 SETTINGS optimize_redundant_comparisons = 1
+rewrite_materialized_float
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE and(greaterOrEquals(__table1.number, 4), lessOrEquals(__table1.number, 8))
+SETTINGS optimize_redundant_comparisons = 1
+5
+5
+rewrite_materialized_boundary
+SELECT count() AS `count()`
+FROM
+(
+    SELECT toUInt8(__table2.number) AS n
+    FROM numbers(3) AS __table2
+) AS __table1
+WHERE equals(__table1.n, 255)
+SETTINGS optimize_redundant_comparisons = 1
+0
+0
+rewrite_materialized_two_columns
+SELECT count() AS `count()`
+FROM
+(
+    SELECT
+        toUInt8(__table2.number) AS n,
+        toInt32(__table2.number) AS i
+    FROM numbers(3) AS __table2
+) AS __table1
+WHERE and(equals(__table1.n, 255), greater(__table1.i, 0))
+SETTINGS optimize_redundant_comparisons = 1
+0
+0

@@ -688,4 +688,32 @@ SELECT count() FROM (SELECT number AS x, number AS y FROM numbers(10))
 WHERE x = 3 AND x = y AND y = 5
 SETTINGS optimize_redundant_comparisons = 1;
 
+-- =====================================================================
+-- Section 21: internal folds/rewrites materialize in the tree
+-- =====================================================================
+-- Even when nothing is pruned, the rewritten predicates must reach the AST.
+
+SELECT 'rewrite_materialized_float';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number > 3.5 AND number < 8.5
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number > 3.5 AND number < 8.5 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number > 3.5 AND number < 8.5 SETTINGS optimize_redundant_comparisons = 1;
+
+-- The AT_MAX fold (`>= 255` -> `= 255` for UInt8) materializes on the survivor.
+SELECT 'rewrite_materialized_boundary';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT toUInt8(number) AS n FROM numbers(3)) WHERE n >= 255 AND n <= 255
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT toUInt8(number) AS n FROM numbers(3)) WHERE n >= 255 AND n <= 255 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT toUInt8(number) AS n FROM numbers(3)) WHERE n >= 255 AND n <= 255 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Size-preserving with a second column: the fold on `n` still materializes.
+SELECT 'rewrite_materialized_two_columns';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT toUInt8(number) AS n, toInt32(number) AS i FROM numbers(3)) WHERE n >= 255 AND i > 0
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT toUInt8(number) AS n, toInt32(number) AS i FROM numbers(3)) WHERE n >= 255 AND i > 0 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT toUInt8(number) AS n, toInt32(number) AS i FROM numbers(3)) WHERE n >= 255 AND i > 0 SETTINGS optimize_redundant_comparisons = 1;
+
 DROP TABLE IF EXISTS 04032_t;

@@ -386,6 +386,9 @@ struct ComparisonFilterInfo
     /// still references the old literal (3.5) and any later rebuild must substitute it with
     /// `converted_value`, otherwise the AST goes out of sync with the analysis state.
     bool constant_rewritten = false;
+    /// Set when folding changed `function` or the constant: the node must be rebuilt on emission,
+    /// so that the tightened predicate reaches downstream analysis.
+    bool modified = false;
 };
 
 /// A `Bool` column constant may be stored as `Types::Bool` (strict conversion) or as an integer
@@ -618,7 +621,10 @@ static std::optional<AddComparisonFilterResult> tryFoldBoundaryOrRewriteFloatFor
             if (filter.function == ComparisonFunction::LESS_OR_EQUALS)
                 return AddComparisonFilterResult::ALWAYS_TRUE;
             if (filter.function == ComparisonFunction::GREATER_OR_EQUALS)
+            {
                 filter.function = ComparisonFunction::EQUALS;
+                filter.modified = true;
+            }
         }
 
         if (boundary == BoundaryCheckResult::AT_MIN)
@@ -628,7 +634,10 @@ static std::optional<AddComparisonFilterResult> tryFoldBoundaryOrRewriteFloatFor
             if (filter.function == ComparisonFunction::GREATER_OR_EQUALS)
                 return AddComparisonFilterResult::ALWAYS_TRUE;
             if (filter.function == ComparisonFunction::LESS_OR_EQUALS)
+            {
                 filter.function = ComparisonFunction::EQUALS;
+                filter.modified = true;
+            }
         }
 
         return std::nullopt;
@@ -674,6 +683,7 @@ static std::optional<AddComparisonFilterResult> tryFoldBoundaryOrRewriteFloatFor
             return result;
         filter.converted_value = make_int_field(floored);
         filter.constant_rewritten = true;
+        filter.modified = true;
         break;
     }
     case ComparisonFunction::GREATER:
@@ -685,6 +695,7 @@ static std::optional<AddComparisonFilterResult> tryFoldBoundaryOrRewriteFloatFor
             return result;
         filter.converted_value = make_int_field(ceiled);
         filter.constant_rewritten = true;
+        filter.modified = true;
         break;
     }
     }
@@ -1914,6 +1925,7 @@ private:
         }
 
         /// Pass 2: collect surviving filters, separating notEquals for NOT IN conversion.
+        bool any_modified = false;
         for (auto & [expression, filters] : filter_map)
         {
             /// The map iterates by value; restore the query order to keep the NOT IN tuple stable.
@@ -1922,7 +1934,16 @@ private:
                 not_equals_infos.push_back(&filter);
 
             for (auto & filter : filters.range_filters)
+            {
+                /// Materialize folds (e.g. `> 3.5` -> `>= 4`, `UInt8 >= 255` -> `= 255`) so that
+                /// the tightened predicate reaches downstream analysis.
+                if (filter.modified)
+                {
+                    rebuildComparisonNode(filter, getContext());
+                    any_modified = true;
+                }
                 all_operands.emplace_back(filter.original_index, std::move(filter.original_node));
+            }
 
             for (auto & filter : filters.opaque_filters)
             {
@@ -1958,7 +1979,8 @@ private:
         for (auto & [_, node_ptr] : all_operands)
             and_operands.push_back(std::move(node_ptr));
 
-        if (and_operands.size() == function_node.getArguments().getNodes().size())
+        /// Rebuilt nodes must be written back even when the operand count is unchanged.
+        if (and_operands.size() == function_node.getArguments().getNodes().size() && !any_modified)
             return;
 
         /// All conditions were redundant — replace with true.
