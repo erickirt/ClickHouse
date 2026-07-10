@@ -2,7 +2,7 @@
 -- no-replicated-database: EXPLAIN output differs for replicated database.
 -- no-parallel-replicas: EXPLAIN output differs for parallel replicas.
 -- See `src/Storages/MergeTree/KeyCondition.cpp` (atom_map "isNotDistinctFrom",
--- reverseComparisonOperator, tryRewriteIsTrueCondition).
+-- reverseComparisonOperator, tryRewriteIsTrueCondition, tryRewriteInTruthyCondition).
 
 SET use_query_condition_cache = 0;
 SET use_skip_indexes_on_data_read = 0;
@@ -64,6 +64,45 @@ SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT * FROM part WHERE b IS TRUE)
 SELECT '--- b IS NOT DISTINCT FROM true prunes partitions the same as b = true ---';
 SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT * FROM part WHERE b IS NOT DISTINCT FROM true) WHERE explain ILIKE '%Parts: 1/2%';
 
+-- `X != false` (`notEquals(X, false)`) is truth-equivalent to `X` for a boolean-valued `X`, so it
+-- must prune the same as the bare atom across all index families.
+SELECT '--- (k = c) != false prunes via primary key ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) != false) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- (v = c) != false prunes via minmax skip index ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM mm WHERE (v = 42) != false) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- b != false prunes partitions the same as b = true ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT * FROM part WHERE b != false) WHERE explain ILIKE '%Parts: 1/2%';
+
+-- `X != true` (`notEquals(X, true)`) is NOT truth-equivalent to `X`, so it must NOT be rewritten.
+SELECT '--- (k = c) != true does NOT get the IS TRUE pruning ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) != true) WHERE explain ILIKE '%Granules: 1/%';
+
+-- `X IN (<all-true const set>)` is truth-equivalent to `X` for a boolean-valued `X`.
+SELECT '--- (k = c) IN (true) prunes via primary key ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) IN (true)) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- (k = c) IN (true, true) prunes via primary key ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) IN (true, true)) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- (v = c) IN (true) prunes via minmax skip index ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM mm WHERE (v = 42) IN (true)) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- b IN (true) prunes partitions the same as b = true ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT * FROM part WHERE b IN (true)) WHERE explain ILIKE '%Parts: 1/2%';
+
+-- `X IN (false)`, `X IN (true, false)`, `X IN (2)` and `X NOT IN (true)` are NOT truth-equivalent to
+-- `X`, so they must NOT get the IS TRUE pruning.
+SELECT '--- (k = c) IN (false) does NOT get the pruning ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) IN (false)) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- (k = c) IN (true, false) does NOT get the pruning ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) IN (true, false)) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- (k = c) NOT IN (true) does NOT get the pruning ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) NOT IN (true)) WHERE explain ILIKE '%Granules: 1/%';
+
 SELECT '--- IS NOT DISTINCT FROM NULL must NOT reuse the "=" range (means IS NULL) ---';
 -- No "Granules: 1/" pruning; correctness below proves it returns the NULL rows.
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE k IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
@@ -81,10 +120,22 @@ SELECT 'k_istrue_means_eq_1', count() FROM pk WHERE k IS TRUE;
 SELECT 'kplus1_istrue_means_eq_1', count() FROM pk WHERE (k + 1) IS TRUE;
 -- IS FALSE must not be rewritten to the IS TRUE path.
 SELECT 'isfalse', count() FROM pk WHERE (k = 42) IS FALSE;
--- Partition pruning correctness: IS TRUE / IS NOT DISTINCT FROM match b = true.
+-- `!= false` / `IN (truthy)` forms match the bare atom; the non-equivalent forms match their own semantics.
+SELECT 'ne_false_eq', count() FROM pk WHERE (k = 42) != false;
+SELECT 'ne_true_eq', count() FROM pk WHERE (k = 42) != true;
+SELECT 'in_true_eq', count() FROM pk WHERE (k = 42) IN (true);
+SELECT 'in_truetrue_eq', count() FROM pk WHERE (k = 42) IN (true, true);
+SELECT 'in_false_eq', count() FROM pk WHERE (k = 42) IN (false);
+SELECT 'in_truefalse_eq', count() FROM pk WHERE (k = 42) IN (true, false);
+SELECT 'notin_true_eq', count() FROM pk WHERE (k = 42) NOT IN (true);
+-- non-boolean X: `k IN (true)` means `k = 1`, not "k truthy"; must stay correct.
+SELECT 'k_in_true_means_eq_1', count() FROM pk WHERE k IN (true);
+-- Partition pruning correctness: IS TRUE / IS NOT DISTINCT FROM / != false / IN (true) match b = true.
 SELECT 'part_eq', count() FROM part WHERE b = true;
 SELECT 'part_istrue', count() FROM part WHERE b IS TRUE;
 SELECT 'part_ndf', count() FROM part WHERE b IS NOT DISTINCT FROM true;
+SELECT 'part_ne_false', count() FROM part WHERE b != false;
+SELECT 'part_in_true', count() FROM part WHERE b IN (true);
 
 DROP TABLE pk;
 DROP TABLE pk_null;

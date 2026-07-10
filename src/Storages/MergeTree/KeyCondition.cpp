@@ -1046,14 +1046,43 @@ static const std::set<std::string_view> boolean_result_functions
     "not", "and", "or", "isNotDistinctFrom", "isDistinctFrom",
 };
 
-/// Rewrite `X IS TRUE`, which the analyzer lowers to `isNotDistinctFrom(X, true)`, to `X` for key
-/// analysis, so a wrapped predicate like `(k = 42) IS TRUE` becomes a prunable key atom on `k`.
-/// `X <=> true` is truth-equivalent to `X` ONLY IF `X` is boolean-valued (in {0, 1, NULL}): for such
-/// `X`, `X <=> true` equals `X` on the non-NULL values and is `false` (not NULL) on NULL, which
-/// matches truth-tested position where both `false` and `NULL` reject the row. For a non-boolean `X`
-/// (e.g. `k` UInt32), `X <=> true` means `X = 1`, NOT "X is truthy", so the rewrite would be wrong;
-/// hence the boolean-result-function gate on `X`. Like `tryRewriteCoalesceCondition`, it changes the
-/// value on NULL rows, so the caller restricts it to non-inverted boolean position.
+/// A positive boolean wrapper `wrapper(X, ...)` is truth-equivalent to bare `X` ONLY IF `X` is
+/// boolean-valued (in {0, 1, NULL}). Otherwise, e.g. for `k` UInt32, `k <=> true` / `k != false` /
+/// `k IN (true)` mean `k = 1` / `k != 0` / `k = 1`, NOT "k is truthy", so peeling the wrapper would
+/// be wrong. This checks the boolean-result-ness of the predicate after peeling the non-semantic
+/// wrappers that `cloneDAGWithInversionPushDown` strips transparently (alias, `materialize`, trivial
+/// `CAST`). Peeling here keeps equivalent wrapped forms (`CAST(k = 42, 'UInt8') IS TRUE`,
+/// `materialize(k = 42) IS TRUE`) from diverging: otherwise the wrapped predicate reaches the gate as
+/// `CAST` / `materialize` (not in `boolean_result_functions`), the rewrite declines, and the later
+/// clone strips the wrapper anyway, leaving the un-prunable `isNotDistinctFrom(equals(k, 42), true)`
+/// in the DAG. The caller still clones the ORIGINAL `predicate`, so the recursion strips the same
+/// wrappers under boolean context.
+static bool predicateIsBooleanResult(const ActionsDAG::Node * predicate)
+{
+    const ActionsDAG::Node * unwrapped = predicate;
+    while (unwrapped->type == ActionsDAG::ActionType::ALIAS
+           || (unwrapped->type == ActionsDAG::ActionType::FUNCTION
+               && (unwrapped->function_base->getName() == "materialize" || isTrivialCast(*unwrapped))))
+    {
+        if (unwrapped->children.empty())
+            return false;
+        unwrapped = unwrapped->children.front();
+    }
+
+    return unwrapped->type == ActionsDAG::ActionType::FUNCTION
+        && boolean_result_functions.contains(unwrapped->function_base->getName());
+}
+
+/// Rewrite a positive boolean wrapper around a predicate `X` to bare `X` for key analysis, so a
+/// wrapped predicate like `(k = 42) IS TRUE` or `(k = 42) != false` becomes a prunable key atom on
+/// `k`. Two truth-equivalent wrapper forms the analyzer produces are handled:
+///   - `X IS TRUE`, lowered to `isNotDistinctFrom(X, true)`  (const `true` == numeric 1)
+///   - `X != false`, i.e. `notEquals(X, false)`               (const `false` == numeric 0)
+/// Both are truth-equivalent to `X` ONLY IF `X` is boolean-valued (see `predicateIsBooleanResult`):
+/// for such `X`, `X <=> true` equals `X` on non-NULL values and is `false` (not NULL) on NULL, and
+/// `X != false` equals `X` on all values including NULL; in a truth-tested position both `false` and
+/// `NULL` reject the row, matching bare `X`. Like `tryRewriteCoalesceCondition`, it changes the value
+/// on NULL rows (for the `IS TRUE` form), so the caller restricts it to non-inverted boolean position.
 /// Returns nullptr if the pattern does not match.
 static const ActionsDAG::Node * tryRewriteIsTrueCondition(
     const ActionsDAG::Node & node,
@@ -1062,7 +1091,13 @@ static const ActionsDAG::Node * tryRewriteIsTrueCondition(
     std::unordered_map<const ActionsDAG::Node *, const ActionsDAG::Node *> & inputs_mapping,
     const ContextPtr & context)
 {
-    if (name != "isNotDistinctFrom")
+    /// `X IS TRUE` -> `X <=> true` (const 1); `X != false` -> `X != 0` (const 0).
+    UInt64 expected_const;
+    if (name == "isNotDistinctFrom")
+        expected_const = 1;
+    else if (name == "notEquals")
+        expected_const = 0;
+    else
         return nullptr;
 
     if (node.children.size() != 2)
@@ -1073,7 +1108,8 @@ static const ActionsDAG::Node * tryRewriteIsTrueCondition(
         return n.type == ActionsDAG::ActionType::COLUMN && n.column && isColumnConst(*n.column);
     };
 
-    /// Find the `X <=> const` shape (either argument order; `isNotDistinctFrom` is symmetric).
+    /// Find the `X <op> const` shape. `isNotDistinctFrom` and `notEquals` are both symmetric, so the
+    /// constant may be on either side.
     const bool c0 = is_const(*node.children[0]);
     const bool c1 = is_const(*node.children[1]);
     if (c0 == c1)
@@ -1082,36 +1118,92 @@ static const ActionsDAG::Node * tryRewriteIsTrueCondition(
     const ActionsDAG::Node * predicate = node.children[c0 ? 1 : 0];
     const ActionsDAG::Node * const_node = node.children[c0 ? 0 : 1];
 
-    /// The constant must be exactly `true` (numeric 1). `X IS FALSE` lowers to `X <=> false`,
-    /// which is NOT truth-equivalent to `X`, so only the `true` case is rewritten here.
+    /// The constant must be exactly `true` (numeric 1) for `<=>` or `false` (numeric 0) for `!=`.
+    /// `X IS FALSE` (`X <=> false`) and `X != true` (`X != 1`) are NOT truth-equivalent to `X`, so
+    /// they are not rewritten here.
     const Field const_value = (*const_node->column)[0];
-    if (const_value.getType() != Field::Types::UInt64 || const_value.safeGet<UInt64>() != 1)
+    if (const_value.getType() != Field::Types::UInt64 || const_value.safeGet<UInt64>() != expected_const)
         return nullptr;
 
-    /// Peel the non-semantic wrappers that `cloneDAGWithInversionPushDown` strips transparently
-    /// (alias, `materialize`, trivial `CAST`) before the boolean-result gate. Otherwise an equivalent
-    /// wrapped form like `CAST(k = 42, 'UInt8') IS TRUE` or `materialize(k = 42) IS TRUE` reaches the
-    /// gate as `CAST` / `materialize` (not in `boolean_result_functions`), returns nullptr, and the
-    /// later clone strips the wrapper anyway, leaving `isNotDistinctFrom(equals(k, 42), true)` in the
-    /// DAG where `extractAtomFromTree` falls back to `Condition: true`. Peeling here keeps equivalent
-    /// predicates from diverging. We check the boolean-result-ness of the peeled node but still clone
-    /// the original `predicate`, so the recursion strips the same wrappers under boolean context.
-    const ActionsDAG::Node * unwrapped = predicate;
-    while (unwrapped->type == ActionsDAG::ActionType::ALIAS
-           || (unwrapped->type == ActionsDAG::ActionType::FUNCTION
-               && (unwrapped->function_base->getName() == "materialize" || isTrivialCast(*unwrapped))))
-    {
-        if (unwrapped->children.empty())
-            return nullptr;
-        unwrapped = unwrapped->children.front();
-    }
-
-    /// Only valid when `X` is boolean-valued; otherwise `X <=> true` means `X = 1`, not "X truthy".
-    if (unwrapped->type != ActionsDAG::ActionType::FUNCTION
-        || !boolean_result_functions.contains(unwrapped->function_base->getName()))
+    if (!predicateIsBooleanResult(predicate))
         return nullptr;
 
     /// The unwrapped predicate replaces the boolean wrapper, so it stays in boolean context.
+    return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
+}
+
+/// Rewrite `X IN (<all-true const set>)`, e.g. `(k = 42) IN (true)`, to bare `X` for key analysis,
+/// so the inner `k = 42` becomes a prunable key atom. For a boolean-valued `X`, `X IN (true)` matches
+/// exactly the rows where `X` is true, i.e. it is truth-equivalent to `X`. This is only sound when
+/// EVERY element of the set is exactly `true` (numeric 1) and non-NULL:
+///   - `X IN (false)` matches `NOT X` (declined), `X IN (true, false)` matches "X is 0 or 1"
+///     (always-true for non-NULL boolean, declined), and a NULL element changes NULL handling.
+///   - the `X` boolean-result gate is the same as `tryRewriteIsTrueCondition`: `k IN (true)` for a
+///     non-boolean `k` means `k = 1`, not "k truthy".
+/// Only literal/constant sets whose elements are available at analysis time are handled; subquery
+/// sets that are not yet built decline (return nullptr) and fall back to the existing behavior.
+/// Returns nullptr if the pattern does not match.
+static const ActionsDAG::Node * tryRewriteInTruthyCondition(
+    const ActionsDAG::Node & node,
+    const String & name,
+    ActionsDAG & inverted_dag,
+    std::unordered_map<const ActionsDAG::Node *, const ActionsDAG::Node *> & inputs_mapping,
+    const ContextPtr & context)
+{
+    /// Only the plain `in`; `notIn` is negation and `globalIn`/`nullIn` have different NULL semantics.
+    if (name != "in")
+        return nullptr;
+
+    if (node.children.size() != 2)
+        return nullptr;
+
+    const ActionsDAG::Node * predicate = node.children[0];
+    const ActionsDAG::Node * set_node = node.children[1];
+
+    /// The right argument must be a constant column wrapping a prepared set.
+    if (set_node->type != ActionsDAG::ActionType::COLUMN || !set_node->column)
+        return nullptr;
+
+    const auto * column_set = checkAndGetColumn<const ColumnSet>(&set_node->column->getDataColumn());
+    if (!column_set)
+        return nullptr;
+
+    auto future_set = column_set->getData();
+    if (!future_set)
+        return nullptr;
+
+    /// Only single-column sets: `X` is a scalar predicate, so a tuple/multi-column set is not this shape.
+    if (future_set->getTypes().size() != 1)
+        return nullptr;
+
+    /// Build the set inplace so its explicit elements are available. Subquery sets that are not yet
+    /// built (or are too large for index use) return no explicit elements and are declined below.
+    auto prepared_set = future_set->buildOrderedSetInplace(context);
+    if (!prepared_set || !prepared_set->hasExplicitSetElements())
+        return nullptr;
+
+    const Columns set_elements = prepared_set->getSetElements();
+    if (set_elements.size() != 1)
+        return nullptr;
+
+    const IColumn & elements = *set_elements.front();
+    const size_t num_elements = elements.size();
+    /// Empty set: `X IN ()` is always false, not equivalent to `X`. Decline.
+    if (num_elements == 0)
+        return nullptr;
+
+    /// Every element must be exactly `true` (non-NULL numeric 1).
+    for (size_t i = 0; i < num_elements; ++i)
+    {
+        const Field element = elements[i];
+        if (element.getType() != Field::Types::UInt64 || element.safeGet<UInt64>() != 1)
+            return nullptr;
+    }
+
+    if (!predicateIsBooleanResult(predicate))
+        return nullptr;
+
+    /// The unwrapped predicate replaces the `IN` wrapper, so it stays in boolean context.
     return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
 }
 
@@ -1235,7 +1327,8 @@ static const ActionsDAG::Node & cloneDAGWithInversionPushDown(
             }
             else if (!need_inversion
                 && boolean_context
-                && (res = tryRewriteIsTrueCondition(node, name, inverted_dag, inputs_mapping, context)) != nullptr)
+                && ((res = tryRewriteIsTrueCondition(node, name, inverted_dag, inputs_mapping, context)) != nullptr
+                    || (res = tryRewriteInTruthyCondition(node, name, inverted_dag, inputs_mapping, context)) != nullptr))
             {
                 handled_inversion = true;
             }

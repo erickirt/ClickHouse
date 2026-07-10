@@ -20,6 +20,28 @@
 1
 --- b IS NOT DISTINCT FROM true prunes partitions the same as b = true ---
 1
+--- (k = c) != false prunes via primary key ---
+1
+--- (v = c) != false prunes via minmax skip index ---
+1
+--- b != false prunes partitions the same as b = true ---
+1
+--- (k = c) != true does NOT get the IS TRUE pruning ---
+0
+--- (k = c) IN (true) prunes via primary key ---
+1
+--- (k = c) IN (true, true) prunes via primary key ---
+1
+--- (v = c) IN (true) prunes via minmax skip index ---
+1
+--- b IN (true) prunes partitions the same as b = true ---
+1
+--- (k = c) IN (false) does NOT get the pruning ---
+0
+--- (k = c) IN (true, false) does NOT get the pruning ---
+0
+--- (k = c) NOT IN (true) does NOT get the pruning ---
+0
 --- IS NOT DISTINCT FROM NULL must NOT reuse the "=" range (means IS NULL) ---
 0
 --- correctness is preserved across all forms ---
@@ -33,6 +55,16 @@ is_null	5000
 k_istrue_means_eq_1	1
 kplus1_istrue_means_eq_1	1
 isfalse	99999
+ne_false_eq	1
+ne_true_eq	99999
+in_true_eq	1
+in_truetrue_eq	1
+in_false_eq	99999
+in_truefalse_eq	100000
+notin_true_eq	99999
+k_in_true_means_eq_1	1
 part_eq	2
 part_istrue	2
 part_ndf	2
+part_ne_false	2
+part_in_true	2
