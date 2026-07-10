@@ -626,4 +626,31 @@ SETTINGS optimize_redundant_comparisons = 1;
 SELECT count() FROM (SELECT number / 2. AS f FROM numbers(4)) WHERE f != nan AND f != 2 AND f < 1 SETTINGS optimize_redundant_comparisons = 0;
 SELECT count() FROM (SELECT number / 2. AS f FROM numbers(4)) WHERE f != nan AND f != 2 AND f < 1 SETTINGS optimize_redundant_comparisons = 1;
 
+-- =====================================================================
+-- Section 19: AND reduced to a single wide-typed operand keeps boolean semantics
+-- =====================================================================
+-- `i < 300` is always true for Int8 and is pruned; the surviving operand must be
+-- evaluated as a boolean (non-zero test), a plain cast would truncate 256::UInt32 to 0.
+
+SELECT 'sole_survivor_uint32';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT toUInt32(number * 256) AS x, toInt8(number) AS i FROM numbers(3)) WHERE x AND i < 300
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT toUInt32(number * 256) AS x, toInt8(number) AS i FROM numbers(3)) WHERE x AND i < 300 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT toUInt32(number * 256) AS x, toInt8(number) AS i FROM numbers(3)) WHERE x AND i < 300 SETTINGS optimize_redundant_comparisons = 1;
+
+-- The AND is also a value in a projection, it must evaluate to 0/1.
+SELECT 'sole_survivor_projection';
+SELECT x AND (i < 300) FROM (SELECT toUInt32(number * 256) AS x, toInt8(number) AS i FROM numbers(3)) ORDER BY x SETTINGS optimize_redundant_comparisons = 0;
+SELECT x AND (i < 300) FROM (SELECT toUInt32(number * 256) AS x, toInt8(number) AS i FROM numbers(3)) ORDER BY x SETTINGS optimize_redundant_comparisons = 1;
+
+SELECT 'sole_survivor_float';
+SELECT count() FROM (SELECT number / 2. AS f, toInt8(number) AS i FROM numbers(3)) WHERE f AND i < 300 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT number / 2. AS f, toInt8(number) AS i FROM numbers(3)) WHERE f AND i < 300 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Bool survivor still takes the lossless cast path.
+SELECT 'sole_survivor_bool';
+SELECT count() FROM (SELECT number % 2 = 0 AS b, toInt8(number) AS i FROM numbers(3)) WHERE b AND i < 300 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT number % 2 = 0 AS b, toInt8(number) AS i FROM numbers(3)) WHERE b AND i < 300 SETTINGS optimize_redundant_comparisons = 1;
+
 DROP TABLE IF EXISTS 04032_t;

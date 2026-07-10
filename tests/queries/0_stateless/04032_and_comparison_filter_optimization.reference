@@ -1476,3 +1476,29 @@ WHERE and(notEquals(__table1.f, nan), less(__table1.f, 1))
 SETTINGS optimize_redundant_comparisons = 1
 2
 2
+sole_survivor_uint32
+SELECT count() AS `count()`
+FROM
+(
+    SELECT
+        toUInt32(multiply(__table2.number, 256)) AS x,
+        toInt8(__table2.number) AS i
+    FROM numbers(3) AS __table2
+) AS __table1
+WHERE notEquals(__table1.x, 0)
+SETTINGS optimize_redundant_comparisons = 1
+2
+2
+sole_survivor_projection
+0
+1
+1
+0
+1
+1
+sole_survivor_float
+2
+2
+sole_survivor_bool
+2
+2
