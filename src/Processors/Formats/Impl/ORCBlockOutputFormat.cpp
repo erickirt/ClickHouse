@@ -166,14 +166,15 @@ std::unique_ptr<orc::Type> ORCBlockOutputFormat::getORCType(const DataTypePtr & 
             break;
         case TypeIndex::String:
         {
-            /// Iceberg requires String columns to be stored as ORC `string`, otherwise
-            /// spec-compliant readers reject the file (binary -> string is not an allowed
-            /// promotion). For Iceberg writes (column_mapper != nullptr) force `string`
-            /// regardless of the session setting; keep the setting-driven choice otherwise.
-            if (format_settings.orc.output_string_as_string || column_mapper)
-                result = orc::createPrimitiveType(orc::TypeKind::STRING);
-            else
-                result = orc::createPrimitiveType(orc::TypeKind::BINARY);
+            /// Iceberg `string` must be ORC `string`, but Iceberg `binary` also reads as
+            /// DataTypeString (SchemaProcessor getSimpleType) and must stay ORC `binary`.
+            /// On the Iceberg path (column_mapper != nullptr) consult the per-path source
+            /// logical type: force `string` only where the field is genuinely Iceberg `string`,
+            /// leaving `binary` fields as ORC `binary`. Otherwise keep the setting-driven choice.
+            bool force_string = format_settings.orc.output_string_as_string;
+            if (column_mapper)
+                force_string = column_mapper->isIcebergStringPath(column_path);
+            result = orc::createPrimitiveType(force_string ? orc::TypeKind::STRING : orc::TypeKind::BINARY);
             break;
         }
         case TypeIndex::FixedString:

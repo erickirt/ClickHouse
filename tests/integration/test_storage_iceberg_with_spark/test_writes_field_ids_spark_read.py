@@ -262,3 +262,84 @@ def test_writes_field_ids_orc_compaction_rewrite(started_cluster_iceberg_with_sp
         (3, "charlie"),
         (4, "dave"),
     ]
+
+
+# Regression for the ORC string-vs-binary scoping (bot review on #109994):
+# IcebergSchemaProcessor::getSimpleType maps BOTH Iceberg `string` and Iceberg
+# `binary` to ClickHouse DataTypeString, so keying the ORC String -> ORC `string`
+# override on "column_mapper present" alone would corrupt an Iceberg `binary`
+# column into ORC `string`, changing its logical type. The writer must consult
+# the per-path source Iceberg logical type: force ORC `string` only for genuine
+# Iceberg `string` fields and keep Iceberg `binary` as ORC `binary`.
+#
+# CH's own getIcebergType never emits `binary`, so the `binary` field must come
+# from a Spark-created table. We register it in ClickHouse, INSERT (ClickHouse
+# writes the ORC data file with the Iceberg mapper), then read the raw ORC file
+# with pyarrow and assert the physical ORC types: `s` -> arrow string (ORC
+# string), `b` -> arrow binary (ORC binary, NOT string).
+def test_writes_field_ids_orc_binary_vs_string(started_cluster_iceberg_with_spark):
+    import pyarrow.orc
+
+    instance = started_cluster_iceberg_with_spark.instances["node1"]
+    spark = started_cluster_iceberg_with_spark.spark_session
+    storage_type = "local"
+    TABLE_NAME = "test_field_ids_orc_binary_vs_string_" + get_uuid_str()
+    local_path = f"/var/lib/clickhouse/user_files/iceberg_data/default/{TABLE_NAME}"
+
+    # Spark creates the table so it has a genuine Iceberg `binary` field alongside
+    # a `string` field (both read as ClickHouse String).
+    spark.sql(
+        f"""
+        CREATE TABLE {TABLE_NAME} (id INT, s STRING, b BINARY)
+        USING iceberg
+        TBLPROPERTIES ('format-version'='2', 'write.format.default'='orc')
+        """
+    )
+    default_upload_directory(
+        started_cluster_iceberg_with_spark,
+        storage_type,
+        f"/iceberg_data/default/{TABLE_NAME}/",
+        f"/iceberg_data/default/{TABLE_NAME}/",
+    )
+
+    create_iceberg_table(
+        storage_type,
+        instance,
+        TABLE_NAME,
+        started_cluster_iceberg_with_spark,
+        format="ORC",
+    )
+
+    # ClickHouse writes the ORC data file (with the Iceberg column mapper). With
+    # output_format_orc_string_as_string=0 to prove the string/binary choice is
+    # driven by the source Iceberg type, not the session setting.
+    instance.query(
+        f"INSERT INTO {TABLE_NAME} VALUES (1, 'hello', unhex('DEADBEEF'))",
+        settings={
+            "allow_insert_into_iceberg": 1,
+            "output_format_orc_string_as_string": 0,
+        },
+    )
+
+    default_download_directory(
+        started_cluster_iceberg_with_spark,
+        storage_type,
+        f"{local_path}/",
+        f"{local_path}/",
+    )
+
+    data_files = glob.glob(f"{local_path}/data/*.orc")
+    assert data_files, "no ORC data file was written"
+
+    orc_schema = pyarrow.orc.ORCFile(data_files[0]).schema
+    field_types = {orc_schema.field(i).name: orc_schema.field(i).type for i in range(len(orc_schema))}
+    # Iceberg `string` -> ORC string (arrow string); Iceberg `binary` -> ORC
+    # binary (arrow binary). If the mapper-presence heuristic leaked, `b` would
+    # be arrow string here.
+    import pyarrow
+    assert pyarrow.types.is_string(field_types["s"]), field_types
+    assert pyarrow.types.is_binary(field_types["b"]), field_types
+
+    # Spark must still read the ClickHouse-written values back correctly.
+    rows = spark.read.format("iceberg").load(local_path).orderBy("id").collect()
+    assert [(r.id, r.s, bytes(r.b)) for r in rows] == [(1, "hello", bytes.fromhex("DEADBEEF"))]

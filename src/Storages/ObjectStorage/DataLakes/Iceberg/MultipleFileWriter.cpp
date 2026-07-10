@@ -37,6 +37,7 @@ MultipleFileWriter::MultipleFileWriter(
     , sample_block(sample_block_)
 {
     column_mapper->setStorageColumnEncoding(Iceberg::IcebergSchemaProcessor::traverseSchema(schema_));
+    column_mapper->setIcebergStringPaths(Iceberg::IcebergSchemaProcessor::collectIcebergStringPaths(schema_));
 }
 
 void MultipleFileWriter::startNewFile()
