@@ -56,7 +56,10 @@ public:
 
 private:
     /// Type names for different complex types (e.g. enums, fixed strings) must be unique. We use simple incremental number to give them different names.
-    SchemaWithSerializeFn createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name);
+    /// `column_path` is the dotted path of the field (mirrors setIcebergFieldIds / IcebergSchemaProcessor:
+    /// `t.x`, `arr.element`, `m.value`); on the Iceberg path it selects Avro `string` vs `bytes` for a
+    /// String column from the source Iceberg logical type instead of the generic string-column regex.
+    SchemaWithSerializeFn createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name, const String & column_path);
 
     /// Walks the Avro schema tree and sets Iceberg `field-id` on every record field, descending
     /// through union (Nullable/Variant), array and map wrapper nodes so records nested inside e.g.

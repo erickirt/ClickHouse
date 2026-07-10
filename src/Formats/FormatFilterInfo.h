@@ -33,7 +33,15 @@ public:
     /// Paths whose Iceberg logical type is `string` (as opposed to `binary`). Both Iceberg
     /// `string` and `binary` are read as ClickHouse DataTypeString, so an output format that
     /// needs to reproduce the source logical type (e.g. ORC string vs binary) must consult this.
-    void setIcebergStringPaths(std::unordered_set<String> && iceberg_string_paths_) { iceberg_string_paths = std::move(iceberg_string_paths_); }
+    /// `hasIcebergStringInfo()` distinguishes "logical-type info was supplied" from "no info":
+    /// a mapper that only carries field-id encoding (no string-path info) must fall back to the
+    /// setting/spec default instead of treating every DataTypeString path as `binary`.
+    void setIcebergStringPaths(std::unordered_set<String> && iceberg_string_paths_)
+    {
+        iceberg_string_paths = std::move(iceberg_string_paths_);
+        has_iceberg_string_info = true;
+    }
+    bool hasIcebergStringInfo() const { return has_iceberg_string_info; }
     bool isIcebergStringPath(const String & path) const { return iceberg_string_paths.contains(path); }
 
     /// clickhouse_column_name -> format_column_name (just join the maps above by field_id).
@@ -43,6 +51,7 @@ private:
     std::unordered_map<String, Int64> storage_encoding;
     std::unordered_map<Int64, String> field_id_to_clickhouse_name;
     std::unordered_set<String> iceberg_string_paths;
+    bool has_iceberg_string_info = false;
 };
 
 using ColumnMapperPtr = std::shared_ptr<ColumnMapper>;

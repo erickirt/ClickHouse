@@ -168,11 +168,12 @@ std::unique_ptr<orc::Type> ORCBlockOutputFormat::getORCType(const DataTypePtr & 
         {
             /// Iceberg `string` must be ORC `string`, but Iceberg `binary` also reads as
             /// DataTypeString (SchemaProcessor getSimpleType) and must stay ORC `binary`.
-            /// On the Iceberg path (column_mapper != nullptr) consult the per-path source
-            /// logical type: force `string` only where the field is genuinely Iceberg `string`,
-            /// leaving `binary` fields as ORC `binary`. Otherwise keep the setting-driven choice.
+            /// When per-path logical-type info is available, force `string` only where the field
+            /// is genuinely Iceberg `string`, leaving `binary` fields as ORC `binary`. A mapper
+            /// without string-path info (e.g. a bare field-id mapper) falls back to the
+            /// setting-driven choice rather than forcing every String path to binary.
             bool force_string = format_settings.orc.output_string_as_string;
-            if (column_mapper)
+            if (column_mapper && column_mapper->hasIcebergStringInfo())
                 force_string = column_mapper->isIcebergStringPath(column_path);
             result = orc::createPrimitiveType(force_string ? orc::TypeKind::STRING : orc::TypeKind::BINARY);
             break;

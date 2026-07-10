@@ -210,6 +210,11 @@ static std::optional<WriteDataFilesResult> writeDataFiles(
                     field_ids[IcebergPositionDeleteTransform::positions_column_name] = IcebergPositionDeleteTransform::positions_column_field_id;
                     field_ids[IcebergPositionDeleteTransform::data_file_path_column_name] = IcebergPositionDeleteTransform::data_file_path_column_field_id;
                     column_mapper->setStorageColumnEncoding(std::move(field_ids));
+                    /// The position delete-file schema declares `file_path` as Iceberg `string`
+                    /// (`pos` is `long`), so the writer must emit ORC/Avro `string` for it. Without
+                    /// this the string-path-aware writer treats the DataTypeString `file_path` as
+                    /// `binary`, producing spec-incompatible position delete files.
+                    column_mapper->setIcebergStringPaths({String(IcebergPositionDeleteTransform::data_file_path_column_name)});
                     FormatFilterInfoPtr format_filter_info = std::make_shared<FormatFilterInfo>(nullptr, context, column_mapper, nullptr, nullptr);
                     auto output_format = FormatFactory::instance().getOutputFormat(
                         write_format, *write_buffer, delete_file_sample_block, context, format_settings, format_filter_info);

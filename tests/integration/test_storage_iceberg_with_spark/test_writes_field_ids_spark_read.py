@@ -343,3 +343,93 @@ def test_writes_field_ids_orc_binary_vs_string(started_cluster_iceberg_with_spar
     # Spark must still read the ClickHouse-written values back correctly.
     rows = spark.read.format("iceberg").load(local_path).orderBy("id").collect()
     assert [(r.id, r.s, bytes(r.b)) for r in rows] == [(1, "hello", bytes.fromhex("DEADBEEF"))]
+
+
+def _avro_data_file_schema(path):
+    """Return the writer schema of the first Avro data file under path/data/."""
+    import avro.datafile
+    import avro.io
+
+    data_files = glob.glob(f"{path}/data/*.avro")
+    assert data_files, "no Avro data file was written"
+    with open(data_files[0], "rb") as f:
+        reader = avro.datafile.DataFileReader(f, avro.io.DatumReader())
+        return reader.datum_reader.writers_schema
+
+
+# Regression for the Avro string-vs-binary scoping (bot review on #109994):
+# IcebergSchemaProcessor::getSimpleType maps BOTH Iceberg `string` and Iceberg
+# `binary` to ClickHouse DataTypeString. The Avro writer chose `string` vs
+# `bytes` from the output_format_avro_string_column_pattern regex, which cannot
+# tell the two apart, so it could emit Avro `string` for a `binary` field or
+# `bytes` for a `string` field. On the Iceberg path the writer must instead pick
+# from the per-path source Iceberg logical type: `string` -> Avro string,
+# `binary` -> Avro bytes. The `binary` field must come from a Spark-created
+# table (CH's getIcebergType never emits `binary`).
+def test_writes_field_ids_avro_binary_vs_string(started_cluster_iceberg_with_spark):
+    import avro.schema
+
+    instance = started_cluster_iceberg_with_spark.instances["node1"]
+    spark = started_cluster_iceberg_with_spark.spark_session
+    storage_type = "local"
+    TABLE_NAME = "test_field_ids_avro_binary_vs_string_" + get_uuid_str()
+    local_path = f"/var/lib/clickhouse/user_files/iceberg_data/default/{TABLE_NAME}"
+
+    spark.sql(
+        f"""
+        CREATE TABLE {TABLE_NAME} (id INT, s STRING, b BINARY)
+        USING iceberg
+        TBLPROPERTIES ('format-version'='2', 'write.format.default'='avro')
+        """
+    )
+    default_upload_directory(
+        started_cluster_iceberg_with_spark,
+        storage_type,
+        f"/iceberg_data/default/{TABLE_NAME}/",
+        f"/iceberg_data/default/{TABLE_NAME}/",
+    )
+
+    create_iceberg_table(
+        storage_type,
+        instance,
+        TABLE_NAME,
+        started_cluster_iceberg_with_spark,
+        format="Avro",
+    )
+
+    # Choose a string_column_pattern that would (wrongly) force the `binary`
+    # column `b` to Avro string and miss the `string` column `s`, if the writer
+    # still used the regex. The per-path logical type must override it.
+    instance.query(
+        f"INSERT INTO {TABLE_NAME} VALUES (1, 'hello', unhex('DEADBEEF'))",
+        settings={
+            "allow_insert_into_iceberg": 1,
+            "output_format_avro_string_column_pattern": "b",
+        },
+    )
+
+    default_download_directory(
+        started_cluster_iceberg_with_spark,
+        storage_type,
+        f"{local_path}/",
+        f"{local_path}/",
+    )
+
+    schema = _avro_data_file_schema(local_path)
+
+    def _avro_leaf_type(field_schema):
+        # Iceberg fields are nullable, i.e. union [null, T]; unwrap to T.
+        if isinstance(field_schema, avro.schema.UnionSchema):
+            for member in field_schema.schemas:
+                if member.type != "null":
+                    return member.type
+        return field_schema.type
+
+    field_types = {f.name: _avro_leaf_type(f.type) for f in schema.fields}
+    # Iceberg `string` -> Avro string; Iceberg `binary` -> Avro bytes. If the
+    # regex leaked, `b` would be "string" and `s` would be "bytes" here.
+    assert field_types["s"] == "string", field_types
+    assert field_types["b"] == "bytes", field_types
+
+    rows = spark.read.format("iceberg").load(local_path).orderBy("id").collect()
+    assert [(r.id, r.s, bytes(r.b)) for r in rows] == [(1, "hello", bytes.fromhex("DEADBEEF"))]

@@ -110,7 +110,7 @@ AvroSerializer::SchemaWithSerializeFn createBigIntegerSchemaWithSerializeFn(cons
 }
 
 }
-AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name)
+AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name, const String & column_path)
 {
     ++type_name_increment;
 
@@ -241,7 +241,16 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
             return createDecimalSchemaWithSerializeFn<DataTypeDecimal256>(data_type);
         }
         case TypeIndex::String:
-            if (traits->isStringAsString(column_name))
+        {
+            /// Iceberg `string` -> Avro `string`, Iceberg `binary` -> Avro `bytes`. Both read
+            /// as ClickHouse DataTypeString, so on the Iceberg path (mapper with per-path
+            /// logical-type info) pick from the source logical type rather than the generic
+            /// output_format_avro_string_column_pattern regex, which cannot tell them apart.
+            /// Off the Iceberg path (or without string-path info) keep the regex-driven choice.
+            bool as_string = traits->isStringAsString(column_name);
+            if (column_mapper && column_mapper->hasIcebergStringInfo())
+                as_string = column_mapper->isIcebergStringPath(column_path);
+            if (as_string)
                 return {
                     avro::StringSchema(),
                     [](const IColumn & column, size_t row_num, avro::Encoder & encoder)
@@ -256,6 +265,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
                         encoder.encodeBytes(reinterpret_cast<const uint8_t *>(s.data()), s.size());
                     }
                 };
+        }
         case TypeIndex::FixedString:
         {
             auto size = data_type->getSizeOfValueInMemory();
@@ -327,7 +337,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
         case TypeIndex::Array:
         {
             const auto & array_type = assert_cast<const DataTypeArray &>(*data_type);
-            auto nested_mapping = createSchemaWithSerializeFn(array_type.getNestedType(), type_name_increment, column_name);
+            auto nested_mapping = createSchemaWithSerializeFn(array_type.getNestedType(), type_name_increment, column_name, Nested::concatenateName(column_path, "element"));
             auto schema = avro::ArraySchema(nested_mapping.schema);
             return {
                 schema,
@@ -355,7 +365,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
         case TypeIndex::Nullable:
         {
             auto nested_type = removeNullable(data_type);
-            auto nested_mapping = createSchemaWithSerializeFn(nested_type, type_name_increment, column_name);
+            auto nested_mapping = createSchemaWithSerializeFn(nested_type, type_name_increment, column_name, column_path);
             if (nested_type->getTypeId() == TypeIndex::Nothing)
             {
                 return nested_mapping;
@@ -381,7 +391,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
         case TypeIndex::LowCardinality:
         {
             const auto & nested_type = removeLowCardinality(data_type);
-            auto nested_mapping = createSchemaWithSerializeFn(nested_type, type_name_increment, column_name);
+            auto nested_mapping = createSchemaWithSerializeFn(nested_type, type_name_increment, column_name, column_path);
             return {nested_mapping.schema, [nested_mapping](const IColumn & column, size_t row_num, avro::Encoder & encoder)
             {
                 const auto & col = assert_cast<const ColumnLowCardinality &>(column);
@@ -402,7 +412,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
 
             for (const auto & nested_type : nested_types)
             {
-                const auto [schema, serialize] = createSchemaWithSerializeFn(nested_type, type_name_increment, column_name);
+                const auto [schema, serialize] = createSchemaWithSerializeFn(nested_type, type_name_increment, column_name, column_path);
                 union_schema.addType(schema);
                 nested_serializers.push_back(serialize);
             }
@@ -445,7 +455,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
             auto schema = avro::RecordSchema(column_name + "_" + std::to_string(type_name_increment));
             for (size_t i = 0; i != nested_types.size(); ++i)
             {
-                auto nested_mapping = createSchemaWithSerializeFn(nested_types[i], type_name_increment, nested_names[i]);
+                auto nested_mapping = createSchemaWithSerializeFn(nested_types[i], type_name_increment, nested_names[i], Nested::concatenateName(column_path, nested_names[i]));
                 schema.addField(nested_names[i], nested_mapping.schema);
                 nested_serializers.push_back(nested_mapping.serialize);
             }
@@ -472,7 +482,7 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
             };
 
             const auto & values_type = map_type.getValueType();
-            auto values_mapping = createSchemaWithSerializeFn(values_type, type_name_increment, column_name + ".value");
+            auto values_mapping = createSchemaWithSerializeFn(values_type, type_name_increment, column_name + ".value", Nested::concatenateName(column_path, "value"));
             auto schema = avro::MapSchema(values_mapping.schema);
 
             return {schema, [keys_serializer, values_mapping](const IColumn & column, size_t row_num, avro::Encoder & encoder)
@@ -515,7 +525,7 @@ AvroSerializer::AvroSerializer(const ColumnsWithTypeAndName & columns, std::uniq
     {
         try
         {
-            auto field_mapping = createSchemaWithSerializeFn(column.type, type_name_increment, column.name);
+            auto field_mapping = createSchemaWithSerializeFn(column.type, type_name_increment, column.name, /*column_path=*/column.name);
             serialize_fns.push_back(field_mapping.serialize);
             //TODO: verify name starts with A-Za-z_
             record_schema.addField(column.name, field_mapping.schema);
