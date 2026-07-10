@@ -1088,9 +1088,27 @@ static const ActionsDAG::Node * tryRewriteIsTrueCondition(
     if (const_value.getType() != Field::Types::UInt64 || const_value.safeGet<UInt64>() != 1)
         return nullptr;
 
+    /// Peel the non-semantic wrappers that `cloneDAGWithInversionPushDown` strips transparently
+    /// (alias, `materialize`, trivial `CAST`) before the boolean-result gate. Otherwise an equivalent
+    /// wrapped form like `CAST(k = 42, 'UInt8') IS TRUE` or `materialize(k = 42) IS TRUE` reaches the
+    /// gate as `CAST` / `materialize` (not in `boolean_result_functions`), returns nullptr, and the
+    /// later clone strips the wrapper anyway, leaving `isNotDistinctFrom(equals(k, 42), true)` in the
+    /// DAG where `extractAtomFromTree` falls back to `Condition: true`. Peeling here keeps equivalent
+    /// predicates from diverging. We check the boolean-result-ness of the peeled node but still clone
+    /// the original `predicate`, so the recursion strips the same wrappers under boolean context.
+    const ActionsDAG::Node * unwrapped = predicate;
+    while (unwrapped->type == ActionsDAG::ActionType::ALIAS
+           || (unwrapped->type == ActionsDAG::ActionType::FUNCTION
+               && (unwrapped->function_base->getName() == "materialize" || isTrivialCast(*unwrapped))))
+    {
+        if (unwrapped->children.empty())
+            return nullptr;
+        unwrapped = unwrapped->children.front();
+    }
+
     /// Only valid when `X` is boolean-valued; otherwise `X <=> true` means `X = 1`, not "X truthy".
-    if (predicate->type != ActionsDAG::ActionType::FUNCTION
-        || !boolean_result_functions.contains(predicate->function_base->getName()))
+    if (unwrapped->type != ActionsDAG::ActionType::FUNCTION
+        || !boolean_result_functions.contains(unwrapped->function_base->getName()))
         return nullptr;
 
     /// The unwrapped predicate replaces the boolean wrapper, so it stays in boolean context.

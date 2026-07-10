@@ -11,3 +11,10 @@ IS NOT TRUE	3	3
 IS NOT UNKNOWN	2	3
 IS TRUE	2	3
 IS UNKNOWN	2	3
+k = 42	1
+(k = 42) IS TRUE	1
+CAST(k = 42, UInt8) IS TRUE	1
+materialize(k = 42) IS TRUE	1
+1
+1
+1

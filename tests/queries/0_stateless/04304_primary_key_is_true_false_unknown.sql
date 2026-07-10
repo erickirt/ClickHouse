@@ -55,3 +55,26 @@ WHERE current_database = currentDatabase()
 ORDER BY predicate;
 
 DROP TABLE bool_pk;
+
+-- Wrapped `IS TRUE` forms must prune the same as the bare predicate. The analyzer lowers
+-- `X IS TRUE` to `isNotDistinctFrom(X, true)`; when `X` is a non-semantic wrapper over a
+-- boolean predicate (`materialize(k = 42)`, trivial `CAST(k = 42, 'UInt8')`), `KeyCondition`
+-- peels the wrapper before the boolean-result gate so the inner `k = 42` becomes a key atom.
+-- Assert the granule pruning is preserved (1 of 10 granules) via `EXPLAIN indexes = 1`.
+DROP TABLE IF EXISTS int_pk;
+CREATE TABLE int_pk (k UInt32) ENGINE = MergeTree ORDER BY k
+SETTINGS index_granularity = 8, add_minmax_index_for_numeric_columns = 0;
+INSERT INTO int_pk SELECT number FROM numbers(80) SETTINGS max_insert_threads = 1;
+OPTIMIZE TABLE int_pk FINAL;
+
+SELECT 'k = 42',                        countIf(explain LIKE '%Granules: 1/10%') FROM (EXPLAIN indexes = 1 SELECT count() FROM int_pk WHERE k = 42);
+SELECT '(k = 42) IS TRUE',             countIf(explain LIKE '%Granules: 1/10%') FROM (EXPLAIN indexes = 1 SELECT count() FROM int_pk WHERE (k = 42) IS TRUE);
+SELECT 'CAST(k = 42, UInt8) IS TRUE',  countIf(explain LIKE '%Granules: 1/10%') FROM (EXPLAIN indexes = 1 SELECT count() FROM int_pk WHERE CAST(k = 42, 'UInt8') IS TRUE);
+SELECT 'materialize(k = 42) IS TRUE',  countIf(explain LIKE '%Granules: 1/10%') FROM (EXPLAIN indexes = 1 SELECT count() FROM int_pk WHERE materialize(k = 42) IS TRUE);
+
+-- Results must be unchanged by the pruning (one matching row each).
+SELECT count() FROM int_pk WHERE (k = 42) IS TRUE                       SETTINGS optimize_trivial_count_query = 0;
+SELECT count() FROM int_pk WHERE CAST(k = 42, 'UInt8') IS TRUE          SETTINGS optimize_trivial_count_query = 0;
+SELECT count() FROM int_pk WHERE materialize(k = 42) IS TRUE           SETTINGS optimize_trivial_count_query = 0;
+
+DROP TABLE int_pk;
