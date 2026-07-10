@@ -595,4 +595,35 @@ SETTINGS optimize_redundant_comparisons = 1;
 SELECT count() FROM numbers(10) WHERE number < 5 AND number != 7 AND number != 2 AND number != 8 SETTINGS optimize_redundant_comparisons = 0;
 SELECT count() FROM numbers(10) WHERE number < 5 AND number != 7 AND number != 2 AND number != 8 SETTINGS optimize_redundant_comparisons = 1;
 
+-- Bool constants dedup across representations (true / 1 / 1.0 take different conversion paths).
+SELECT 'bool_chain_dedup';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number % 2 = 0 AS b FROM numbers(4)) WHERE b != true AND b != 1 AND b != 1.0
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT number % 2 = 0 AS b FROM numbers(4)) WHERE b != true AND b != 1 AND b != 1.0 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT number % 2 = 0 AS b FROM numbers(4)) WHERE b != true AND b != 1 AND b != 1.0 SETTINGS optimize_redundant_comparisons = 1;
+
+SELECT 'bool_equals_conflicts';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number % 2 = 0 AS b FROM numbers(4)) WHERE b = true AND b != 1.0
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT number % 2 = 0 AS b FROM numbers(4)) WHERE b = true AND b != 1.0 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT number % 2 = 0 AS b FROM numbers(4)) WHERE b = true AND b != 1.0 SETTINGS optimize_redundant_comparisons = 1;
+
+-- An equals seen before the chain prunes each later notEquals on insertion.
+SELECT 'equals_first';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number = 7 AND number != 1 AND number != 2
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number = 7 AND number != 1 AND number != 2 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number = 7 AND number != 1 AND number != 2 SETTINGS optimize_redundant_comparisons = 1;
+
+-- NaN constants stay out of the analysis; the rest of the chain is still pruned.
+SELECT 'nan_not_equals_kept';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM (SELECT number / 2. AS f FROM numbers(4)) WHERE f != nan AND f != 2 AND f < 1
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM (SELECT number / 2. AS f FROM numbers(4)) WHERE f != nan AND f != 2 AND f < 1 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM (SELECT number / 2. AS f FROM numbers(4)) WHERE f != nan AND f != 2 AND f < 1 SETTINGS optimize_redundant_comparisons = 1;
+
 DROP TABLE IF EXISTS 04032_t;

@@ -17,8 +17,6 @@
 #include <Functions/FunctionFactory.h>
 #include <Interpreters/convertFieldToType.h>
 
-#include <map>
-
 
 namespace DB
 {
@@ -373,9 +371,8 @@ struct ComparisonFilterInfo
     bool constant_rewritten = false;
 };
 
-/// Converted values of one expression share one Field representation, except for `Bool` columns:
-/// strict conversion yields `Types::Bool` while boundary folding yields an integer Field.
-/// Canonicalize so that map lookups agree with `accurateEquals`/`accurateLess`.
+/// A `Bool` column constant may be stored as `Types::Bool` (strict conversion) or as an integer
+/// Field (boundary folding); unify so that map lookups agree with `accurateEquals`/`accurateLess`.
 static Field canonicalizeNotEqualsKey(const Field & value)
 {
     if (value.getType() == Field::Types::Bool)
@@ -383,19 +380,17 @@ static Field canonicalizeNotEqualsKey(const Field & value)
     return value;
 }
 
-/// Filters of one expression, split by how they participate in the analysis. The split keeps the
-/// analysis linear for long chains like `x != c1 AND x != c2 AND ...`: notEquals interact with each
-/// other only through exact duplicates (an ordered lookup), and a range predicate prunes exactly
-/// the values it excludes via ordered erase, so each value is erased at most once. The pairwise
-/// scan is confined to `range_filters`, which is self-pruning and stays at a couple of elements.
+/// Filters of one expression, split so that long `x != c1 AND x != c2 AND ...` chains stay linear:
+/// notEquals interact only through exact duplicates (one map lookup), a range erases exactly the
+/// values it excludes, and the pairwise scan is confined to the small `range_filters`.
 struct ExpressionFilters
 {
-    /// Convertible equals/range filters: at most one lower bound and one upper bound, or one equals.
+    /// Convertible equals/range filters: at most one lower and one upper bound, or one equals.
     std::vector<ComparisonFilterInfo> range_filters;
     /// Convertible notEquals filters, keyed by their canonicalized converted value.
     std::map<Field, ComparisonFilterInfo> not_equals_filters;
-    /// Filters excluded from the analysis: non-lossless conversions (they also veto the
-    /// fold-to-false collapse), NaN constants, and everything when pruning is disabled.
+    /// Excluded from the analysis: non-lossless conversions (they also veto the fold-to-false
+    /// collapse), NaN constants, and everything when pruning is disabled.
     std::vector<ComparisonFilterInfo> opaque_filters;
 };
 
@@ -894,8 +889,8 @@ static AddComparisonFilterResult addComparisonFilter(
     auto is_nan_field = [](const Field & f)
     { return f.getType() == Field::Types::Float64 && isNaN(f.safeGet<Float64>()); };
 
-    /// Non-lossless conversions and NaN constants never interact with other filters
-    /// (`compareComparisonFilters` returns NONE for them), so skip the analysis entirely.
+    /// Non-lossless conversions and NaN constants never interact (`compareComparisonFilters`
+    /// yields NONE for them), so keep them aside as-is.
     if (!new_filter.converted_value || is_nan_field(*new_filter.converted_value))
     {
         filters.opaque_filters.push_back(std::move(new_filter));
@@ -935,8 +930,8 @@ static AddComparisonFilterResult addComparisonFilter(
     auto & not_equals_filters = filters.not_equals_filters;
     Field key = canonicalizeNotEqualsKey(*new_filter.converted_value);
 
-    /// notEquals interact with each other only through exact duplicates: one ordered lookup
-    /// replaces the pairwise scan, which was quadratic for long `x != c1 AND x != c2 ...` chains.
+    /// notEquals interact only through exact duplicates: one lookup replaces the pairwise scan,
+    /// which was quadratic for long `x != c1 AND x != c2 ...` chains.
     if (new_filter.function == ComparisonFunction::NOT_EQUALS)
     {
         auto [it, inserted] = not_equals_filters.try_emplace(std::move(key), std::move(new_filter));
@@ -945,8 +940,8 @@ static AddComparisonFilterResult addComparisonFilter(
         return AddComparisonFilterResult::ADDED;
     }
 
-    /// A new equals/range filter prunes the notEquals values it makes redundant; map order agrees
-    /// with `accurateLess`, so ordered erase touches each stored value at most once overall.
+    /// An equals/range filter prunes the notEquals values it makes redundant via ordered erase,
+    /// touching each stored value at most once overall.
     if (new_filter.function == ComparisonFunction::EQUALS)
     {
         /// `expr = c AND expr != c` is always false; any other `expr != v` is implied.
@@ -1904,8 +1899,7 @@ private:
         /// Pass 2: collect surviving filters, separating notEquals for NOT IN conversion.
         for (auto & [expression, filters] : filter_map)
         {
-            /// The map iterates by value; restore the original order so that the NOT IN tuple
-            /// lists the constants in the order they appeared in the query.
+            /// The map iterates by value; restore the query order to keep the NOT IN tuple stable.
             std::vector<ComparisonFilterInfo *> not_equals_infos;
             for (auto & [_, filter] : filters.not_equals_filters)
                 not_equals_infos.push_back(&filter);
