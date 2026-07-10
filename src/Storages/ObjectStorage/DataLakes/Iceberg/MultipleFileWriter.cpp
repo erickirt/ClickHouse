@@ -59,6 +59,9 @@ void MultipleFileWriter::startNewFile()
         format_settings->parquet.write_page_index = true;
         format_settings->parquet.bloom_filter_push_down = true;
         format_settings->parquet.filter_push_down = true;
+        /// Iceberg requires ORC String columns to be written as ORC `string` (not binary), otherwise
+        /// spec-compliant readers reject the file (binary -> string is not an allowed type promotion).
+        format_settings->orc.output_string_as_string = true;
     }
     FormatFilterInfoPtr format_filter_info = std::make_shared<FormatFilterInfo>(nullptr, context, column_mapper, nullptr, nullptr);
     output_format = FormatFactory::instance().getOutputFormatParallelIfPossible(

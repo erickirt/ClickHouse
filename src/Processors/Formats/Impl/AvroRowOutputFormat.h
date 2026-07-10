@@ -8,6 +8,7 @@
 #include <Core/ColumnsWithTypeAndName.h>
 #include <Formats/FormatSchemaInfo.h>
 #include <Formats/FormatSettings.h>
+#include <Formats/FormatFilterInfo.h>
 #include <IO/WriteBuffer.h>
 #include <Processors/Formats/IRowOutputFormat.h>
 #include <DataFile.hh>
@@ -42,7 +43,7 @@ private:
 class AvroSerializer
 {
 public:
-    AvroSerializer(const ColumnsWithTypeAndName & columns, std::unique_ptr<AvroSerializerTraits>, const FormatSettings & settings_);
+    AvroSerializer(const ColumnsWithTypeAndName & columns, std::unique_ptr<AvroSerializerTraits>, const FormatSettings & settings_, ColumnMapperPtr column_mapper_ = nullptr);
     const avro::ValidSchema & getSchema() const { return valid_schema; }
     void serializeRow(const Columns & columns, size_t row_num, avro::Encoder & encoder);
 
@@ -57,16 +58,23 @@ private:
     /// Type names for different complex types (e.g. enums, fixed strings) must be unique. We use simple incremental number to give them different names.
     SchemaWithSerializeFn createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name);
 
+    /// Sets Iceberg `field-id` on each field of the record node at `path`, recursively descending
+    /// into nested record (Tuple) fields, so ClickHouse-written Avro data files carry field-ids as
+    /// the Iceberg spec requires (https://iceberg.apache.org/spec/#avro). No-op without a mapper.
+    void setIcebergFieldIds(const avro::NodePtr & record_node, const String & path);
+
     std::vector<SerializeFn> serialize_fns;
     avro::ValidSchema valid_schema;
     std::unique_ptr<AvroSerializerTraits> traits;
     const FormatSettings & settings;
+    /// Non-null only for Iceberg writes; maps dotted column name -> Iceberg field-id.
+    ColumnMapperPtr column_mapper;
 };
 
 class AvroRowOutputFormat final : public IRowOutputFormat
 {
 public:
-    AvroRowOutputFormat(WriteBuffer & out_, SharedHeader header_, const FormatSettings & settings_);
+    AvroRowOutputFormat(WriteBuffer & out_, SharedHeader header_, const FormatSettings & settings_, ColumnMapperPtr column_mapper_ = nullptr);
     ~AvroRowOutputFormat() override;
 
     String getName() const override { return "AvroRowOutputFormat"; }
