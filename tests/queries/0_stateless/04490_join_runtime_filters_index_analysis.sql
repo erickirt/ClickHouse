@@ -54,24 +54,6 @@ CREATE TABLE pe_dim (id UInt64, tag String) ENGINE = MergeTree ORDER BY id;
 INSERT INTO pe_fact SELECT number, number FROM numbers(2000);
 INSERT INTO pe_dim SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
 
-SELECT d.tag, sum(f.v)
-FROM pe_fact AS f
-INNER JOIN pe_dim AS d ON f.id = d.id
-WHERE d.tag = 'hot'
-GROUP BY d.tag
-FORMAT Null
-SETTINGS log_comment = '04490_pe';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
-
 DROP TABLE IF EXISTS pe_fact2;
 DROP TABLE IF EXISTS pe_dim2;
 CREATE TABLE pe_fact2 (id UInt64, k UInt64, v UInt64, INDEX idx_k k TYPE minmax GRANULARITY 1)
@@ -80,48 +62,12 @@ CREATE TABLE pe_dim2 (k UInt64, tag String) ENGINE = MergeTree ORDER BY k;
 INSERT INTO pe_fact2 SELECT number, number, number FROM numbers(2000);
 INSERT INTO pe_dim2 SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
 
-SELECT d.tag, sum(f.v)
-FROM pe_fact2 AS f
-INNER JOIN pe_dim2 AS d ON f.k = d.k
-WHERE d.tag = 'hot'
-GROUP BY d.tag
-FORMAT Null
-SETTINGS log_comment = '04490_pe_skip';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_skip' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
-
 DROP TABLE IF EXISTS ckey_fact;
 DROP TABLE IF EXISTS ckey_dim;
 CREATE TABLE ckey_fact (a UInt64, b UInt64, v UInt64) ENGINE = MergeTree ORDER BY (a, b) SETTINGS index_granularity = 16;
 CREATE TABLE ckey_dim (a UInt64, tag String) ENGINE = MergeTree ORDER BY a;
 INSERT INTO ckey_fact SELECT number, number, number FROM numbers(2000);
 INSERT INTO ckey_dim SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
-
-SELECT d.tag, sum(f.v)
-FROM ckey_fact AS f
-INNER JOIN ckey_dim AS d ON f.a = d.a
-WHERE d.tag = 'hot'
-GROUP BY d.tag
-FORMAT Null
-SETTINGS log_comment = '04490_pe_ckey';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_ckey' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
 
 -- Make sure to test with a String primary key
 DROP TABLE IF EXISTS str_fact;
@@ -131,23 +77,6 @@ CREATE TABLE str_dim (s String, tag String) ENGINE = MergeTree ORDER BY s;
 INSERT INTO str_fact SELECT concat('k', leftPad(toString(number), 5, '0')), number FROM numbers(2000);
 INSERT INTO str_dim SELECT concat('k', leftPad(toString(number), 5, '0')), if(number < 64, 'hot', 'cold') FROM numbers(2000);
 
-SELECT count(), sum(f.v)
-FROM str_fact AS f
-INNER JOIN str_dim AS d ON f.s = d.s
-WHERE d.tag = 'hot'
-FORMAT Null
-SETTINGS log_comment = '04490_pe_str';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_str' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
-
 -- Date primary key
 DROP TABLE IF EXISTS dt_fact;
 DROP TABLE IF EXISTS dt_dim;
@@ -156,23 +85,6 @@ CREATE TABLE dt_dim (d Date, tag String) ENGINE = MergeTree ORDER BY d;
 INSERT INTO dt_fact SELECT toDate('2020-01-01') + number, number FROM numbers(2000);
 INSERT INTO dt_dim SELECT toDate('2020-01-01') + number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
 
-SELECT count(), sum(f.v)
-FROM dt_fact AS f
-INNER JOIN dt_dim AS d ON f.d = d.d
-WHERE d.tag = 'hot'
-FORMAT Null
-SETTINGS log_comment = '04490_pe_dt';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_dt' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
-
 -- LowCardinality primary key
 DROP TABLE IF EXISTS lc_fact;
 DROP TABLE IF EXISTS lc_dim;
@@ -180,23 +92,6 @@ CREATE TABLE lc_fact (s LowCardinality(String), v UInt64) ENGINE = MergeTree ORD
 CREATE TABLE lc_dim (s LowCardinality(String), tag String) ENGINE = MergeTree ORDER BY s;
 INSERT INTO lc_fact SELECT concat('k', leftPad(toString(number), 5, '0')), number FROM numbers(2000);
 INSERT INTO lc_dim SELECT concat('k', leftPad(toString(number), 5, '0')), if(number < 64, 'hot', 'cold') FROM numbers(2000);
-
-SELECT count(), sum(f.v)
-FROM lc_fact AS f
-INNER JOIN lc_dim AS d ON f.s = d.s
-WHERE d.tag = 'hot'
-FORMAT Null
-SETTINGS log_comment = '04490_pe_lc';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_lc' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
 
 -- Bloom filter in skip index
 DROP TABLE IF EXISTS bf_fact;
@@ -207,24 +102,6 @@ CREATE TABLE bf_dim (k UInt64, tag String) ENGINE = MergeTree ORDER BY k;
 INSERT INTO bf_fact SELECT number, number, number FROM numbers(2000);
 INSERT INTO bf_dim SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
 
-SELECT d.tag, sum(f.v)
-FROM bf_fact AS f
-INNER JOIN bf_dim AS d ON f.k = d.k
-WHERE d.tag = 'hot'
-GROUP BY d.tag
-FORMAT Null
-SETTINGS log_comment = '04490_pe_bf';
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT
-    ProfileEvents['RuntimeFilterGranulesConsidered'] > 0,
-    ProfileEvents['RuntimeFilterGranulesDropped'] > 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_bf' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
-
 DROP TABLE IF EXISTS bf_fact_cap;
 DROP TABLE IF EXISTS bf_dim_cap;
 CREATE TABLE bf_fact_cap (id UInt64, k UInt64, v UInt64, INDEX idx_k k TYPE bloom_filter GRANULARITY 1)
@@ -232,22 +109,6 @@ ENGINE = MergeTree ORDER BY id SETTINGS index_granularity = 16;
 CREATE TABLE bf_dim_cap (k UInt64, tag String) ENGINE = MergeTree ORDER BY k;
 INSERT INTO bf_fact_cap SELECT number, number, number FROM numbers(2000);
 INSERT INTO bf_dim_cap SELECT number, if(number < 64, 'hot', 'cold') FROM numbers(2000);
-
-SELECT d.tag, sum(f.v)
-FROM bf_fact_cap AS f
-INNER JOIN bf_dim_cap AS d ON f.k = d.k
-WHERE d.tag = 'hot'
-GROUP BY d.tag
-FORMAT Null
-SETTINGS log_comment = '04490_pe_bf_cap', join_runtime_filter_exact_values_limit = 100;
-
-SYSTEM FLUSH LOGS query_log;
-
-SELECT ProfileEvents['RuntimeFilterGranulesDropped'] = 0
-FROM system.query_log
-WHERE current_database = currentDatabase() AND log_comment = '04490_pe_bf_cap' AND type = 'QueryFinish'
-ORDER BY event_time DESC
-LIMIT 1;
 
 DROP TABLE IF EXISTS jrf_fact;
 DROP TABLE IF EXISTS jrf_dim;
@@ -258,6 +119,72 @@ INSERT INTO jrf_fact SELECT number, number, number FROM numbers(50100);
 -- two dense clusters with a large gap: an exact key set prunes the gap; a [min,max] range does not
 INSERT INTO jrf_dim SELECT number, 'a' FROM numbers(100);
 INSERT INTO jrf_dim SELECT number + 50000, 'a' FROM numbers(100);
+
+-- Run every profiled workload query up front, then flush the query log once and read
+-- all the profile events back in a single pass. Doing one flush + a few scans instead of
+-- one flush + one scan per query keeps the test fast under adversarial randomized settings
+-- (e.g. fsync_metadata, direct IO, parallel replicas) where a shared query_log is expensive.
+
+SELECT d.tag, sum(f.v)
+FROM pe_fact AS f
+INNER JOIN pe_dim AS d ON f.id = d.id
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe';
+
+SELECT d.tag, sum(f.v)
+FROM pe_fact2 AS f
+INNER JOIN pe_dim2 AS d ON f.k = d.k
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe_skip';
+
+SELECT d.tag, sum(f.v)
+FROM ckey_fact AS f
+INNER JOIN ckey_dim AS d ON f.a = d.a
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe_ckey';
+
+SELECT count(), sum(f.v)
+FROM str_fact AS f
+INNER JOIN str_dim AS d ON f.s = d.s
+WHERE d.tag = 'hot'
+FORMAT Null
+SETTINGS log_comment = '04490_pe_str';
+
+SELECT count(), sum(f.v)
+FROM dt_fact AS f
+INNER JOIN dt_dim AS d ON f.d = d.d
+WHERE d.tag = 'hot'
+FORMAT Null
+SETTINGS log_comment = '04490_pe_dt';
+
+SELECT count(), sum(f.v)
+FROM lc_fact AS f
+INNER JOIN lc_dim AS d ON f.s = d.s
+WHERE d.tag = 'hot'
+FORMAT Null
+SETTINGS log_comment = '04490_pe_lc';
+
+SELECT d.tag, sum(f.v)
+FROM bf_fact AS f
+INNER JOIN bf_dim AS d ON f.k = d.k
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe_bf';
+
+SELECT d.tag, sum(f.v)
+FROM bf_fact_cap AS f
+INNER JOIN bf_dim_cap AS d ON f.k = d.k
+WHERE d.tag = 'hot'
+GROUP BY d.tag
+FORMAT Null
+SETTINGS log_comment = '04490_pe_bf_cap', join_runtime_filter_exact_values_limit = 100;
 
 -- join_algorithm='hash' + external-join disabled forces the single-level in-memory HashJoin
 -- that converts to a FixedHashMap and publishes it as the runtime filter
@@ -274,6 +201,26 @@ SETTINGS log_comment = '04490_pe_fht',
     join_runtime_filter_from_fixed_hash_table = 1;
 
 SYSTEM FLUSH LOGS query_log;
+
+-- For each PK type / skip index the runtime filter must consider granules and drop some.
+-- argMax(..., event_time) picks the latest QueryFinish row per log_comment, mirroring the
+-- per-query `ORDER BY event_time DESC LIMIT 1` while collapsing all checks into one scan.
+SELECT
+    argMax(ProfileEvents['RuntimeFilterGranulesConsidered'], event_time) > 0,
+    argMax(ProfileEvents['RuntimeFilterGranulesDropped'], event_time) > 0
+FROM system.query_log
+WHERE current_database = currentDatabase()
+    AND log_comment IN ('04490_pe', '04490_pe_skip', '04490_pe_ckey', '04490_pe_str', '04490_pe_dt', '04490_pe_lc', '04490_pe_bf')
+    AND type = 'QueryFinish'
+GROUP BY log_comment
+ORDER BY log_comment;
+
+-- The exact-values limit caps the runtime filter, so it must not drop any granule.
+SELECT ProfileEvents['RuntimeFilterGranulesDropped'] = 0
+FROM system.query_log
+WHERE current_database = currentDatabase() AND log_comment = '04490_pe_bf_cap' AND type = 'QueryFinish'
+ORDER BY event_time DESC
+LIMIT 1;
 
 -- exact-set pruning must survive the FixedHashMap runtime filter, not degrade to a [min,max] range
 SELECT ProfileEvents['RuntimeFilterGranulesDropped'] > 0
