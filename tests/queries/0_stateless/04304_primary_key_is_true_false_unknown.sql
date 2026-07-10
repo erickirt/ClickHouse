@@ -37,12 +37,13 @@ SYSTEM FLUSH LOGS query_log;
 
 -- `SelectedMarks` counts the granules read after primary-key pruning;
 -- `SelectedMarksTotal` counts the granules considered before pruning.
--- `KeyCondition` recognises `isNull` and `isNotNull` (the lowered forms of
--- `IS UNKNOWN` and `IS NOT UNKNOWN`) and prunes one of the three granules
--- for both forms. The other four predicates lower to `isNotDistinctFrom` /
--- `isDistinctFrom`, which `KeyCondition` currently treats as the trivial
--- `true` condition, so no granule is dropped and `SelectedMarks` equals
--- `SelectedMarksTotal`.
+-- `IS TRUE` / `IS FALSE` lower to `b <=> true` / `b <=> false`
+-- (`isNotDistinctFrom` against a non-NULL constant), which `KeyCondition` maps
+-- like `b = true` / `b = false` and prunes to the single matching granule.
+-- `IS UNKNOWN` / `IS NOT UNKNOWN` lower to `isNull` / `isNotNull` and prune the
+-- NULL granule. The `IS NOT TRUE` / `IS NOT FALSE` forms lower to `isDistinctFrom`,
+-- which `KeyCondition` still treats as the trivial `true` condition, so no
+-- granule is dropped and `SelectedMarks` equals `SelectedMarksTotal`.
 SELECT
     splitByString('04304 ', log_comment)[2]  AS predicate,
     ProfileEvents['SelectedMarks']           AS granules_read,
