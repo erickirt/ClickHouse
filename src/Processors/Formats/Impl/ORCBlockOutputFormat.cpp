@@ -178,10 +178,11 @@ std::unique_ptr<orc::Type> ORCBlockOutputFormat::getORCType(const DataTypePtr & 
         }
         case TypeIndex::FixedString:
         {
-            /// FixedString is intentionally NOT forced to ORC `string` for Iceberg: Iceberg
-            /// exposes `fixed[L]` as FixedString(L), and STRING would change its logical type.
-            /// Keep it on the setting-driven path only.
-            if (format_settings.orc.output_string_as_string)
+            /// Iceberg exposes `fixed[L]` as FixedString(L), which maps to ORC `binary`.
+            /// output_format_orc_string_as_string defaults to true, so for Iceberg writes
+            /// (column_mapper != nullptr) force `binary` regardless of the setting to keep
+            /// the fixed[L] logical type; keep the setting-driven choice otherwise.
+            if (format_settings.orc.output_string_as_string && !column_mapper)
                 result = orc::createPrimitiveType(orc::TypeKind::STRING);
             else
                 result = orc::createPrimitiveType(orc::TypeKind::BINARY);
