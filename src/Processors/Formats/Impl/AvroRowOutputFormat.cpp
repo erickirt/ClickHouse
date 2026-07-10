@@ -533,30 +533,59 @@ AvroSerializer::AvroSerializer(const ColumnsWithTypeAndName & columns, std::uniq
     valid_schema.setSchema(record_schema);
 }
 
-void AvroSerializer::setIcebergFieldIds(const avro::NodePtr & record_node, const String & path)
+void AvroSerializer::setIcebergFieldIds(const avro::NodePtr & node, const String & path)
 {
-    if (record_node->type() != avro::AVRO_RECORD)
-        return;
-
-    auto * node_record = dynamic_cast<avro::NodeRecord *>(record_node.get());
-    if (!node_record)
-        return;
-
-    const auto & encoding = column_mapper->getStorageColumnEncoding();
-    const size_t num_fields = record_node->leaves();
-
-    std::vector<int> field_ids(num_fields, -1);
-    for (size_t i = 0; i < num_fields; ++i)
+    switch (node->type())
     {
-        const String field_name = record_node->nameAt(static_cast<int>(i));
-        const String field_path = Nested::concatenateName(path, field_name);
-        if (auto it = encoding.find(field_path); it != encoding.end())
-            field_ids[i] = static_cast<int>(it->second);
+        case avro::AVRO_RECORD:
+        {
+            /// A record maps a dotted path per field. Set the field-id of each field and
+            /// descend into it. The dotted path matches IcebergSchemaProcessor::traverseSchema.
+            auto * node_record = dynamic_cast<avro::NodeRecord *>(node.get());
+            if (!node_record)
+                return;
 
-        /// Recurse into nested records (Tuple) so their fields also carry field-ids.
-        setIcebergFieldIds(record_node->leafAt(static_cast<int>(i)), field_path);
+            const auto & encoding = column_mapper->getStorageColumnEncoding();
+            const size_t num_fields = node->leaves();
+
+            std::vector<int> field_ids(num_fields, -1);
+            for (size_t i = 0; i < num_fields; ++i)
+            {
+                const String field_path = Nested::concatenateName(path, node->nameAt(static_cast<int>(i)));
+                if (auto it = encoding.find(field_path); it != encoding.end())
+                    field_ids[i] = static_cast<int>(it->second);
+
+                setIcebergFieldIds(node->leafAt(static_cast<int>(i)), field_path);
+            }
+            node_record->setFieldIds(field_ids);
+            return;
+        }
+        case avro::AVRO_UNION:
+        {
+            /// Nullable(T) and Variant are Avro unions wrapping the actual type; the field-id
+            /// belongs to the wrapped record/array/map, not the union. Descend without extending
+            /// the path so nested records inside e.g. Nullable(Tuple(...)) still get field-ids.
+            for (size_t i = 0; i < node->leaves(); ++i)
+                setIcebergFieldIds(node->leafAt(static_cast<int>(i)), path);
+            return;
+        }
+        case avro::AVRO_ARRAY:
+        {
+            /// The element sits under "<path>.element" (matches traverseComplexType for lists).
+            setIcebergFieldIds(node->leafAt(0), Nested::concatenateName(path, "element"));
+            return;
+        }
+        case avro::AVRO_MAP:
+        {
+            /// An Avro map has two leaves: key (leaf 0) and value (leaf 1). Only the value can
+            /// carry a nested record; keys are always strings. Path suffixes match traverseComplexType.
+            if (node->leaves() >= 2)
+                setIcebergFieldIds(node->leafAt(1), Nested::concatenateName(path, "value"));
+            return;
+        }
+        default:
+            return;
     }
-    node_record->setFieldIds(field_ids);
 }
 
 void AvroSerializer::serializeRow(const Columns & columns, size_t row_num, avro::Encoder & encoder)

@@ -59,10 +59,10 @@ void MultipleFileWriter::startNewFile()
         format_settings->parquet.write_page_index = true;
         format_settings->parquet.bloom_filter_push_down = true;
         format_settings->parquet.filter_push_down = true;
-        /// Iceberg requires ORC String columns to be written as ORC `string` (not binary), otherwise
-        /// spec-compliant readers reject the file (binary -> string is not an allowed type promotion).
-        format_settings->orc.output_string_as_string = true;
     }
+    /// The ORC String -> `string` normalization is applied inside ORCBlockOutputFormat when a
+    /// column mapper is present (all Iceberg ORC writers pass one), so it also covers the
+    /// compaction/mutation rewrite paths without touching format_settings here.
     FormatFilterInfoPtr format_filter_info = std::make_shared<FormatFilterInfo>(nullptr, context, column_mapper, nullptr, nullptr);
     output_format = FormatFactory::instance().getOutputFormatParallelIfPossible(
         write_format, *buffer, *sample_block, context, format_settings, format_filter_info);

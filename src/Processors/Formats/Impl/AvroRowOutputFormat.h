@@ -58,10 +58,12 @@ private:
     /// Type names for different complex types (e.g. enums, fixed strings) must be unique. We use simple incremental number to give them different names.
     SchemaWithSerializeFn createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name);
 
-    /// Sets Iceberg `field-id` on each field of the record node at `path`, recursively descending
-    /// into nested record (Tuple) fields, so ClickHouse-written Avro data files carry field-ids as
-    /// the Iceberg spec requires (https://iceberg.apache.org/spec/#avro). No-op without a mapper.
-    void setIcebergFieldIds(const avro::NodePtr & record_node, const String & path);
+    /// Walks the Avro schema tree and sets Iceberg `field-id` on every record field, descending
+    /// through union (Nullable/Variant), array and map wrapper nodes so records nested inside e.g.
+    /// Nullable(Tuple(...)) or Array(Tuple(...)) also carry field-ids, as the Iceberg spec requires
+    /// (https://iceberg.apache.org/spec/#avro). Dotted paths mirror IcebergSchemaProcessor's
+    /// traversal (`t.x`, `arr.element`, `m.value`). No-op without a mapper.
+    void setIcebergFieldIds(const avro::NodePtr & node, const String & path);
 
     std::vector<SerializeFn> serialize_fns;
     avro::ValidSchema valid_schema;
