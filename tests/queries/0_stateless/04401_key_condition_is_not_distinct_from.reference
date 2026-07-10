@@ -14,6 +14,12 @@
 1
 --- (v = c) IS TRUE prunes via minmax skip index ---
 1
+--- b = true prunes partitions (baseline) ---
+1
+--- b IS TRUE prunes partitions the same as b = true ---
+1
+--- b IS NOT DISTINCT FROM true prunes partitions the same as b = true ---
+1
 --- IS NOT DISTINCT FROM NULL must NOT reuse the "=" range (means IS NULL) ---
 0
 --- correctness is preserved across all forms ---
@@ -27,3 +33,6 @@ is_null	5000
 k_istrue_means_eq_1	1
 kplus1_istrue_means_eq_1	1
 isfalse	99999
+part_eq	2
+part_istrue	2
+part_ndf	2
