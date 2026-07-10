@@ -2278,13 +2278,13 @@ TEST_P(CoordinationTest, TestFailedMultiRollsBackTTLDestroyTime)
     EXPECT_EQ(stats.destroyTime(), original_destroy_time);
 }
 
-TYPED_TEST(CoordinationTest, TestCreate2ResponseDataLength)
+TEST_P(CoordinationTest, TestCreate2ResponseDataLength)
 {
     using namespace DB;
     using namespace Coordination;
-    using Storage [[maybe_unused]] = DB::KeeperStorage;
 
-    Storage storage{500, "", this->keeper_context};
+    const auto storage_ptr = DB::KeeperStorage::create(500, "", this->keeper_context);
+    DB::KeeperStorage & storage = *storage_ptr;
     int64_t zxid = 0;
 
     const std::string data = "hello-create2";
@@ -2294,7 +2294,7 @@ TYPED_TEST(CoordinationTest, TestCreate2ResponseDataLength)
     request->data = data;
     request->include_stats = true;
 
-    storage.preprocessRequest(request, 1, 0, ++zxid);
+    storage.preprocessRequest(request, 1, 0, ++zxid, /*check_acl=*/true, /*digest=*/std::nullopt, /*log_idx=*/0);
     auto responses = storage.processRequest(request, 1, zxid);
 
     ASSERT_EQ(responses.size(), 1u);
