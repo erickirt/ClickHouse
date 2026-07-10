@@ -108,7 +108,7 @@ void collectStringPaths(const Poco::Dynamic::Var & type, std::unordered_set<Stri
         return;
     }
 
-    auto type_object = type.extract<Poco::JSON::Object::Ptr>();
+    const auto & type_object = type.extract<Poco::JSON::Object::Ptr>();
     auto type_str = type_object->getValue<String>(Iceberg::f_type);
     if (type_str == "map")
     {
