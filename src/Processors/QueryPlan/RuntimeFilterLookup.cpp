@@ -646,6 +646,11 @@ static const ActionsDAG::Node * convertRuntimeFilterToKeyConditionDAG(
 
     if (exact_values)
     {
+        LOG_DEBUG(
+            getLogger("JoinRuntimeFilterIndexAnalysis"),
+            "Index analysis engaged on join key '{}': pruning by exact IN-set of {} value(s)",
+            column_name, exact_values->size());
+
         ColumnWithTypeAndName set_values(exact_values, target_type, "__rf_in_values_" + column_name);
         auto future_set = std::make_shared<FutureSetFromTuple>(
             CityHash_v1_0_2::uint128{}, ASTPtr{}, ColumnsWithTypeAndName{set_values}, /*transform_null_in=*/false, SizeLimits{});
@@ -655,6 +660,11 @@ static const ActionsDAG::Node * convertRuntimeFilterToKeyConditionDAG(
         auto in_func = FunctionFactory::instance().get("in", context);
         return &dag.addFunction(in_func, {&key_casted, &set_node}, {});
     }
+
+    LOG_DEBUG(
+        getLogger("JoinRuntimeFilterIndexAnalysis"),
+        "Index analysis engaged on join key '{}': pruning by range {}",
+        column_name, range->toString());
 
     const auto & min_node = dag.addColumn(
         target_type->createColumnConst(1, range->left), target_type, "__rf_min_" + column_name);
