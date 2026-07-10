@@ -1,0 +1,29 @@
+--- IS NOT DISTINCT FROM prunes via primary key (non-Nullable key) ---
+1
+--- (k = c) IS TRUE prunes via primary key (non-Nullable key) ---
+1
+--- IS NOT DISTINCT FROM prunes via primary key (Nullable key) ---
+1
+--- (k = c) IS TRUE prunes via primary key (Nullable key) ---
+1
+--- const on the left side prunes too ---
+1
+--- (k < c) IS TRUE prunes an ordered condition ---
+1
+--- IS NOT DISTINCT FROM prunes via minmax skip index ---
+1
+--- (v = c) IS TRUE prunes via minmax skip index ---
+1
+--- IS NOT DISTINCT FROM NULL must NOT reuse the "=" range (means IS NULL) ---
+0
+--- correctness is preserved across all forms ---
+ndf_nonnull	1
+eq_nonnull	1
+istrue_eq	1
+istrue_lt	42
+ndf_nullable	1
+ndf_null_is_null	5000
+is_null	5000
+k_istrue_means_eq_1	1
+kplus1_istrue_means_eq_1	1
+isfalse	99999

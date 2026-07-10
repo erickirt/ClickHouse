@@ -387,6 +387,17 @@ const KeyCondition::AtomMap KeyCondition::atom_map
             }
         },
         {
+            /// For a non-NULL constant `c`, `key <=> c` matches the same rows as `key = c`.
+            /// The NULL-constant case (`<=>` meaning "is NULL") is rejected earlier, before the atom is built.
+            "isNotDistinctFrom",
+            [] (RPNElement & out, const Field & value)
+            {
+                out.function = RPNElement::FUNCTION_IN_RANGE;
+                out.range = Range(value);
+                return true;
+            }
+        },
+        {
             "less",
             [] (RPNElement & out, const Field & value)
             {
@@ -723,6 +734,7 @@ static std::string_view reverseComparisonOperator(std::string_view op)
 {
     if (op == "equals") return "equals";
     if (op == "notEquals") return "notEquals";
+    if (op == "isNotDistinctFrom") return "isNotDistinctFrom";
     if (op == "less") return "greater";
     if (op == "greater") return "less";
     if (op == "lessOrEquals") return "greaterOrEquals";
@@ -1023,6 +1035,68 @@ static const ActionsDAG::Node * tryRewriteCoalesceCondition(
     return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
 }
 
+/// Functions whose result is guaranteed to be boolean-valued (in {0, 1, NULL}). Mirrors
+/// `boolean_functions` in LogicalExpressionOptimizerPass.cpp. Comparison/logical functions return a
+/// plain `UInt8` (not the custom `Bool` type), so this must be gated by function name, not by type.
+static const std::set<std::string_view> boolean_result_functions
+{
+    "equals", "notEquals", "less", "greaterOrEquals", "greater", "lessOrEquals",
+    "in", "notIn", "globalIn", "globalNotIn", "nullIn", "notNullIn", "globalNullIn", "globalNullNotIn",
+    "isNull", "isNotNull", "like", "notLike", "ilike", "notILike", "empty", "notEmpty",
+    "not", "and", "or", "isNotDistinctFrom", "isDistinctFrom",
+};
+
+/// Rewrite `X IS TRUE`, which the analyzer lowers to `isNotDistinctFrom(X, true)`, to `X` for key
+/// analysis, so a wrapped predicate like `(k = 42) IS TRUE` becomes a prunable key atom on `k`.
+/// `X <=> true` is truth-equivalent to `X` ONLY IF `X` is boolean-valued (in {0, 1, NULL}): for such
+/// `X`, `X <=> true` equals `X` on the non-NULL values and is `false` (not NULL) on NULL, which
+/// matches truth-tested position where both `false` and `NULL` reject the row. For a non-boolean `X`
+/// (e.g. `k` UInt32), `X <=> true` means `X = 1`, NOT "X is truthy", so the rewrite would be wrong;
+/// hence the boolean-result-function gate on `X`. Like `tryRewriteCoalesceCondition`, it changes the
+/// value on NULL rows, so the caller restricts it to non-inverted boolean position.
+/// Returns nullptr if the pattern does not match.
+static const ActionsDAG::Node * tryRewriteIsTrueCondition(
+    const ActionsDAG::Node & node,
+    const String & name,
+    ActionsDAG & inverted_dag,
+    std::unordered_map<const ActionsDAG::Node *, const ActionsDAG::Node *> & inputs_mapping,
+    const ContextPtr & context)
+{
+    if (name != "isNotDistinctFrom")
+        return nullptr;
+
+    if (node.children.size() != 2)
+        return nullptr;
+
+    auto is_const = [](const ActionsDAG::Node & n)
+    {
+        return n.type == ActionsDAG::ActionType::COLUMN && n.column && isColumnConst(*n.column);
+    };
+
+    /// Find the `X <=> const` shape (either argument order; `isNotDistinctFrom` is symmetric).
+    const bool c0 = is_const(*node.children[0]);
+    const bool c1 = is_const(*node.children[1]);
+    if (c0 == c1)
+        return nullptr;
+
+    const ActionsDAG::Node * predicate = node.children[c0 ? 1 : 0];
+    const ActionsDAG::Node * const_node = node.children[c0 ? 0 : 1];
+
+    /// The constant must be exactly `true` (numeric 1). `X IS FALSE` lowers to `X <=> false`,
+    /// which is NOT truth-equivalent to `X`, so only the `true` case is rewritten here.
+    const Field const_value = (*const_node->column)[0];
+    if (const_value.getType() != Field::Types::UInt64 || const_value.safeGet<UInt64>() != 1)
+        return nullptr;
+
+    /// Only valid when `X` is boolean-valued; otherwise `X <=> true` means `X = 1`, not "X truthy".
+    if (predicate->type != ActionsDAG::ActionType::FUNCTION
+        || !boolean_result_functions.contains(predicate->function_base->getName()))
+        return nullptr;
+
+    /// The unwrapped predicate replaces the boolean wrapper, so it stays in boolean context.
+    return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
+}
+
 static const ActionsDAG::Node & cloneDAGWithInversionPushDown(
     const ActionsDAG::Node & node,
     ActionsDAG & inverted_dag,
@@ -1139,6 +1213,12 @@ static const ActionsDAG::Node & cloneDAGWithInversionPushDown(
                 /// We match columns by name, so it is important to fill name correctly.
                 /// So, use empty string to make it automatically.
                 res = &inverted_dag.addFunction(function_builder, children, "");
+                handled_inversion = true;
+            }
+            else if (!need_inversion
+                && boolean_context
+                && (res = tryRewriteIsTrueCondition(node, name, inverted_dag, inputs_mapping, context)) != nullptr)
+            {
                 handled_inversion = true;
             }
             else if (!need_inversion
@@ -3547,6 +3627,11 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
             /// If the const operand is null, the atom will be always false
             if (const_value.isNull())
             {
+                /// `key <=> NULL` means "key IS NULL", not "key = NULL", so it is not always false.
+                /// We do not build a key range for it, just decline to analyze this atom.
+                if (func_name == "isNotDistinctFrom")
+                    return false;
+
                 out.function = RPNElement::ALWAYS_FALSE;
                 return true;
             }
@@ -3615,7 +3700,7 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
             {
                 condition_is_relaxed = true;
             }
-            else if (func_name == "equals" || func_name == "notEquals")
+            else if (func_name == "equals" || func_name == "notEquals" || func_name == "isNotDistinctFrom")
             {
                 bool is_injective = false;
                 if (!canConstantBeWrappedByDeterministicFunctions(
