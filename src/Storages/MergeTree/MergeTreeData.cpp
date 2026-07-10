@@ -11252,7 +11252,12 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::createE
     DB::IMergeTreeDataPart::TTLInfos move_ttl_infos;
     VolumePtr volume = getStoragePolicy()->getVolume(0);
     ReservationPtr reservation = reserveSpacePreferringTTLRules(metadata_snapshot, 0, move_ttl_infos, time(nullptr), 0, true);
-    VolumePtr data_part_volume = createVolumeFromReservation(reservation, volume);
+    /// The `SingleDiskVolume` is stored on the part for its whole lifetime; build it in the arena.
+    VolumePtr data_part_volume;
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        data_part_volume = createVolumeFromReservation(reservation, volume);
+    }
 
     auto tmp_dir_holder = getTemporaryPartDirectoryHolder(EMPTY_PART_TMP_PREFIX + new_part_name);
     auto new_data_part = getDataPartBuilder(new_part_name, data_part_volume, EMPTY_PART_TMP_PREFIX + new_part_name, getReadSettings())
@@ -11281,6 +11286,8 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::createE
     new_data_part->partition = partition;
 
     new_data_part->setMinMaxIndex(std::move(minmax_idx));
+    /// `partition` and the minmax index were built outside the arena above; re-home them into it.
+    new_data_part->moveMetadataToDedicatedArena();
     new_data_part->is_temp = true;
     /// In case of replicated merge tree with zero copy replication
     /// Here Clickhouse claims that this new part can be deleted in temporary state without unlocking the blobs
