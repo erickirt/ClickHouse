@@ -137,6 +137,14 @@ SELECT 'part_ndf', count() FROM part WHERE b IS NOT DISTINCT FROM true;
 SELECT 'part_ne_false', count() FROM part WHERE b != false;
 SELECT 'part_in_true', count() FROM part WHERE b IN (true);
 
+-- The `IN (truthy)` key-condition rewrite must NOT force-build the set during analysis:
+-- for a subquery set (`(k = 42) IN (SELECT ...)`) the set is left for execution, so EXPLAIN
+-- does not run the subquery. Regression for a server abort where the subquery was executed
+-- during key analysis (see 02707_skip_index_with_in). The plan keeps a deferred `CreatingSet`.
+SELECT 'explain_in_subquery_not_built', count() > 0
+FROM (EXPLAIN SELECT count() FROM pk WHERE (k = 42) IN (SELECT throwIf(1)) SETTINGS use_skip_indexes = 0)
+WHERE explain ILIKE '%CreatingSet%';
+
 DROP TABLE pk;
 DROP TABLE pk_null;
 DROP TABLE mm;

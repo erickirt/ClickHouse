@@ -68,3 +68,4 @@ part_istrue	2
 part_ndf	2
 part_ne_false	2
 part_in_true	2
+explain_in_subquery_not_built	1

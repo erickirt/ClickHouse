@@ -1176,8 +1176,16 @@ static const ActionsDAG::Node * tryRewriteInTruthyCondition(
     if (future_set->getTypes().size() != 1)
         return nullptr;
 
-    /// Build the set inplace so its explicit elements are available. Subquery sets that are not yet
-    /// built (or are too large for index use) return no explicit elements and are declined below.
+    /// Only inspect a set that is ALREADY built. `get()` returns a non-null set for literal-tuple
+    /// (`IN (true)`) and storage sets, which are available at planning time, and nullptr for a
+    /// subquery set that has not run yet. We must NOT force-build here: this rewrite runs during
+    /// key-condition DAG cloning for every query, so forcing the set would execute the `IN` subquery
+    /// purely for analysis, e.g. `X IN (SELECT throwIf(1))` would throw even when no index is used
+    /// (see 02707_skip_index_with_in). buildOrderedSetInplace on an already-built set is then cheap
+    /// (no subquery) and just materializes its ordered elements.
+    if (!future_set->get())
+        return nullptr;
+
     auto prepared_set = future_set->buildOrderedSetInplace(context);
     if (!prepared_set || !prepared_set->hasExplicitSetElements())
         return nullptr;
