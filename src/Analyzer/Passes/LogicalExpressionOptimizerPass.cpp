@@ -17,6 +17,8 @@
 #include <Functions/FunctionFactory.h>
 #include <Interpreters/convertFieldToType.h>
 
+#include <map>
+
 
 namespace DB
 {
@@ -371,7 +373,33 @@ struct ComparisonFilterInfo
     bool constant_rewritten = false;
 };
 
-using ComparisonFilterMap = QueryTreeNodePtrWithHashMap<std::vector<ComparisonFilterInfo>>;
+/// Converted values of one expression share one Field representation, except for `Bool` columns:
+/// strict conversion yields `Types::Bool` while boundary folding yields an integer Field.
+/// Canonicalize so that map lookups agree with `accurateEquals`/`accurateLess`.
+static Field canonicalizeNotEqualsKey(const Field & value)
+{
+    if (value.getType() == Field::Types::Bool)
+        return Field(static_cast<UInt64>(value.safeGet<bool>()));
+    return value;
+}
+
+/// Filters of one expression, split by how they participate in the analysis. The split keeps the
+/// analysis linear for long chains like `x != c1 AND x != c2 AND ...`: notEquals interact with each
+/// other only through exact duplicates (an ordered lookup), and a range predicate prunes exactly
+/// the values it excludes via ordered erase, so each value is erased at most once. The pairwise
+/// scan is confined to `range_filters`, which is self-pruning and stays at a couple of elements.
+struct ExpressionFilters
+{
+    /// Convertible equals/range filters: at most one lower bound and one upper bound, or one equals.
+    std::vector<ComparisonFilterInfo> range_filters;
+    /// Convertible notEquals filters, keyed by their canonicalized converted value.
+    std::map<Field, ComparisonFilterInfo> not_equals_filters;
+    /// Filters excluded from the analysis: non-lossless conversions (they also veto the
+    /// fold-to-false collapse), NaN constants, and everything when pruning is disabled.
+    std::vector<ComparisonFilterInfo> opaque_filters;
+};
+
+using ComparisonFilterMap = QueryTreeNodePtrWithHashMap<ExpressionFilters>;
 
 static ValueComparisonResult invertComparisonResult(ValueComparisonResult result)
 {
@@ -833,9 +861,9 @@ static void rebuildComparisonNode(ComparisonFilterInfo & filter, const ContextPt
 
 /// Insert a new comparison filter for `expression` into `filter_map`.
 /// When `enable_pruning` is true, performs type conversion, boundary folding, and
-/// pairwise comparison against existing filters for the same expression.
+/// comparison against existing filters for the same expression.
 /// Returns CONFLICT if a contradiction is found, REDUNDANT if the condition is
-/// always true, or ADDED otherwise.
+/// always true or implied by existing filters, or ADDED otherwise.
 static AddComparisonFilterResult addComparisonFilter(
     ComparisonFilterMap & filter_map,
     const QueryTreeNodePtr & expression,
@@ -846,7 +874,7 @@ static AddComparisonFilterResult addComparisonFilter(
     /// Pruning disabled — just store the filter without analysis.
     if (!enable_pruning)
     {
-        filter_map[expression].push_back(std::move(new_filter));
+        filter_map[expression].opaque_filters.push_back(std::move(new_filter));
         return AddComparisonFilterResult::ADDED;
     }
 
@@ -861,35 +889,40 @@ static AddComparisonFilterResult addComparisonFilter(
     if (auto result = tryFoldBoundaryOrRewriteFloatForIntColumn(new_filter, expr_type))
         return *result;
 
-    /// First filter for this expression — nothing to compare against.
-    auto it = filter_map.find(expression);
-    if (it == filter_map.end())
+    auto & filters = filter_map[expression];
+
+    auto is_nan_field = [](const Field & f)
+    { return f.getType() == Field::Types::Float64 && isNaN(f.safeGet<Float64>()); };
+
+    /// Non-lossless conversions and NaN constants never interact with other filters
+    /// (`compareComparisonFilters` returns NONE for them), so skip the analysis entirely.
+    if (!new_filter.converted_value || is_nan_field(*new_filter.converted_value))
     {
-        filter_map[expression].push_back(std::move(new_filter));
+        filters.opaque_filters.push_back(std::move(new_filter));
         return AddComparisonFilterResult::ADDED;
     }
 
-    /// Step 3: compare pairwise against existing filters for the same expression.
-    auto & info_list = it->second;
-    for (size_t i = 0; i < info_list.size(); ++i)
+    /// Step 3: compare against the existing equals/range filters.
+    auto & range_filters = filters.range_filters;
+    for (size_t i = 0; i < range_filters.size(); ++i)
     {
-        auto result = compareComparisonFilters(info_list[i], new_filter);
+        auto result = compareComparisonFilters(range_filters[i], new_filter);
         switch (result)
         {
         case ValueComparisonResult::PRUNE_LEFT:
-            info_list.erase(info_list.begin() + static_cast<std::ptrdiff_t>(i));
+            range_filters.erase(range_filters.begin() + static_cast<std::ptrdiff_t>(i));
             --i;
             break;
         case ValueComparisonResult::PRUNE_RIGHT:
             return AddComparisonFilterResult::REDUNDANT;
         case ValueComparisonResult::STRENGTHEN_LEFT:
-            info_list[i].function = strengthenComparison(info_list[i].function);
-            rebuildComparisonNode(info_list[i], context);
+            range_filters[i].function = strengthenComparison(range_filters[i].function);
+            rebuildComparisonNode(range_filters[i], context);
             return AddComparisonFilterResult::REDUNDANT;
         case ValueComparisonResult::STRENGTHEN_RIGHT:
             new_filter.function = strengthenComparison(new_filter.function);
             rebuildComparisonNode(new_filter, context);
-            info_list.erase(info_list.begin() + static_cast<std::ptrdiff_t>(i));
+            range_filters.erase(range_filters.begin() + static_cast<std::ptrdiff_t>(i));
             --i;
             break;
         case ValueComparisonResult::CONFLICT:
@@ -899,7 +932,64 @@ static AddComparisonFilterResult addComparisonFilter(
         }
     }
 
-    info_list.push_back(std::move(new_filter));
+    auto & not_equals_filters = filters.not_equals_filters;
+    Field key = canonicalizeNotEqualsKey(*new_filter.converted_value);
+
+    /// notEquals interact with each other only through exact duplicates: one ordered lookup
+    /// replaces the pairwise scan, which was quadratic for long `x != c1 AND x != c2 ...` chains.
+    if (new_filter.function == ComparisonFunction::NOT_EQUALS)
+    {
+        auto [it, inserted] = not_equals_filters.try_emplace(std::move(key), std::move(new_filter));
+        if (!inserted)
+            return AddComparisonFilterResult::REDUNDANT;
+        return AddComparisonFilterResult::ADDED;
+    }
+
+    /// A new equals/range filter prunes the notEquals values it makes redundant; map order agrees
+    /// with `accurateLess`, so ordered erase touches each stored value at most once overall.
+    if (new_filter.function == ComparisonFunction::EQUALS)
+    {
+        /// `expr = c AND expr != c` is always false; any other `expr != v` is implied.
+        if (not_equals_filters.contains(key))
+            return AddComparisonFilterResult::CONFLICT;
+        not_equals_filters.clear();
+    }
+    else
+    {
+        switch (new_filter.function)
+        {
+        case ComparisonFunction::LESS:
+            /// `expr < c` makes `expr != v` redundant for all v >= c; similar below.
+            not_equals_filters.erase(not_equals_filters.lower_bound(key), not_equals_filters.end());
+            break;
+        case ComparisonFunction::LESS_OR_EQUALS:
+            not_equals_filters.erase(not_equals_filters.upper_bound(key), not_equals_filters.end());
+            /// `expr != c AND expr <= c` tightens to `expr < c`.
+            if (auto it = not_equals_filters.find(key); it != not_equals_filters.end())
+            {
+                new_filter.function = strengthenComparison(new_filter.function);
+                rebuildComparisonNode(new_filter, context);
+                not_equals_filters.erase(it);
+            }
+            break;
+        case ComparisonFunction::GREATER:
+            not_equals_filters.erase(not_equals_filters.begin(), not_equals_filters.upper_bound(key));
+            break;
+        case ComparisonFunction::GREATER_OR_EQUALS:
+            not_equals_filters.erase(not_equals_filters.begin(), not_equals_filters.lower_bound(key));
+            if (auto it = not_equals_filters.find(key); it != not_equals_filters.end())
+            {
+                new_filter.function = strengthenComparison(new_filter.function);
+                rebuildComparisonNode(new_filter, context);
+                not_equals_filters.erase(it);
+            }
+            break;
+        default:
+            UNREACHABLE();
+        }
+    }
+
+    range_filters.push_back(std::move(new_filter));
     return AddComparisonFilterResult::ADDED;
 }
 
@@ -1801,8 +1891,9 @@ private:
         /// leave the AND untouched whenever a non-convertible comparison is present.
         if (found_conflict)
         {
+            /// Only `opaque_filters` can hold filters without a converted value.
             for (const auto & entry : filter_map)
-                for (const auto & filter : entry.second)
+                for (const auto & filter : entry.second.opaque_filters)
                     if (!filter.converted_value)
                         return;
 
@@ -1813,20 +1904,33 @@ private:
         /// Pass 2: collect surviving filters, separating notEquals for NOT IN conversion.
         for (auto & [expression, filters] : filter_map)
         {
-            for (auto & filter : filters)
+            /// The map iterates by value; restore the original order so that the NOT IN tuple
+            /// lists the constants in the order they appeared in the query.
+            std::vector<ComparisonFilterInfo *> not_equals_infos;
+            for (auto & [_, filter] : filters.not_equals_filters)
+                not_equals_infos.push_back(&filter);
+
+            for (auto & filter : filters.range_filters)
+                all_operands.emplace_back(filter.original_index, std::move(filter.original_node));
+
+            for (auto & filter : filters.opaque_filters)
             {
                 if (filter.function == ComparisonFunction::NOT_EQUALS)
-                {
-                    auto & constant_set = not_equals_node_to_constants[expression];
-                    if (!constant_set.contains(filter.constant_node))
-                    {
-                        constant_set.insert(filter.constant_node);
-                        node_to_not_equals_functions[expression].emplace_back(filter.original_index, std::move(filter.original_node));
-                    }
-                }
+                    not_equals_infos.push_back(&filter);
                 else
-                {
                     all_operands.emplace_back(filter.original_index, std::move(filter.original_node));
+            }
+
+            std::sort(not_equals_infos.begin(), not_equals_infos.end(),
+                [](const auto * a, const auto * b) { return a->original_index < b->original_index; });
+
+            for (auto * filter : not_equals_infos)
+            {
+                auto & constant_set = not_equals_node_to_constants[expression];
+                if (!constant_set.contains(filter->constant_node))
+                {
+                    constant_set.insert(filter->constant_node);
+                    node_to_not_equals_functions[expression].emplace_back(filter->original_index, std::move(filter->original_node));
                 }
             }
         }

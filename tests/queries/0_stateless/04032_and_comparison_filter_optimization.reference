@@ -1380,3 +1380,59 @@ SETTINGS optimize_redundant_comparisons = 1, optimize_and_compare_chain = 1
 nan_guard
 0
 0
+range_prunes_not_equals
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE and(notEquals(__table1.number, 2), less(__table1.number, 5))
+SETTINGS optimize_redundant_comparisons = 1
+4
+4
+boundary_strengthen
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE less(__table1.number, 5)
+SETTINGS optimize_redundant_comparisons = 1
+5
+5
+boundary_strengthen_mirrored
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE greater(__table1.number, 5)
+SETTINGS optimize_redundant_comparisons = 1
+4
+4
+equals_prunes_chain
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE equals(__table1.number, 7)
+SETTINGS optimize_redundant_comparisons = 1
+1
+1
+equals_conflicts_chain
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE 0
+SETTINGS optimize_redundant_comparisons = 1
+0
+0
+cross_type_dedup
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE notEquals(__table1.number, 3)
+SETTINGS optimize_redundant_comparisons = 1
+9
+9
+chain_to_not_in
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE notIn(__table1.number, (1, 3, 5, 7))
+SETTINGS optimize_redundant_comparisons = 1
+6
+6
+range_first
+SELECT count() AS `count()`
+FROM numbers(10) AS __table1
+WHERE and(less(__table1.number, 5), notEquals(__table1.number, 2))
+SETTINGS optimize_redundant_comparisons = 1
+4
+4

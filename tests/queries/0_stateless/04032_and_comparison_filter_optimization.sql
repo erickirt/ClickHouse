@@ -526,4 +526,73 @@ SELECT 'nan_guard';
 SELECT count() FROM (SELECT number::Float64 AS f FROM numbers(3)) WHERE f = 1 AND f < nan SETTINGS optimize_redundant_comparisons = 0;
 SELECT count() FROM (SELECT number::Float64 AS f FROM numbers(3)) WHERE f = 1 AND f < nan SETTINGS optimize_redundant_comparisons = 1;
 
+-- =====================================================================
+-- Section 18: notEquals chains vs equals/range predicates
+-- =====================================================================
+-- notEquals filters are kept in a per-expression ordered map (long machine-generated
+-- exclusion chains stay linear), so cover the map-vs-range/equals transitions.
+
+-- A range predicate prunes exactly the notEquals values it excludes.
+SELECT 'range_prunes_not_equals';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number != 7 AND number != 8 AND number != 2 AND number < 5
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number != 7 AND number != 8 AND number != 2 AND number < 5 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number != 7 AND number != 8 AND number != 2 AND number < 5 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Inclusive boundary: `!= 5 AND <= 5` tightens to `< 5`, and the mirrored case.
+SELECT 'boundary_strengthen';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number != 5 AND number <= 5
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number != 5 AND number <= 5 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number != 5 AND number <= 5 SETTINGS optimize_redundant_comparisons = 1;
+
+SELECT 'boundary_strengthen_mirrored';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number >= 5 AND number != 5
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number >= 5 AND number != 5 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number >= 5 AND number != 5 SETTINGS optimize_redundant_comparisons = 1;
+
+-- An equals predicate prunes every non-conflicting notEquals of the chain.
+SELECT 'equals_prunes_chain';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 2 AND number != 3 AND number = 7
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 2 AND number != 3 AND number = 7 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 2 AND number != 3 AND number = 7 SETTINGS optimize_redundant_comparisons = 1;
+
+-- An equals predicate conflicting with one of the notEquals collapses the AND to false.
+SELECT 'equals_conflicts_chain';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 7 AND number != 3 AND number = 7
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 7 AND number != 3 AND number = 7 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 7 AND number != 3 AND number = 7 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Cross-representation duplicates dedup by converted value.
+SELECT 'cross_type_dedup';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number != 3 AND number != 3.0 AND number != 3
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number != 3 AND number != 3.0 AND number != 3 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number != 3 AND number != 3.0 AND number != 3 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Surviving chains still convert to NOT IN, keeping the original constant order.
+SELECT 'chain_to_not_in';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 3 AND number != 5 AND number != 7
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 3 AND number != 5 AND number != 7 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number != 1 AND number != 3 AND number != 5 AND number != 7 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Range arriving before the chain: later notEquals outside the range are dropped on insertion.
+SELECT 'range_first';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number < 5 AND number != 7 AND number != 2 AND number != 8
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number < 5 AND number != 7 AND number != 2 AND number != 8 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number < 5 AND number != 7 AND number != 2 AND number != 8 SETTINGS optimize_redundant_comparisons = 1;
+
 DROP TABLE IF EXISTS 04032_t;
