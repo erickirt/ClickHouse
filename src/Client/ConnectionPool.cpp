@@ -144,14 +144,10 @@ ConnectionPoolFactory & ConnectionPoolFactory::instance()
     return ret;
 }
 
-IConnectionPool::Entry ConnectionPool::get(const DB::ConnectionTimeouts& timeouts, const DB::Settings& settings,
-        bool force_connected)
+IConnectionPool::Entry ConnectionPool::get(const DB::ConnectionTimeouts& timeouts, const DB::Settings& settings)
 {
     Entry entry = Base::get(settings[Setting::connection_pool_max_wait_ms].totalMilliseconds());
-
-    if (force_connected)
-        entry->forceConnected(timeouts);
-
+    entry->forceConnected(timeouts);
     return entry;
 }
 

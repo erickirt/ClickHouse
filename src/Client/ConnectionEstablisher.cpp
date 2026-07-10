@@ -12,6 +12,7 @@ namespace ProfileEvents
     extern const Event DistributedConnectionMissingTable;
     extern const Event DistributedConnectionStaleReplica;
     extern const Event DistributedConnectionFailTry;
+    extern const Event DistributedConnectionReconnectCount;
 }
 
 namespace DB
@@ -35,6 +36,7 @@ namespace ErrorCodes
 namespace FailPoints
 {
     extern const char replicated_merge_tree_all_replicas_stale[];
+    extern const char connection_stale_on_establish[];
 }
 
 ConnectionEstablisher::ConnectionEstablisher(
@@ -47,13 +49,28 @@ ConnectionEstablisher::ConnectionEstablisher(
 {
 }
 
-void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::string & fail_message, bool force_connected)
+void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::string & fail_message)
 {
-    try
+    /// A pooled connection is handed out without pinging it first - a ping would add an unnecessary
+    /// Ping-Pong round trip when the connection is still alive. If a connection that we did manage to
+    /// establish then fails its very first request, it was most likely closed by the server while it
+    /// was idle in the pool. In the synchronous case we reconnect once and retry, so that a single
+    /// available replica is not dropped just because its pooled connection went stale. In the
+    /// asynchronous case we do not retry here - stale connections are handled by retrying the next
+    /// replica (see ConnectionPoolWithFailover).
+    const bool can_reconnect = !async_callback;
+
+    auto try_establish = [&]()
     {
         ProfileEvents::increment(ProfileEvents::DistributedConnectionTries);
-        result.entry = pool->get(*timeouts, settings, force_connected);
+        result.entry = pool->get(*timeouts, settings);
         AsyncCallbackSetter<Connection> async_setter(&*result.entry, std::move(async_callback));
+
+        /// For tests: simulate a connection that the server has closed while it was idle in the pool,
+        /// so that the reconnect-and-retry path below is exercised.
+        fiu_do_on(FailPoints::connection_stale_on_establish, {
+            throw Exception(ErrorCodes::NETWORK_ERROR, "Injected stale connection failure while establishing the connection");
+        });
 
         UInt64 server_revision = 0;
         if (table_to_check)
@@ -61,9 +78,6 @@ void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::
 
         if (!table_to_check || server_revision < DBMS_MIN_REVISION_WITH_TABLES_STATUS)
         {
-            if (!force_connected)
-                result.entry->forceConnected(*timeouts);
-
             ProfileEvents::increment(ProfileEvents::DistributedConnectionUsable);
             result.is_usable = true;
             result.is_up_to_date = true;
@@ -120,30 +134,53 @@ void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::
             LOG_TRACE(log, "Server {} has unacceptable replica delay for table {}.{}: {}", result.entry->getDescription(), table_to_check->database, table_to_check->table, delay);
             ProfileEvents::increment(ProfileEvents::DistributedConnectionStaleReplica);
         }
-    }
-    catch (const Exception & e)
+    };
+
+    for (size_t tries = 0; ; ++tries)
     {
-        ProfileEvents::increment(ProfileEvents::DistributedConnectionFailTry);
-
-        /// All of these mean the connection taken from the pool turned out to be unusable, which is
-        /// expected: this is an optimistic path that does not ping a pooled connection before use
-        /// (see the comment on `run`'s `force_connected` argument). `UNEXPECTED_PACKET_FROM_SERVER`
-        /// covers a connection left out of sync by a previous query (e.g. a stale `ProfileInfo` read
-        /// instead of the `TablesStatusResponse` we requested). In all of these cases we disconnect
-        /// the entry and report a soft failure, so the caller can retry on a freshly established
-        /// connection instead of failing the whole distributed query.
-        if (e.code() != ErrorCodes::NETWORK_ERROR && e.code() != ErrorCodes::SOCKET_TIMEOUT
-            && e.code() != ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF && e.code() != ErrorCodes::DNS_ERROR
-            && e.code() != ErrorCodes::CANNOT_READ_FROM_SOCKET && e.code() != ErrorCodes::CANNOT_WRITE_TO_SOCKET
-            && e.code() != ErrorCodes::UNEXPECTED_PACKET_FROM_SERVER)
-            throw;
-
-        fail_message = getCurrentExceptionMessage(/* with_stacktrace = */ false);
-
-        if (!result.entry.isNull())
+        try
         {
-            result.entry->disconnect();
-            result.reset();
+            try_establish();
+            return;
+        }
+        catch (const Exception & e)
+        {
+            ProfileEvents::increment(ProfileEvents::DistributedConnectionFailTry);
+
+            /// All of these mean the connection taken from the pool turned out to be unusable, which
+            /// is expected: the pooled connection is used optimistically, without a preceding ping.
+            /// `UNEXPECTED_PACKET_FROM_SERVER` covers a connection left out of sync by a previous
+            /// query (e.g. a stale `ProfileInfo` read instead of the `TablesStatusResponse` we
+            /// requested). Anything else is a genuine error and is rethrown.
+            if (e.code() != ErrorCodes::NETWORK_ERROR && e.code() != ErrorCodes::SOCKET_TIMEOUT
+                && e.code() != ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF && e.code() != ErrorCodes::DNS_ERROR
+                && e.code() != ErrorCodes::CANNOT_READ_FROM_SOCKET && e.code() != ErrorCodes::CANNOT_WRITE_TO_SOCKET
+                && e.code() != ErrorCodes::UNEXPECTED_PACKET_FROM_SERVER)
+                throw;
+
+            fail_message = getCurrentExceptionMessage(/* with_stacktrace = */ false);
+
+            /// Whether we managed to take an already established connection from the pool before the
+            /// failure. If we could not even connect, there is nothing stale to reconnect.
+            const bool had_connection = !result.entry.isNull();
+            if (had_connection)
+            {
+                result.entry->disconnect();
+                result.reset();
+            }
+
+            /// Reconnect and retry once if a previously established (pooled) connection went stale.
+            /// The failed request is safe to repeat: it is either a read-only status request, or the
+            /// connection was closed before the request reached a live server.
+            if (can_reconnect && tries == 0 && had_connection)
+            {
+                ProfileEvents::increment(ProfileEvents::DistributedConnectionReconnectCount);
+                continue;
+            }
+
+            /// Report a soft failure, so the caller can retry on another replica instead of failing
+            /// the whole distributed query.
+            return;
         }
     }
 }
@@ -167,7 +204,7 @@ void ConnectionEstablisherAsync::Task::run(AsyncCallback async_callback, Suspend
     connection_establisher_async.reset();
     connection_establisher_async.connection_establisher.setAsyncCallback(async_callback);
     connection_establisher_async.connection_establisher.run(connection_establisher_async.result,
-        connection_establisher_async.fail_message, connection_establisher_async.force_connected);
+        connection_establisher_async.fail_message);
     connection_establisher_async.is_finished = true;
 }
 

@@ -59,7 +59,6 @@ namespace CurrentMetrics
 
 namespace ProfileEvents
 {
-    extern const Event DistributedConnectionReconnectCount;
     extern const Event DistributedConnectionConnectCount;
 }
 
@@ -742,16 +741,14 @@ const String & Connection::getServerDisplayName(const ConnectionTimeouts & timeo
 
 void Connection::forceConnected(const ConnectionTimeouts & timeouts)
 {
+    /// Ensure the connection is established, but do not ping an already-established one.
+    /// Pinging a pooled connection before every use adds a Ping-Pong round trip that doubles the
+    /// latency of small queries. A connection that the server has closed while it was idle in the
+    /// pool is instead detected when it is first used (see ConnectionEstablisher::run, which
+    /// reconnects and retries once). The `Ping` protocol command remains available as a convenience
+    /// (see Connection::ping / checkConnected).
     if (!isConnected())
-    {
         connect(timeouts);
-    }
-    else if (!ping(timeouts))
-    {
-        ProfileEvents::increment(ProfileEvents::DistributedConnectionReconnectCount);
-        LOG_TRACE(log_wrapper.get(), "Connection was closed, will reconnect.");
-        connect(timeouts);
-    }
 }
 
 #if USE_SSL
