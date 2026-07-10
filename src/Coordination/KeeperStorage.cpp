@@ -444,9 +444,9 @@ void KeeperStorage::UncommittedState::rollback(std::list<Delta> rollback_deltas)
                 {
                     if constexpr (std::same_as<DeltaType, CreateNodeDelta>)
                     {
-                        if (operation.stat.ephemeralOwner != 0)
-                            unregisterEphemeralPath(storage.uncommitted_state.ephemerals, operation.stat.ephemeralOwner, delta.path, /*throw_if_missing=*/false);
-                        storage.acl_map.removeUsage(operation.acl_id);
+                        if (operation.stat.isEphemeral())
+                            unregisterEphemeralPath(storage.uncommitted_state.ephemerals, operation.stat.getEphemeralOwner(), delta.path, /*throw_if_missing=*/false);
+                        storage.acl_map.removeUsage(operation.stat.acl_id);
                     }
                     else if constexpr (std::same_as<DeltaType, UpdateNodeStatDelta>)
                     {
@@ -569,13 +569,13 @@ Coordination::Error KeeperStorage::commit(KeeperStorage::DeltaRange deltas)
             {
                 if constexpr (std::same_as<DeltaType, CreateNodeDelta>)
                 {
-                    if (operation.stat.ephemeralOwner != 0)
+                    if (operation.stat.isEphemeral())
                     {
                         ++committed_ephemeral_nodes;
                         std::lock_guard lock(ephemeral_mutex);
-                        committed_ephemerals[operation.stat.ephemeralOwner].emplace(path);
+                        committed_ephemerals[operation.stat.getEphemeralOwner()].emplace(path);
                     }
-                    if (operation.ttl)
+                    if (operation.stat.isTTL())
                         ttl_paths.insert(path);
                     return Coordination::Error::ZOK;
                 }

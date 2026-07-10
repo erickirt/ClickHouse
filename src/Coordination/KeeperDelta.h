@@ -30,10 +30,8 @@ namespace DB
 
 struct CreateNodeDelta
 {
-    Coordination::Stat stat;
-    ACLId acl_id;
+    KeeperNodeStats stat;
     String data;
-    std::optional<int64_t> ttl;
 };
 
 struct RemoveNodeDelta

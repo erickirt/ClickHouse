@@ -157,9 +157,8 @@ struct KeeperNodesStorage
     ///       std::string_view path, UncommittedNodeRef && node, const KeeperNodeStats & new_stats,
     ///       std::string_view new_data, KeeperStagingTransaction & staging);
     ///   void prepareCreateNodeWithoutUpdatingParent(
-    ///       std::string_view path, UncommittedNodeRef && node, const Coordination::Stat & stat,
-    ///       ACLId acl_id, std::string_view data, std::optional<int64_t> ttl,
-    ///       KeeperStagingTransaction & staging);
+    ///       std::string_view path, UncommittedNodeRef && node, const KeeperNodeStats & stats,
+    ///       std::string_view data, KeeperStagingTransaction & staging);
     ///   void prepareRemoveNodeWithoutUpdatingParent(
     ///       std::string_view path, UncommittedNodeRef && node, KeeperStagingTransaction & staging);
 };

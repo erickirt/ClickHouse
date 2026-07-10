@@ -418,7 +418,7 @@ void KeeperMemNodesStorage::commitDelta(Delta & delta, uint64_t * digest)
         {
             if constexpr (std::same_as<DeltaType, CreateNodeDelta>)
             {
-                if (!createNode(path, operation.data, operation.stat, operation.acl_id, operation.ttl, digest))
+                if (!createNode(path, operation.data, operation.stat, digest))
                     onStorageInconsistency("Failed to create a node");
 
                 return Coordination::Error::ZOK;
@@ -752,9 +752,8 @@ void KeeperMemNodesStorage::prepareUpdateNodeDataAndStat(std::string_view path, 
 }
 
 void KeeperMemNodesStorage::prepareCreateNodeWithoutUpdatingParent(
-    std::string_view path, UncommittedNodeRef && node, const Coordination::Stat & stat,
-    ACLId acl_id, std::string_view data, std::optional<int64_t> ttl,
-    KeeperStagingTransaction & staging)
+    std::string_view path, UncommittedNodeRef && node, const KeeperNodeStats & stats,
+    std::string_view data, KeeperStagingTransaction & staging)
 {
     if (!node.it.has_value())
         node.it = uncommitted_nodes.emplace(std::string{path}, UncommittedNode{}).first;
@@ -763,16 +762,13 @@ void KeeperMemNodesStorage::prepareCreateNodeWithoutUpdatingParent(
     staging.deltas.emplace_back(
         std::string{path},
         staging.zxid,
-        CreateNodeDelta{stat, acl_id, std::string{data}, ttl});
+        CreateNodeDelta{stats, std::string{data}});
 
     auto node_it = *node.it;
     chassert(!node_it->second.node);
     node_it->second.node = std::make_shared<Node>();
     Node * node_ptr = node_it->second.node.get();
-    node_ptr->stats.copyStats(stat);
-    node_ptr->stats.acl_id = acl_id;
-    if (ttl)
-        node_ptr->stats.makeTTL(*ttl);
+    node_ptr->stats = stats;
     node_ptr->setData(data);
 }
 
@@ -789,7 +785,7 @@ void KeeperMemNodesStorage::prepareRemoveNodeWithoutUpdatingParent(
 }
 
 bool KeeperMemNodesStorage::createNode(
-    const std::string & path, String data, const Coordination::Stat & stat, ACLId acl_id, std::optional<int64_t> ttl, uint64_t * digest) TSA_NO_THREAD_SAFETY_ANALYSIS
+    const std::string & path, String data, const KeeperNodeStats & stat, uint64_t * digest) TSA_NO_THREAD_SAFETY_ANALYSIS
 {
     auto parent_path = Coordination::parentNodePath(path);
     auto node_it = container.find(parent_path);
@@ -805,10 +801,7 @@ bool KeeperMemNodesStorage::createNode(
 
     Node created_node;
 
-    created_node.stats.copyStats(stat);
-    created_node.stats.acl_id = acl_id;
-    if (ttl)
-        created_node.stats.makeTTL(*ttl);
+    created_node.stats = stat;
     created_node.setData(data);
 
     auto [map_key, _] = container.insert(path, std::move(created_node));

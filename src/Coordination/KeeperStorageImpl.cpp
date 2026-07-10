@@ -360,26 +360,23 @@ static Coordination::Error preprocess(
 
     new_parent_stats.increaseNumChildren();
 
-    Coordination::Stat stat;
-    stat.czxid = storage.staging.zxid;
-    stat.mzxid = storage.staging.zxid;
-    stat.pzxid = storage.staging.zxid;
-    stat.ctime = time;
-    stat.mtime = time;
-    stat.numChildren = 0;
-    stat.version = 0;
-    stat.aversion = 0;
-    stat.cversion = 0;
-    stat.ephemeralOwner = zk_request.is_ephemeral ? session_id : 0;
-    stat.dataLength = static_cast<int32_t>(zk_request.data.size());
-
-    ACLId acl_id = storage.acl_map.convertACLs(node_acls);
+    KeeperNodeStats stats;
+    stats.czxid = storage.staging.zxid;
+    stats.mzxid = storage.staging.zxid;
+    stats.pzxid = storage.staging.zxid;
+    stats.setCTime(time);
+    stats.mtime = time;
+    stats.acl_id = storage.acl_map.convertACLs(node_acls);
+    stats.data_size = static_cast<int32_t>(zk_request.data.size());
+    if (zk_request.is_ephemeral)
+        stats.makeEphemeral(session_id);
+    else if (zk_request.include_ttl)
+        stats.makeTTL(zk_request.ttl);
 
     storage.nodes.prepareUpdateNodeStat(
         parent_path, std::move(parent_node_ref), new_parent_stats, storage.staging);
     storage.nodes.prepareCreateNodeWithoutUpdatingParent(
-        path_created, std::move(child_node_ref), stat, acl_id, zk_request.data,
-        zk_request.include_ttl ? std::optional(zk_request.ttl) : std::nullopt, storage.staging);
+        path_created, std::move(child_node_ref), stats, zk_request.data, storage.staging);
 
     return Coordination::Error::ZOK;
 }
@@ -409,7 +406,7 @@ static Coordination::ZooKeeperResponsePtr process(const Coordination::ZooKeeperC
     {
         created_path = create_delta_it->path;
         if (response->getOpNum() == Coordination::OpNum::Create2 || response->getOpNum() == Coordination::OpNum::CreateTTL)
-            static_cast<Coordination::ZooKeeperCreate2Response &>(*response).zstat = std::get<CreateNodeDelta>(create_delta_it->operation).stat;
+            std::get<CreateNodeDelta>(create_delta_it->operation).stat.setResponseStat(static_cast<Coordination::ZooKeeperCreate2Response &>(*response).zstat);
     }
     if (const auto result = storage.commit(std::move(deltas)); result != Coordination::Error::ZOK)
     {
