@@ -81,7 +81,7 @@ public:
 protected:
     Chunk generate() override
     {
-        if (!databases_cursor.advanceToDatabase())
+        if (!databases_cursor.advanceToNextDatabase())
             return {};
 
         MutableColumns res_columns = getPort().getHeader().cloneEmptyColumns();
@@ -92,7 +92,7 @@ protected:
         size_t rows_count = 0;
         while (rows_count < max_block_size)
         {
-            if (!databases_cursor.advanceToDatabase())
+            if (!databases_cursor.advanceToNextDatabase())
                 break;
 
             const String & database_name = databases_cursor.getDatabaseName();

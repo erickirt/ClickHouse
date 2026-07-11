@@ -33,13 +33,14 @@ public:
     /// still valid, i.e. the previous block ended mid-database. Returns false when
     /// no databases remain; on a `true` return the tables iterator is either absent
     /// or valid, never exhausted.
-    bool advanceToDatabase();
+    bool advanceToNextDatabase();
 
-    /// Step past the current database without reading its tables (e.g. when a fast
-    /// path emitted them through its own local iterator).
-    void advancePastDatabase();
+    /// Skip the current database without reading its tables (e.g. when a fast path
+    /// emitted them through its own local iterator). Only valid once the current
+    /// database is done - i.e. the tables iterator is absent or exhausted.
+    void skipCurrentDatabase();
 
-    /// The accessors below are valid only after `advanceToDatabase` returned true.
+    /// The accessors below are valid only after `advanceToNextDatabase` returned true.
     const String & getDatabaseName() const
     {
         chassert(database);

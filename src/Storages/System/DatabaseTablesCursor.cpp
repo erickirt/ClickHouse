@@ -15,11 +15,11 @@ DatabaseTablesCursor::DatabaseTablesCursor(ColumnPtr database_names_)
 
 DatabaseTablesCursor::~DatabaseTablesCursor() = default;
 
-bool DatabaseTablesCursor::advanceToDatabase()
+bool DatabaseTablesCursor::advanceToNextDatabase()
 {
     /// Consume the exhausted iterator, otherwise it could advance the position twice.
     if (tables_it && !tables_it->isValid())
-        advancePastDatabase();
+        skipCurrentDatabase();
 
     /// A valid iterator means the previous block ended mid-database; stay on it.
     if (tables_it)
@@ -40,8 +40,11 @@ bool DatabaseTablesCursor::advanceToDatabase()
     return false;
 }
 
-void DatabaseTablesCursor::advancePastDatabase()
+void DatabaseTablesCursor::skipCurrentDatabase()
 {
+    /// Only valid once the current database is done; calling this with a live iterator
+    /// would silently skip the rest of its tables.
+    chassert(!tables_it || !tables_it->isValid());
     ++database_idx;
     tables_it.reset();
 }

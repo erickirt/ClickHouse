@@ -523,7 +523,7 @@ protected:
         while (rows_count < max_block_size)
         {
             /// This is for temporary tables. They are output in single block regardless to max_block_size.
-            if (!databases_cursor.advanceToDatabase())
+            if (!databases_cursor.advanceToNextDatabase())
             {
                 if (context->hasSessionContext())
                 {
@@ -664,7 +664,7 @@ protected:
             {
                 size_t rows_added = fillTableNamesOnly(res_columns);
                 rows_count += rows_added;
-                databases_cursor.advancePastDatabase();
+                databases_cursor.skipCurrentDatabase();
                 continue;
             }
 
