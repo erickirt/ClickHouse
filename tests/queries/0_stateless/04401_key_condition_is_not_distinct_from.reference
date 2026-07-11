@@ -42,8 +42,20 @@
 0
 --- (k = c) NOT IN (true) does NOT get the pruning ---
 0
---- IS NOT DISTINCT FROM NULL must NOT reuse the "=" range (means IS NULL) ---
-0
+--- IS NOT DISTINCT FROM NULL prunes to the NULL granule like IS NULL ---
+1
+--- NULL IS NOT DISTINCT FROM key prunes too (const on the left) ---
+1
+--- bare IS NULL prunes to the NULL granule (reference for the above) ---
+1
+--- startsWith(s, p) IS TRUE prunes via primary key like the bare atom ---
+1
+--- bare startsWith(s, p) prunes via primary key (reference) ---
+1
+--- startsWith(s, p) != false prunes via primary key like the bare atom ---
+1
+--- startsWith(s, p) IN (true) prunes via primary key like the bare atom ---
+1
 --- correctness is preserved across all forms ---
 ndf_nonnull	1
 eq_nonnull	1
@@ -63,6 +75,11 @@ in_false_eq	99999
 in_truefalse_eq	100000
 notin_true_eq	99999
 k_in_true_means_eq_1	1
+ndf_null_left	5000
+startswith_bare	111
+startswith_istrue	111
+startswith_ne_false	111
+startswith_in_true	111
 part_eq	2
 part_istrue	2
 part_ndf	2

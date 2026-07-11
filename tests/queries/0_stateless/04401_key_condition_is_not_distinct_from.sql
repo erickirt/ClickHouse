@@ -6,11 +6,15 @@
 
 SET use_query_condition_cache = 0;
 SET use_skip_indexes_on_data_read = 0;
+-- The implicit `_exact_count_projection` hides the ReadFromMergeTree step (and its Granules line)
+-- from `EXPLAIN indexes = 1 SELECT count() ...`; disable it so the granule counts are visible.
+SET optimize_use_implicit_projections = 0;
 
 DROP TABLE IF EXISTS pk;
 DROP TABLE IF EXISTS pk_null;
 DROP TABLE IF EXISTS mm;
 DROP TABLE IF EXISTS part;
+DROP TABLE IF EXISTS spk;
 
 CREATE TABLE pk (k UInt32) ENGINE = MergeTree ORDER BY k
     SETTINGS index_granularity = 8192, add_minmax_index_for_numeric_columns = 0;
@@ -30,6 +34,12 @@ INSERT INTO mm SELECT number, number FROM numbers(100000);
 -- must apply there too.
 CREATE TABLE part (b Bool, id UInt8) ENGINE = MergeTree PARTITION BY b ORDER BY id;
 INSERT INTO part VALUES (false, 0), (false, 1), (true, 2), (true, 3);
+
+-- String primary key: the boolean-wrapper peel must reach the `startsWith` atom (a prunable boolean
+-- atom that is NOT a comparison), not just `equals`/`less`.
+CREATE TABLE spk (s String) ENGINE = MergeTree ORDER BY s
+    SETTINGS index_granularity = 8192, add_minmax_index_for_numeric_columns = 0;
+INSERT INTO spk SELECT toString(number) FROM numbers(100000);
 
 SELECT '--- IS NOT DISTINCT FROM prunes via primary key (non-Nullable key) ---';
 SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE k IS NOT DISTINCT FROM 42) WHERE explain ILIKE '%Granules: 1/%';
@@ -103,9 +113,31 @@ SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) I
 SELECT '--- (k = c) NOT IN (true) does NOT get the pruning ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE (k = 42) NOT IN (true)) WHERE explain ILIKE '%Granules: 1/%';
 
-SELECT '--- IS NOT DISTINCT FROM NULL must NOT reuse the "=" range (means IS NULL) ---';
--- No "Granules: 1/" pruning; correctness below proves it returns the NULL rows.
-SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE k IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+-- `key <=> NULL` means "key IS NULL", so it reuses the existing `isNull` atom and prunes the Nullable
+-- index to the NULL granule exactly (NOT the "=" range). It must prune the same as bare `key IS NULL`.
+SELECT '--- IS NOT DISTINCT FROM NULL prunes to the NULL granule like IS NULL ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE k IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- NULL IS NOT DISTINCT FROM key prunes too (const on the left) ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE NULL IS NOT DISTINCT FROM k) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- bare IS NULL prunes to the NULL granule (reference for the above) ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE k IS NULL) WHERE explain ILIKE '%Granules: 1/%';
+
+-- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
+-- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
+-- `startsWith(s, p)` (the gate is derived from `atom_map` in `predicateIsBooleanResult`).
+SELECT '--- startsWith(s, p) IS TRUE prunes via primary key like the bare atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM spk WHERE startsWith(s, '999') IS TRUE) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- bare startsWith(s, p) prunes via primary key (reference) ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM spk WHERE startsWith(s, '999')) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- startsWith(s, p) != false prunes via primary key like the bare atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM spk WHERE startsWith(s, '999') != false) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- startsWith(s, p) IN (true) prunes via primary key like the bare atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM spk WHERE startsWith(s, '999') IN (true)) WHERE explain ILIKE '%Granules: 1/%';
 
 SELECT '--- correctness is preserved across all forms ---';
 SELECT 'ndf_nonnull', count() FROM pk WHERE k IS NOT DISTINCT FROM 42;
@@ -130,6 +162,13 @@ SELECT 'in_truefalse_eq', count() FROM pk WHERE (k = 42) IN (true, false);
 SELECT 'notin_true_eq', count() FROM pk WHERE (k = 42) NOT IN (true);
 -- non-boolean X: `k IN (true)` means `k = 1`, not "k truthy"; must stay correct.
 SELECT 'k_in_true_means_eq_1', count() FROM pk WHERE k IN (true);
+-- `key <=> NULL` returns the NULL rows (like IS NULL); the const-on-left form matches too.
+SELECT 'ndf_null_left', count() FROM pk_null WHERE NULL IS NOT DISTINCT FROM k;
+-- startsWith wrapper forms match the bare atom.
+SELECT 'startswith_bare', count() FROM spk WHERE startsWith(s, '999');
+SELECT 'startswith_istrue', count() FROM spk WHERE startsWith(s, '999') IS TRUE;
+SELECT 'startswith_ne_false', count() FROM spk WHERE startsWith(s, '999') != false;
+SELECT 'startswith_in_true', count() FROM spk WHERE startsWith(s, '999') IN (true);
 -- Partition pruning correctness: IS TRUE / IS NOT DISTINCT FROM / != false / IN (true) match b = true.
 SELECT 'part_eq', count() FROM part WHERE b = true;
 SELECT 'part_istrue', count() FROM part WHERE b IS TRUE;
@@ -163,3 +202,4 @@ DROP TABLE pk;
 DROP TABLE pk_null;
 DROP TABLE mm;
 DROP TABLE part;
+DROP TABLE spk;

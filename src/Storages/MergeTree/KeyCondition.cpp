@@ -1035,15 +1035,13 @@ static const ActionsDAG::Node * tryRewriteCoalesceCondition(
     return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
 }
 
-/// Functions whose result is guaranteed to be boolean-valued (in {0, 1, NULL}). Mirrors
-/// `boolean_functions` in LogicalExpressionOptimizerPass.cpp. Comparison/logical functions return a
-/// plain `UInt8` (not the custom `Bool` type), so this must be gated by function name, not by type.
-static const std::set<std::string_view> boolean_result_functions
+/// Boolean-valued functions (result in {0, 1, NULL}) that are NOT `atom_map` atoms: the logical
+/// connectives (handled structurally by `cloneDAGWithInversionPushDown`) and boolean comparisons
+/// `KeyCondition` does not prune (`isDistinctFrom`, `ilike`, `notILike`). The prunable boolean atoms
+/// are taken directly from `atom_map` (see `predicateIsBooleanResult`), so this only holds the extras.
+static const std::set<std::string_view> extra_boolean_result_functions
 {
-    "equals", "notEquals", "less", "greaterOrEquals", "greater", "lessOrEquals",
-    "in", "notIn", "globalIn", "globalNotIn", "nullIn", "notNullIn", "globalNullIn", "globalNullNotIn",
-    "isNull", "isNotNull", "like", "notLike", "ilike", "notILike", "empty", "notEmpty",
-    "not", "and", "or", "isNotDistinctFrom", "isDistinctFrom",
+    "not", "and", "or", "isDistinctFrom", "ilike", "notILike",
 };
 
 /// A positive boolean wrapper `wrapper(X, ...)` is truth-equivalent to bare `X` ONLY IF `X` is
@@ -1053,10 +1051,17 @@ static const std::set<std::string_view> boolean_result_functions
 /// wrappers that `cloneDAGWithInversionPushDown` strips transparently (alias, `materialize`, trivial
 /// `CAST`). Peeling here keeps equivalent wrapped forms (`CAST(k = 42, 'UInt8') IS TRUE`,
 /// `materialize(k = 42) IS TRUE`) from diverging: otherwise the wrapped predicate reaches the gate as
-/// `CAST` / `materialize` (not in `boolean_result_functions`), the rewrite declines, and the later
-/// clone strips the wrapper anyway, leaving the un-prunable `isNotDistinctFrom(equals(k, 42), true)`
-/// in the DAG. The caller still clones the ORIGINAL `predicate`, so the recursion strips the same
-/// wrappers under boolean context.
+/// `CAST` / `materialize` (not boolean-valued), the rewrite declines, and the later clone strips the
+/// wrapper anyway, leaving the un-prunable `isNotDistinctFrom(equals(k, 42), true)` in the DAG. The
+/// caller still clones the ORIGINAL `predicate`, so the recursion strips the same wrappers under
+/// boolean context.
+///
+/// The allowlist is derived from `KeyCondition::atom_map` (the single source of truth for the atoms
+/// `KeyCondition` can actually prune: comparisons, `in`/`notIn`, `has`, `empty`/`notEmpty`, `like`,
+/// `startsWith`/`startsWithUTF8`, `match`, `isNull`/`isNotNull`, `pointInPolygon`), plus the boolean
+/// connectives and boolean comparisons that are not atoms (`extra_boolean_result_functions`). This
+/// way `startsWith(s, 'ab') IS TRUE` and `has([1, 10], id) IS TRUE` peel to the prunable atom instead
+/// of being left behind.
 static bool predicateIsBooleanResult(const ActionsDAG::Node * predicate)
 {
     const ActionsDAG::Node * unwrapped = predicate;
@@ -1069,8 +1074,12 @@ static bool predicateIsBooleanResult(const ActionsDAG::Node * predicate)
         unwrapped = unwrapped->children.front();
     }
 
-    return unwrapped->type == ActionsDAG::ActionType::FUNCTION
-        && boolean_result_functions.contains(unwrapped->function_base->getName());
+    if (unwrapped->type != ActionsDAG::ActionType::FUNCTION)
+        return false;
+
+    const auto & unwrapped_name = unwrapped->function_base->getName();
+    return KeyCondition::atom_map.contains(unwrapped_name)
+        || extra_boolean_result_functions.contains(unwrapped_name);
 }
 
 /// Rewrite a positive boolean wrapper around a predicate `X` to bare `X` for key analysis, so a
@@ -3760,10 +3769,27 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
             /// If the const operand is null, the atom will be always false
             if (const_value.isNull())
             {
-                /// `key <=> NULL` means "key IS NULL", not "key = NULL", so it is not always false.
-                /// We do not build a key range for it, just decline to analyze this atom.
+                /// `key <=> NULL` means "key IS NULL", not "key = NULL". Reuse the existing `isNull`
+                /// atom (same handling as bare `key IS NULL`) so a Nullable PK / minmax index prunes
+                /// to the NULL granule exactly, instead of declining and scanning every granule.
                 if (func_name == "isNotDistinctFrom")
-                    return false;
+                {
+                    size_t key_arg_pos = 1 - const_arg_pos;
+                    auto key_arg = func.getArgumentAt(key_arg_pos);
+                    if (!isKeyPossiblyWrappedByMonotonicFunctions(
+                            key_arg, info, key_column_num, argument_num_of_space_filling_curve, key_expr_type, chain))
+                        return false;
+
+                    if (key_column_num == static_cast<size_t>(-1))
+                        throw Exception(ErrorCodes::LOGICAL_ERROR, "`key_column_num` wasn't initialized. It is a bug.");
+
+                    out.key_columns.push_back(key_column_num);
+                    out.monotonic_functions_chain = std::move(chain);
+                    out.argument_num_of_space_filling_curve = argument_num_of_space_filling_curve;
+
+                    const auto atom_it = atom_map.find("isNull");
+                    return atom_it->second(out, const_value);
+                }
 
                 out.function = RPNElement::ALWAYS_FALSE;
                 return true;
