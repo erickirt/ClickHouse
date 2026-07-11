@@ -707,25 +707,46 @@ const KeyCondition::AtomMap KeyCondition::atom_map
         }
 };
 
-/// Monotonic wrappers that can ERASE NULLs (map a NULL input to a non-NULL output): `ifNull`,
-/// `coalesce`, `assumeNotNull`. They declare monotonicity and `useDefaultImplementationForNulls() ==
-/// false`, so `isKeyPossiblyWrappedByMonotonicFunctions` accepts them into the key monotonic-functions
-/// chain. That is safe for the ordered atoms (`<`, `=`, ...), which apply the chain to the mark bounds.
-/// It is NOT safe for the `isNull`/`isNotNull` atoms: their evaluators deliberately ignore the chain
-/// ("nulls are kept"), so `isNull(ifNull(k, 0))` would be analyzed like bare `isNull(k)`. But
-/// `ifNull(k, 0)` is never NULL, so the predicate is always false, while `isNull(k)` narrows a Nullable
-/// index to the NULL granule and marks it exact-true -> exact-count / implicit-projection paths would
-/// count those rows for an always-false predicate (wrong results). When a NULL-erasing wrapper is
-/// present we must decline the null atom and fall back to a full scan.
-static const std::set<std::string_view> null_erasing_functions
+/// The `isNull`/`isNotNull` atoms deliberately ignore the key monotonic-functions chain ("nulls are
+/// kept"): they narrow a Nullable index to the NULL granule as if the wrapper were absent. That is only
+/// sound when EVERY function in the chain preserves NULL (maps a NULL input to a NULL output). Some
+/// monotonic wrappers do not: `ifNull(k, 0)` / `coalesce(k, 0)` / `assumeNotNull(k)` map NULL to a
+/// non-NULL value, and a `CAST(k, 'UInt32')` to a non-Nullable type turns a NULL row into a thrown
+/// "Cannot convert NULL value" (or, on the pruning path, silently drops it). For such wrappers
+/// `isNull(wrapper(k))` is actually always false, but reusing the bare `isNull` atom would match the
+/// NULL granule and mark it exact-true -> exact-count / implicit-projection paths count those rows for
+/// an always-false predicate (wrong results). When any chain step erases NULL we must decline the null
+/// atom and fall back to a full scan.
+///
+/// The test is SEMANTIC, not a name allowlist: a function preserves NULL iff, whenever it takes a
+/// Nullable argument, its result type is also Nullable. This correctly keeps NULL-preserving
+/// conversions such as `toUInt32(Nullable(UInt32))` (result `Nullable(UInt32)`) while rejecting
+/// `CAST(k, 'UInt32')`, `ifNull`, `coalesce`, and `assumeNotNull` (all produce a non-Nullable result
+/// from a Nullable input).
+static bool functionPreservesNulls(const IFunctionBase & func)
 {
-    "ifNull", "coalesce", "assumeNotNull",
-};
+    bool has_nullable_argument = false;
+    for (const auto & arg_type : func.getArgumentTypes())
+    {
+        if (arg_type && isNullableOrLowCardinalityNullable(arg_type))
+        {
+            has_nullable_argument = true;
+            break;
+        }
+    }
+
+    /// A function that never sees a Nullable argument cannot erase a NULL in this chain.
+    if (!has_nullable_argument)
+        return true;
+
+    const auto & result_type = func.getResultType();
+    return result_type && isNullableOrLowCardinalityNullable(result_type);
+}
 
 static bool monotonicChainPreservesNulls(const KeyCondition::MonotonicFunctionsChain & chain)
 {
     for (const auto & func : chain)
-        if (func && null_erasing_functions.contains(func->getName()))
+        if (func && !functionPreservesNulls(*func))
             return false;
     return true;
 }

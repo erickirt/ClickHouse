@@ -1,6 +1,9 @@
--- Tags: no-replicated-database, no-parallel-replicas
+-- Tags: no-replicated-database, no-parallel-replicas, no-random-merge-tree-settings
 -- no-replicated-database: EXPLAIN output differs for replicated database.
 -- no-parallel-replicas: EXPLAIN output differs for parallel replicas.
+-- no-random-merge-tree-settings: the test asserts exact `Granules: N/M` counts, which depend on the
+--   data layout; randomized MergeTree settings (index_granularity, use_const_adaptive_granularity, ...)
+--   change the granule boundaries and flip the counts.
 -- See `src/Storages/MergeTree/KeyCondition.cpp` (atom_map "isNotDistinctFrom",
 -- reverseComparisonOperator, tryRewriteIsTrueCondition, tryRewriteInTruthyCondition).
 
@@ -150,6 +153,22 @@ SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE assum
 SELECT '--- bare isNull(ifNull(k, 0)) does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE isNull(ifNull(k, 0))) WHERE explain ILIKE '%Granules: 1/%';
 
+-- The NULL-preservation guard is SEMANTIC (result type stays Nullable), not a name allowlist. A `CAST`
+-- to a non-Nullable type erases NULL just like `ifNull`: `CAST(k, 'UInt32') IS NOT DISTINCT FROM NULL`
+-- is always false, but reusing `isNull(k)` would prune to the NULL granule and mark it exact-true, so
+-- exact-count paths would count rows for an always-false predicate. It must NOT prune.
+SELECT '--- CAST(k, non-Nullable) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE CAST(k, 'UInt32') IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- bare isNull(CAST(k, non-Nullable)) does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE isNull(CAST(k, 'UInt32'))) WHERE explain ILIKE '%Granules: 1/%';
+-- A NULL-PRESERVING conversion (`toUInt32(Nullable(UInt32))` stays `Nullable(UInt32)`) must STILL prune
+-- to the NULL granule, exactly like bare `k IS NULL`: it maps NULL to NULL, so `isNull` reuse is sound.
+SELECT '--- toUInt32(k) (NULL-preserving) IS NOT DISTINCT FROM NULL DOES prune to the NULL granule ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE toUInt32(k) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+-- A nested chain erases NULL if ANY step does: `toUInt32(ifNull(k, 0))` -> the inner ifNull erases.
+SELECT '--- toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+
 -- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
 -- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
 -- `startsWith(s, p)` (the gate is derived from `atom_map` in `predicateIsBooleanResult`).
@@ -218,6 +237,10 @@ SELECT 'coalesce_ndf_null', count() FROM pk_null WHERE coalesce(k, 0) IS NOT DIS
 SELECT 'assumenotnull_ndf_null', count() FROM pk_null WHERE assumeNotNull(k) IS NOT DISTINCT FROM NULL;
 SELECT 'ifnull_isnull', count() FROM pk_null WHERE isNull(ifNull(k, 0));
 SELECT 'ifnull_ndf_null_corw_off', count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL SETTINGS allow_key_condition_coalesce_rewrite = 0;
+-- A NULL-preserving conversion (`toUInt32(Nullable)` stays Nullable) matches the NULL rows like bare
+-- `k <=> NULL`; wrapping it in a NULL-erasing `ifNull` makes it always-false again.
+SELECT 'touint32_ndf_null', count() FROM pk_null WHERE toUInt32(k) IS NOT DISTINCT FROM NULL;
+SELECT 'touint32_ifnull_ndf_null', count() FROM pk_null WHERE toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL;
 -- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
 SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
 SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;
