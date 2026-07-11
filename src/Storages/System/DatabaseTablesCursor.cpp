@@ -35,6 +35,8 @@ bool DatabaseTablesCursor::advanceToDatabase()
         /// Database was deleted just now or the user has no access.
         ++database_idx;
     }
+    /// Exhausted: drop the last resolved database so the accessors cannot return stale state.
+    database.reset();
     return false;
 }
 

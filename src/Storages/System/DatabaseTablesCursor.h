@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Columns/IColumn_fwd.h>
+#include <base/defines.h>
 #include <base/types.h>
 
 #include <memory>
@@ -38,8 +39,18 @@ public:
     /// path emitted them through its own local iterator).
     void advancePastDatabase();
 
-    const String & getDatabaseName() const { return database_name; }
-    const DatabasePtr & getDatabase() const { return database; }
+    /// The accessors below are valid only after `advanceToDatabase` returned true.
+    const String & getDatabaseName() const
+    {
+        chassert(database);
+        return database_name;
+    }
+
+    const DatabasePtr & getDatabase() const
+    {
+        chassert(database);
+        return database;
+    }
 
     bool hasTablesIterator() const { return tables_it != nullptr; }
     void setTablesIterator(DatabaseTablesIteratorPtr tables_it_);
