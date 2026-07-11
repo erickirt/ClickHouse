@@ -939,9 +939,25 @@ static AddComparisonFilterResult addComparisonFilter(
         case ValueComparisonResult::PRUNE_RIGHT:
             return AddComparisonFilterResult::ALWAYS_TRUE;
         case ValueComparisonResult::STRENGTHEN_LEFT:
+        {
             range_filters[i].function = strengthenComparison(range_filters[i].function);
             rebuildComparisonNode(range_filters[i], context);
+
+            /// The tightened bound may now contradict the other stored range
+            /// (e.g. `a <= 3 AND a >= 3 AND a != 3` must fold to false).
+            for (size_t j = 0; j < range_filters.size(); ++j)
+            {
+                if (j == i)
+                    continue;
+                auto recheck = compareComparisonFilters(range_filters[j], range_filters[i]);
+                if (recheck == ValueComparisonResult::ALWAYS_FALSE)
+                    return AddComparisonFilterResult::ALWAYS_FALSE;
+                /// Only an opposite-direction range can coexist here, and tightening does not
+                /// change the direction, so the verdict is either ALWAYS_FALSE or NONE.
+                chassert(recheck == ValueComparisonResult::NONE);
+            }
             return AddComparisonFilterResult::ALWAYS_TRUE;
+        }
         case ValueComparisonResult::STRENGTHEN_RIGHT:
             new_filter.function = strengthenComparison(new_filter.function);
             rebuildComparisonNode(new_filter, context);

@@ -377,4 +377,31 @@ SETTINGS optimize_redundant_comparisons = 1;
 SELECT count() FROM (SELECT toUInt8(number) AS n, toInt32(number) AS i FROM numbers(3)) WHERE n >= 255 AND i > 0 SETTINGS optimize_redundant_comparisons = 0;
 SELECT count() FROM (SELECT toUInt8(number) AS n, toInt32(number) AS i FROM numbers(3)) WHERE n >= 255 AND i > 0 SETTINGS optimize_redundant_comparisons = 1;
 
+-- =====================================================================
+-- Section 22: a bound tightened by notEquals is rechecked against the other bound
+-- =====================================================================
+
+-- `<= 3` is tightened to `< 3` by `!= 3` and now contradicts `>= 3` → fold to false.
+SELECT 'strengthen_then_conflict';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number <= 3 AND number >= 3 AND number != 3
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number <= 3 AND number >= 3 AND number != 3 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number <= 3 AND number >= 3 AND number != 3 SETTINGS optimize_redundant_comparisons = 1;
+
+SELECT 'strengthen_then_conflict_mirrored';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number >= 3 AND number <= 3 AND number != 3
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number >= 3 AND number <= 3 AND number != 3 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number >= 3 AND number <= 3 AND number != 3 SETTINGS optimize_redundant_comparisons = 1;
+
+-- Non-conflicting counterpart: the tightened interval stays valid.
+SELECT 'strengthen_no_conflict';
+EXPLAIN SYNTAX run_query_tree_passes = 1
+SELECT count() FROM numbers(10) WHERE number <= 3 AND number >= 1 AND number != 3
+SETTINGS optimize_redundant_comparisons = 1;
+SELECT count() FROM numbers(10) WHERE number <= 3 AND number >= 1 AND number != 3 SETTINGS optimize_redundant_comparisons = 0;
+SELECT count() FROM numbers(10) WHERE number <= 3 AND number >= 1 AND number != 3 SETTINGS optimize_redundant_comparisons = 1;
+
 DROP TABLE IF EXISTS 04032_t;
