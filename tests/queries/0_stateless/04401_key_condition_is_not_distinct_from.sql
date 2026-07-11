@@ -145,6 +145,20 @@ SELECT 'explain_in_subquery_not_built', count() > 0
 FROM (EXPLAIN SELECT count() FROM pk WHERE (k = 42) IN (SELECT throwIf(1)) SETTINGS use_skip_indexes = 0)
 WHERE explain ILIKE '%CreatingSet%';
 
+-- A `LowCardinality` key compared with a `LowCardinality` constant drives a monotonic-function chain
+-- (UInt8->Bool `CAST`) in `applyFunction`. Regression for a server abort where the raw
+-- `ColumnLowCardinality` reached a wrapper doing `checkAndGetColumn<ColumnUInt8>` (bad cast). The
+-- constant comes from a subquery so it is not folded away before key analysis.
+SET allow_suspicious_low_cardinality_types = 1;
+DROP TABLE IF EXISTS lc_bool;
+CREATE TABLE lc_bool (b LowCardinality(Bool)) ENGINE = MergeTree ORDER BY tuple(b) SETTINGS index_granularity = 8, index_granularity_bytes = 0;
+INSERT INTO lc_bool SELECT multiIf(number < 8, false, number < 16, true, NULL) FROM numbers(24);
+SELECT 'lc_less', count() FROM lc_bool WHERE toLowCardinality((SELECT false)) < b;
+SELECT 'lc_eq', count() FROM lc_bool WHERE toLowCardinality((SELECT false)) = b;
+SELECT 'lc_istrue', count() FROM lc_bool WHERE b IS TRUE;
+SELECT 'lc_ndf', count() FROM lc_bool WHERE b IS NOT DISTINCT FROM false;
+DROP TABLE lc_bool;
+
 DROP TABLE pk;
 DROP TABLE pk_null;
 DROP TABLE mm;

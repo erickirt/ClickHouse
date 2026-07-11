@@ -69,3 +69,7 @@ part_ndf	2
 part_ne_false	2
 part_in_true	2
 explain_in_subquery_not_built	1
+lc_less	8
+lc_eq	16
+lc_istrue	8
+lc_ndf	16
