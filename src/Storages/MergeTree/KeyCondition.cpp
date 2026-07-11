@@ -748,7 +748,8 @@ static bool functionPreservesNulls(const IFunctionBase & func)
     }
     catch (...)
     {
-        /// A wrapper that throws on NULL (e.g. CAST to a non-Nullable type) cannot preserve NULLs.
+        /// Ok to swallow here: a wrapper that throws on a NULL input (e.g. CAST to a non-Nullable
+        /// type) cannot preserve NULLs, which is exactly what we report by returning false.
         return false;
     }
 }
