@@ -1205,6 +1205,16 @@ static const ActionsDAG::Node * tryRewriteInTruthyCondition(
     if (future_set->getTypes().size() != 1)
         return nullptr;
 
+    /// Gate on the (cheap) boolean-result check of the left-hand side BEFORE materializing the set.
+    /// The rewrite only applies when `X` is boolean-valued, which is a property of the predicate alone
+    /// and independent of the set. Checking it first avoids the `O(set size)` ordered-set
+    /// materialization (`buildOrderedSetInplace` + `getSetElements`) for common large non-boolean
+    /// filters like `user_id IN (1, 2, ... huge literal list)`, which would otherwise be built and
+    /// iterated only to be discarded here. This mirrors the discipline in `tryPrepareSetIndexForIn`
+    /// where ordered-set materialization happens only for `IN` predicates usable for key analysis.
+    if (!predicateIsBooleanResult(predicate, context->getSettingsRef()[Setting::allow_key_condition_coalesce_rewrite]))
+        return nullptr;
+
     /// Only inspect a set that is ALREADY built. `get()` returns a non-null set for literal-tuple
     /// (`IN (true)`) and storage sets, which are available at planning time, and nullptr for a
     /// subquery set that has not run yet. We must NOT force-build here: this rewrite runs during
@@ -1236,9 +1246,6 @@ static const ActionsDAG::Node * tryRewriteInTruthyCondition(
         if (element.getType() != Field::Types::UInt64 || element.safeGet<UInt64>() != 1)
             return nullptr;
     }
-
-    if (!predicateIsBooleanResult(predicate, context->getSettingsRef()[Setting::allow_key_condition_coalesce_rewrite]))
-        return nullptr;
 
     /// The unwrapped predicate replaces the `IN` wrapper, so it stays in boolean context.
     return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
