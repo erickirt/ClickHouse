@@ -1326,6 +1326,17 @@ clickhouse-client --query "SELECT count() FROM test.visits"
             return f"timed out after {self.DUMP_SYSTEM_TABLE_TIMEOUT}s\n{stderr}"
         return stderr
 
+    @classmethod
+    def _is_info_only_dump_failure(cls, table, res):
+        # A bounded timeout on a minio_* table is info-only, not a real failure.
+        # minio_audit_logs / minio_server_logs are minio's own operational logs
+        # (fed via a webhook), not ClickHouse server diagnostics; on s3 runs they
+        # can balloon past the 600s dump cap. That is expected volume, not a bug,
+        # so it stays visible in the report but must not redden an otherwise-green
+        # check. Every other failure (real CH system tables, non-timeout minio
+        # errors, too-many-rows) is a genuine signal and still fails the check.
+        return "minio" in table and res in cls._TIMEOUT_EXIT_CODES
+
     def dump_system_tables(self):
         # Stop server so we can safely read data with clickhouse-local.
         # Why do we read data with clickhouse-local?
@@ -1398,6 +1409,10 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                 Shell.check(f"rm {cache_status_path}", verbose=True)
 
         scraping_system_table = Result(name="Scraping system tables", status=Result.Status.OK)
+        # Info is always recorded so the report shows what happened, but the
+        # check only turns FAIL on a genuine failure. A bounded timeout on a
+        # minio_* diagnostic table (see _is_info_only_dump_failure) is info-only.
+        real_failure = False
         for table in TABLES:
             path_arg = f" --path {self.run_path0}"
             res, stdout, stderr = Shell.get_res_stdout_stderr(
@@ -1406,10 +1421,14 @@ clickhouse-client --query "SELECT count() FROM test.visits"
             )
             if res != 0:
                 stderr = self._annotate_timeout(res, stderr)
-                print(f"ERROR: Failed to dump system table: {table}\nError: {stderr}")
+                info_only = self._is_info_only_dump_failure(table, res)
+                prefix = "INFO" if info_only else "ERROR"
+                print(f"{prefix}: Failed to dump system table: {table}\nError: {stderr}")
                 scraping_system_table.set_info(
                     f"Failed to dump system table: {table}\nError: {stderr}"
                 )
+                if not info_only:
+                    real_failure = True
             else:
                 lines_count = int(
                     Shell.get_output_or_raise(
@@ -1421,6 +1440,7 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                     scraping_system_table.set_info(
                         f"System table {table} has too many rows {lines_count} > {ROWS_COUNT_IN_SYSTEM_TABLE_LIMIT}"
                     )
+                    real_failure = True
 
             if "minio" in table:
                 # minio tables are not replicated
@@ -1439,6 +1459,9 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                     scraping_system_table.set_info(
                         f"Failed to dump system table from replica 1: {table}\nError: {stderr}"
                     )
+                    # Replicas never dump minio_* tables (they `continue` above),
+                    # so any replica dump failure is a genuine failure.
+                    real_failure = True
                     res = False
                 else:
                     lines_count = int(
@@ -1451,6 +1474,7 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                         scraping_system_table.set_info(
                             f"System table {table} on replica 1 has too many rows {lines_count} > {ROWS_COUNT_IN_SYSTEM_TABLE_LIMIT}"
                         )
+                        real_failure = True
 
             if self.is_db_replicated:
                 path_arg = f" --path {self.run_path2}"
@@ -1466,6 +1490,9 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                     scraping_system_table.set_info(
                         f"Failed to dump system table from replica 2: {table}\nError: {stderr}"
                     )
+                    # Replicas never dump minio_* tables (they `continue` above),
+                    # so any replica dump failure is a genuine failure.
+                    real_failure = True
                     res = False
                 else:
                     lines_count = int(
@@ -1478,9 +1505,14 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                         scraping_system_table.set_info(
                             f"System table {table} on replica 2 has too many rows {lines_count} > {ROWS_COUNT_IN_SYSTEM_TABLE_LIMIT}"
                         )
+                        real_failure = True
 
         if scraping_system_table.info:
-            scraping_system_table.set_status(Result.Status.FAIL)
+            # Genuine failure -> FAIL; info-only (bounded minio_* timeout) stays
+            # OK so an otherwise-green PR is not reddened by minio audit-log
+            # volume, while the detail remains visible in the report.
+            if real_failure:
+                scraping_system_table.set_status(Result.Status.FAIL)
             self.extra_tests_results.append(scraping_system_table)
         return [f for f in glob.glob(f"{temp_dir}/system_tables/*.tsv")]
 

@@ -133,3 +133,103 @@ def test_production_code_bounds_each_dump_with_timeout():
     assert "_TIMEOUT_EXIT_CODES = (124, 137)" in src
     # The annotation helper must be applied to every dump branch (replica 0/1/2).
     assert src.count("self._annotate_timeout(res, stderr)") == 3
+
+
+# --- info-only bounded timeout on minio_* diagnostic tables ------------------
+#
+# A bounded 600s timeout on system.minio_audit_logs / minio_server_logs is
+# expected volume on s3 runs (minio's own webhook-fed operational logs), not a
+# ClickHouse bug, so it must stay VISIBLE in the report but not turn the
+# "Scraping system tables" check FAIL. Every other dump failure (real CH system
+# tables, non-timeout minio errors, too-many-rows, replica dumps) is a genuine
+# signal and still fails the check.
+
+import importlib
+
+_MODULE = None
+
+
+def _load_proc_class():
+    global _MODULE
+    if _MODULE is None:
+        import sys
+
+        sys.path.insert(0, str(_REPO_ROOT))
+        _MODULE = importlib.import_module("ci.jobs.scripts.clickhouse_proc")
+    return _MODULE.ClickHouseProc
+
+
+def test_info_only_classifier_matches_only_minio_timeouts():
+    proc_cls = _load_proc_class()
+    m = proc_cls._is_info_only_dump_failure
+    # minio_* + a timeout expiry code -> info-only
+    assert m("minio_audit_logs", 124) is True
+    assert m("minio_audit_logs", 137) is True
+    assert m("minio_server_logs", 124) is True
+    # minio_* but a NON-timeout error (e.g. real dump error) -> NOT info-only
+    assert m("minio_audit_logs", 1) is False
+    assert m("minio_audit_logs", 0) is False
+    # a real CH system table timing out is NOT info-only -> still a real failure
+    assert m("query_log", 124) is False
+    assert m("trace_log", 137) is False
+    assert m("part_log", 1) is False
+
+
+def test_source_makes_minio_timeout_info_only_but_still_visible():
+    # The production code must record info for every failure (so the report shows
+    # it) yet flip the check to FAIL only on a genuine failure, gated by the
+    # real_failure flag and the info-only classifier.
+    src = _SRC.read_text()
+    assert "def _is_info_only_dump_failure(cls, table, res):" in src
+    assert 'return "minio" in table and res in cls._TIMEOUT_EXIT_CODES' in src
+    # A real_failure flag drives the final FAIL decision, not merely the presence
+    # of info -- otherwise an info-only minio timeout would still redden the check.
+    assert "real_failure = False" in src
+    assert "if real_failure:" in src
+    assert "scraping_system_table.set_status(Result.Status.FAIL)" in src
+    # The replica-0 dump-failure branch must consult the classifier and only set
+    # real_failure when the failure is not info-only.
+    assert "info_only = self._is_info_only_dump_failure(table, res)" in src
+    assert "if not info_only:" in src
+
+
+def _decide(failures):
+    # Mirror dump_system_tables' per-table decision using the REAL classifier and
+    # the REAL Result API: record info for every failure, but only flip FAIL on a
+    # genuine (non-info-only) one. `failures` is a list of (table, res) pairs.
+    proc_cls = _load_proc_class()
+    from ci.praktika.result import Result
+
+    result = Result(name="Scraping system tables", status=Result.Status.OK)
+    real_failure = False
+    for table, res in failures:
+        result.set_info(f"Failed to dump system table: {table}")
+        if not proc_cls._is_info_only_dump_failure(table, res):
+            real_failure = True
+    if result.info and real_failure:
+        result.set_status(Result.Status.FAIL)
+    return result
+
+
+def test_only_a_minio_timeout_keeps_the_check_green_but_visible():
+    # Direction A: an otherwise-green run whose ONLY problem is a bounded 600s
+    # timeout on minio_audit_logs must stay OK, with the detail still recorded.
+    from ci.praktika.result import Result
+
+    result = _decide([("minio_audit_logs", 124)])
+    assert result.status == Result.Status.OK
+    assert "minio_audit_logs" in result.info  # still visible in the report
+
+
+def test_a_real_system_table_failure_still_fails_the_check():
+    # Direction B: a genuine failure (a real CH system table, or a minio table
+    # failing for a non-timeout reason) must still FAIL, even alongside an
+    # info-only minio timeout.
+    from ci.praktika.result import Result
+
+    assert _decide([("query_log", 124)]).status == Result.Status.FAIL
+    assert _decide([("minio_audit_logs", 1)]).status == Result.Status.FAIL
+    assert (
+        _decide([("minio_audit_logs", 124), ("part_log", 137)]).status
+        == Result.Status.FAIL
+    )
