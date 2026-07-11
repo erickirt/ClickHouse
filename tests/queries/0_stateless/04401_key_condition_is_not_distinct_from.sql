@@ -16,17 +16,27 @@ DROP TABLE IF EXISTS mm;
 DROP TABLE IF EXISTS part;
 DROP TABLE IF EXISTS spk;
 
+-- Pin index_granularity_bytes = 0 (non-adaptive) on every table whose exact `Granules: N/M` count is
+-- asserted below, so granule boundaries depend only on the row-count `index_granularity` and not on the
+-- CI-randomized byte cap (a small cap makes tiny granules, splitting the matched key range across more
+-- than one granule and flipping the count). min_bytes_for_wide_part = 0 forces Wide so the non-adaptive
+-- granularity does not log the "can't create parts with adaptive granularity" warning (Fast test fails
+-- on any stderr).
 CREATE TABLE pk (k UInt32) ENGINE = MergeTree ORDER BY k
-    SETTINGS index_granularity = 8192, add_minmax_index_for_numeric_columns = 0;
+    SETTINGS index_granularity = 8192, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, add_minmax_index_for_numeric_columns = 0;
 INSERT INTO pk SELECT number FROM numbers(100000);
 
 CREATE TABLE pk_null (k Nullable(UInt32)) ENGINE = MergeTree ORDER BY k
-    SETTINGS index_granularity = 8192, allow_nullable_key = 1, add_minmax_index_for_numeric_columns = 0;
+    SETTINGS index_granularity = 8192, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, allow_nullable_key = 1, add_minmax_index_for_numeric_columns = 0;
 INSERT INTO pk_null SELECT number FROM numbers(100000);
 INSERT INTO pk_null SELECT NULL FROM numbers(5000);
+-- The NULL rows arrive in a second part that sorts last; whether a background merge fires mid-test is
+-- nondeterministic and flips whether the NULLs share a granule boundary with the non-NULL tail (1 vs 2
+-- granules for `k IS NULL` / `<=> NULL`). Merge to a single part up front so the count is stable.
+OPTIMIZE TABLE pk_null FINAL;
 
 CREATE TABLE mm (id UInt32, v UInt32, INDEX v_idx v TYPE minmax GRANULARITY 1) ENGINE = MergeTree ORDER BY id
-    SETTINGS index_granularity = 1024, add_minmax_index_for_numeric_columns = 0;
+    SETTINGS index_granularity = 1024, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, add_minmax_index_for_numeric_columns = 0;
 INSERT INTO mm SELECT number, number FROM numbers(100000);
 
 -- Partition pruning uses a separate KeyCondition path (PartitionPruner over the
@@ -38,7 +48,7 @@ INSERT INTO part VALUES (false, 0), (false, 1), (true, 2), (true, 3);
 -- String primary key: the boolean-wrapper peel must reach the `startsWith` atom (a prunable boolean
 -- atom that is NOT a comparison), not just `equals`/`less`.
 CREATE TABLE spk (s String) ENGINE = MergeTree ORDER BY s
-    SETTINGS index_granularity = 8192, add_minmax_index_for_numeric_columns = 0;
+    SETTINGS index_granularity = 8192, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, add_minmax_index_for_numeric_columns = 0;
 INSERT INTO spk SELECT toString(number) FROM numbers(100000);
 
 SELECT '--- IS NOT DISTINCT FROM prunes via primary key (non-Nullable key) ---';
