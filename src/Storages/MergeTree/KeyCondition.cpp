@@ -685,6 +685,29 @@ const KeyCondition::AtomMap KeyCondition::atom_map
 static const std::set<KeyCondition::RPNElement::Function> always_relaxed_atom_elements
     = {KeyCondition::RPNElement::FUNCTION_UNKNOWN, KeyCondition::RPNElement::FUNCTION_ARGS_IN_HYPERRECTANGLE, KeyCondition::RPNElement::FUNCTION_POINT_IN_POLYGON};
 
+/// Monotonic wrappers that can ERASE NULLs (map a NULL input to a non-NULL output): `ifNull`,
+/// `coalesce`, `assumeNotNull`. They declare monotonicity and `useDefaultImplementationForNulls() ==
+/// false`, so `isKeyPossiblyWrappedByMonotonicFunctions` accepts them into the key monotonic-functions
+/// chain. That is safe for the ordered atoms (`<`, `=`, ...), which apply the chain to the mark bounds.
+/// It is NOT safe for the `isNull`/`isNotNull` atoms: their evaluators deliberately ignore the chain
+/// ("nulls are kept"), so `isNull(ifNull(k, 0))` would be analyzed like bare `isNull(k)`. But
+/// `ifNull(k, 0)` is never NULL, so the predicate is always false, while `isNull(k)` narrows a Nullable
+/// index to the NULL granule and marks it exact-true -> exact-count / implicit-projection paths would
+/// count those rows for an always-false predicate (wrong results). When a NULL-erasing wrapper is
+/// present we must decline the null atom and fall back to a full scan.
+static const std::set<std::string_view> null_erasing_functions
+{
+    "ifNull", "coalesce", "assumeNotNull",
+};
+
+static bool monotonicChainPreservesNulls(const KeyCondition::MonotonicFunctionsChain & chain)
+{
+    for (const auto & func : chain)
+        if (func && null_erasing_functions.contains(func->getName()))
+            return false;
+    return true;
+}
+
 /// Functions with range inversion cannot be relaxed. It will become stricter instead.
 /// For example:
 /// create table test(d Date, k Int64, s String) Engine=MergeTree order by toYYYYMM(d);
@@ -886,6 +909,14 @@ static const ActionsDAG::Node * tryRewriteCoalesceComparison(
     const ActionsDAG::Node * coalesce_node = node.children[c0 ? 1 : 0];
     const ActionsDAG::Node * const_node = node.children[c0 ? 0 : 1];
     const std::string_view canonical_op = c0 ? mirrored : std::string_view{op_name};
+
+    /// A NULL constant only reaches here through `isNotDistinctFrom` (`= NULL` is folded away).
+    /// `coalesce(k, 0) <=> NULL` is always false because `coalesce(k, 0)` is never NULL, but the
+    /// branch decomposition below would emit `(y_0 <=> NULL) OR ...` = `isNull(k) OR ...`, wrongly
+    /// narrowing a Nullable index to the NULL granule. Decline so `extractAtomFromTree` handles it
+    /// (its `isNotDistinctFrom` NULL branch declines NULL-erasing wrappers, giving a full scan).
+    if (const_node->column && const_node->column->isNullAt(0))
+        return nullptr;
 
     if (coalesce_node->type != ActionsDAG::ActionType::FUNCTION)
         return nullptr;
@@ -3743,6 +3774,12 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
             /// empty/notEmpty produce a meaningful range only for String key columns.
             if ((func_name == "empty" || func_name == "notEmpty") && !isString(*key_expr_type))
                 return false;
+
+            /// The `isNull`/`isNotNull` atoms ignore the monotonic-functions chain (nulls are kept),
+            /// so a NULL-erasing wrapper (`ifNull`, `coalesce`, `assumeNotNull`) in the chain would make
+            /// e.g. `isNull(ifNull(k, 0))` analyzed like `isNull(k)` and wrongly match the NULL granule.
+            if ((func_name == "isNull" || func_name == "isNotNull") && !monotonicChainPreservesNulls(chain))
+                return false;
         }
         else if (num_args == 2)
         {
@@ -3809,6 +3846,13 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
 
                     if (key_column_num == static_cast<size_t>(-1))
                         throw Exception(ErrorCodes::LOGICAL_ERROR, "`key_column_num` wasn't initialized. It is a bug.");
+
+                    /// The `isNull` atom ignores the monotonic-functions chain (nulls are kept), so a
+                    /// NULL-erasing wrapper (`ifNull`, `coalesce`, `assumeNotNull`) must not be routed
+                    /// here: `ifNull(k, 0) IS NOT DISTINCT FROM NULL` is always false, but `isNull(k)`
+                    /// would match the NULL granule and mark it exact-true (wrong results).
+                    if (!monotonicChainPreservesNulls(chain))
+                        return false;
 
                     out.key_columns.push_back(key_column_num);
                     out.monotonic_functions_chain = std::move(chain);

@@ -134,6 +134,22 @@ SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE N
 SELECT '--- bare IS NULL prunes to the NULL granule (reference for the above) ---';
 SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE k IS NULL) WHERE explain ILIKE '%Granules: 1/%';
 
+-- A NULL-erasing wrapper (`ifNull`, `coalesce`, `assumeNotNull`) around the key must NOT be routed to
+-- the `isNull` atom: `ifNull(k, 0) IS NOT DISTINCT FROM NULL` is always false (`ifNull(k, 0)` is never
+-- NULL), but reusing `isNull(k)` would narrow the index to the NULL granule and mark it exact-true,
+-- so exact-count / implicit-projection paths would count those rows for an always-false predicate.
+-- It must fall back to a full scan (no `Granules: 1/` prune), under coalesce-rewrite on AND off.
+SELECT '--- ifNull(k, 0) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- ifNull(k, 0) IS NOT DISTINCT FROM NULL does NOT prune with coalesce rewrite off (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL SETTINGS allow_key_condition_coalesce_rewrite = 0) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- coalesce(k, 0) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE coalesce(k, 0) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- assumeNotNull(k) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE assumeNotNull(k) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- bare isNull(ifNull(k, 0)) does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE isNull(ifNull(k, 0))) WHERE explain ILIKE '%Granules: 1/%';
+
 -- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
 -- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
 -- `startsWith(s, p)` (the gate is derived from `atom_map` in `predicateIsBooleanResult`).
@@ -196,6 +212,12 @@ SELECT 'notin_true_eq', count() FROM pk WHERE (k = 42) NOT IN (true);
 SELECT 'k_in_true_means_eq_1', count() FROM pk WHERE k IN (true);
 -- `key <=> NULL` returns the NULL rows (like IS NULL); the const-on-left form matches too.
 SELECT 'ndf_null_left', count() FROM pk_null WHERE NULL IS NOT DISTINCT FROM k;
+-- NULL-erasing wrappers over the key are ALWAYS FALSE against NULL (never match), unlike bare `k <=> NULL`.
+SELECT 'ifnull_ndf_null', count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL;
+SELECT 'coalesce_ndf_null', count() FROM pk_null WHERE coalesce(k, 0) IS NOT DISTINCT FROM NULL;
+SELECT 'assumenotnull_ndf_null', count() FROM pk_null WHERE assumeNotNull(k) IS NOT DISTINCT FROM NULL;
+SELECT 'ifnull_isnull', count() FROM pk_null WHERE isNull(ifNull(k, 0));
+SELECT 'ifnull_ndf_null_corw_off', count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL SETTINGS allow_key_condition_coalesce_rewrite = 0;
 -- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
 SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
 SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;

@@ -48,6 +48,16 @@
 1
 --- bare IS NULL prunes to the NULL granule (reference for the above) ---
 1
+--- ifNull(k, 0) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---
+0
+--- ifNull(k, 0) IS NOT DISTINCT FROM NULL does NOT prune with coalesce rewrite off (0/) ---
+0
+--- coalesce(k, 0) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---
+0
+--- assumeNotNull(k) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---
+0
+--- bare isNull(ifNull(k, 0)) does NOT prune to the NULL granule (0/) ---
+0
 --- startsWith(s, p) IS TRUE prunes via primary key like the bare atom ---
 1
 --- bare startsWith(s, p) prunes via primary key (reference) ---
@@ -88,6 +98,11 @@ in_truefalse_eq	100000
 notin_true_eq	99999
 k_in_true_means_eq_1	1
 ndf_null_left	5000
+ifnull_ndf_null	0
+coalesce_ndf_null	0
+assumenotnull_ndf_null	0
+ifnull_isnull	0
+ifnull_ndf_null_corw_off	0
 ifnull_bare	1
 ifnull_istrue	1
 coalesce_istrue	1
