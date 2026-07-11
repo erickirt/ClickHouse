@@ -126,7 +126,9 @@ def test_production_code_bounds_each_dump_with_timeout():
     # build the timeout prefix from the class constant and apply it to the dump.
     src = _SRC.read_text()
     assert "DUMP_SYSTEM_TABLE_TIMEOUT" in src
-    assert "timeout --signal=TERM --kill-after=60" in src
+    # --verbose is required so timeout prints its own KILL diagnostic (used to
+    # disambiguate a 137 escalation from an OOM/external SIGKILL).
+    assert "timeout --verbose --signal=TERM --kill-after=60" in src
     assert "{dump_prefix}clickhouse local" in src
     # Both timeout expiry codes must be classified: 124 (child died on SIGTERM)
     # and 137 (SIGTERM-ignoring child escalated to SIGKILL via --kill-after).
@@ -159,20 +161,48 @@ def _load_proc_class():
     return _MODULE.ClickHouseProc
 
 
-def test_info_only_classifier_matches_only_minio_timeouts():
+# `timeout --verbose` prints exactly this to stderr when IT escalates to
+# SIGKILL after --kill-after. It is the proof that a 137 exit came from our
+# wrapper, not from an OOM/external SIGKILL of `clickhouse local`.
+_KILL_DIAG = "timeout: sending signal KILL to command 'clickhouse'"
+
+
+def test_timeout_wrapper_expired_distinguishes_137_kill_source():
+    # 124 is an unambiguous timeout (child died on the initial SIGTERM).
+    # 137 is ambiguous: our own `timeout --kill-after` escalation exits 137, but
+    # so does an OOM/external SIGKILL of the wrapped command. Only trust 137 as a
+    # timeout when timeout's --verbose KILL diagnostic is present in stderr.
+    proc_cls = _load_proc_class()
+    e = proc_cls._timeout_wrapper_expired
+    assert e(124, "") is True
+    assert e(124, "anything") is True
+    # 137 WITH timeout's own KILL diagnostic -> our wrapper escalated -> timeout
+    assert e(137, "timeout: sending signal TERM to command 'clickhouse'\n" + _KILL_DIAG) is True
+    # 137 WITHOUT the diagnostic -> OOM/external SIGKILL -> NOT a timeout
+    assert e(137, "") is False
+    assert e(137, "Killed") is False  # bare shell "Killed" is not proof
+    # non-timeout exit codes are never a timeout
+    assert e(1, _KILL_DIAG) is False
+    assert e(0, "") is False
+
+
+def test_info_only_classifier_matches_only_proven_minio_timeouts():
     proc_cls = _load_proc_class()
     m = proc_cls._is_info_only_dump_failure
-    # minio_* + a timeout expiry code -> info-only
-    assert m("minio_audit_logs", 124) is True
-    assert m("minio_audit_logs", 137) is True
-    assert m("minio_server_logs", 124) is True
+    # minio_* + 124 -> unambiguous timeout -> info-only
+    assert m("minio_audit_logs", 124, "") is True
+    assert m("minio_server_logs", 124, "") is True
+    # minio_* + 137 WITH timeout's KILL diagnostic -> proven timeout -> info-only
+    assert m("minio_audit_logs", 137, _KILL_DIAG) is True
+    # minio_* + 137 WITHOUT the diagnostic (OOM/external kill) -> NOT info-only
+    assert m("minio_audit_logs", 137, "") is False
     # minio_* but a NON-timeout error (e.g. real dump error) -> NOT info-only
-    assert m("minio_audit_logs", 1) is False
-    assert m("minio_audit_logs", 0) is False
+    assert m("minio_audit_logs", 1, "") is False
+    assert m("minio_audit_logs", 0, "") is False
     # a real CH system table timing out is NOT info-only -> still a real failure
-    assert m("query_log", 124) is False
-    assert m("trace_log", 137) is False
-    assert m("part_log", 1) is False
+    assert m("query_log", 124, "") is False
+    assert m("trace_log", 137, _KILL_DIAG) is False
+    assert m("part_log", 1, "") is False
 
 
 def test_source_makes_minio_timeout_info_only_but_still_visible():
@@ -180,31 +210,58 @@ def test_source_makes_minio_timeout_info_only_but_still_visible():
     # it) yet flip the check to FAIL only on a genuine failure, gated by the
     # real_failure flag and the info-only classifier.
     src = _SRC.read_text()
-    assert "def _is_info_only_dump_failure(cls, table, res):" in src
-    assert 'return "minio" in table and res in cls._TIMEOUT_EXIT_CODES' in src
+    assert "def _is_info_only_dump_failure(cls, table, res, stderr):" in src
+    assert 'return "minio" in table and cls._timeout_wrapper_expired(res, stderr)' in src
+    # The 137 exit code must NOT be blindly trusted: it is info-only only when
+    # timeout's own --verbose KILL diagnostic proves the wrapper sent SIGKILL.
+    assert 'timeout --verbose' in src
+    assert '_TIMEOUT_KILL_DIAG = "sending signal KILL to command"' in src
+    assert "def _timeout_wrapper_expired(cls, res, stderr):" in src
     # A real_failure flag drives the final FAIL decision, not merely the presence
     # of info -- otherwise an info-only minio timeout would still redden the check.
     assert "real_failure = False" in src
     assert "if real_failure:" in src
     assert "scraping_system_table.set_status(Result.Status.FAIL)" in src
-    # The replica-0 dump-failure branch must consult the classifier and only set
+    # The dump-failure branch must consult the classifier and only set
     # real_failure when the failure is not info-only.
-    assert "info_only = self._is_info_only_dump_failure(table, res)" in src
+    assert "info_only = self._is_info_only_dump_failure(table, res, stderr)" in src
     assert "if not info_only:" in src
+
+
+def test_dump_only_runs_on_already_failed_jobs():
+    # Caller-wiring context (clickhouse-gh[bot] Finding A). The ONLY publisher of
+    # the "Scraping system tables" result is functional_tests.py's Collect-logs
+    # stage, and it dumps system tables only when the job already failed:
+    #     CH.prepare_logs(all=test_result and not test_result.is_ok())
+    # `dump_system_tables` runs inside prepare_logs' `if all:` block, so on a
+    # green job it never runs and never produces a Scraping result at all. The
+    # reclassification therefore cannot, by itself, keep an otherwise-green PR
+    # green -- there is nothing to reclassify. Its real effect is on an
+    # already-red job: a bounded minio_* timeout no longer adds a spurious extra
+    # failed sub-result (which would otherwise inflate the failure count past the
+    # <4 "do not block pipeline" threshold and muddy triage). This test pins that
+    # gating so a future refactor cannot silently start dumping on green jobs.
+    ft = (_REPO_ROOT / "ci" / "jobs" / "functional_tests.py").read_text()
+    assert "CH.prepare_logs(all=test_result and not test_result.is_ok(), info=info)" in ft
+    proc = _SRC.read_text()
+    # dump_system_tables is reached only through prepare_logs' `if all:` branch.
+    assert "def prepare_logs(self, info, all=False):" in proc
+    assert "if all:" in proc
+    assert "res += self.dump_system_tables()" in proc
 
 
 def _decide(failures):
     # Mirror dump_system_tables' per-table decision using the REAL classifier and
     # the REAL Result API: record info for every failure, but only flip FAIL on a
-    # genuine (non-info-only) one. `failures` is a list of (table, res) pairs.
+    # genuine (non-info-only) one. `failures` is a list of (table, res, stderr).
     proc_cls = _load_proc_class()
     from ci.praktika.result import Result
 
     result = Result(name="Scraping system tables", status=Result.Status.OK)
     real_failure = False
-    for table, res in failures:
+    for table, res, stderr in failures:
         result.set_info(f"Failed to dump system table: {table}")
-        if not proc_cls._is_info_only_dump_failure(table, res):
+        if not proc_cls._is_info_only_dump_failure(table, res, stderr):
             real_failure = True
     if result.info and real_failure:
         result.set_status(Result.Status.FAIL)
@@ -212,24 +269,32 @@ def _decide(failures):
 
 
 def test_only_a_minio_timeout_keeps_the_check_green_but_visible():
-    # Direction A: an otherwise-green run whose ONLY problem is a bounded 600s
-    # timeout on minio_audit_logs must stay OK, with the detail still recorded.
+    # Direction A: an already-red job whose only dump problem is a bounded 600s
+    # timeout on minio_audit_logs must not add a Scraping FAIL, with the detail
+    # still recorded. Covers both the 124 case and the proven-137 case.
     from ci.praktika.result import Result
 
-    result = _decide([("minio_audit_logs", 124)])
+    result = _decide([("minio_audit_logs", 124, "")])
     assert result.status == Result.Status.OK
     assert "minio_audit_logs" in result.info  # still visible in the report
 
+    result = _decide([("minio_server_logs", 137, _KILL_DIAG)])
+    assert result.status == Result.Status.OK
+    assert "minio_server_logs" in result.info
+
 
 def test_a_real_system_table_failure_still_fails_the_check():
-    # Direction B: a genuine failure (a real CH system table, or a minio table
-    # failing for a non-timeout reason) must still FAIL, even alongside an
-    # info-only minio timeout.
+    # Direction B: a genuine failure (a real CH system table, a minio table
+    # failing for a non-timeout reason, or a minio table 137 that is actually an
+    # OOM/external SIGKILL rather than our wrapper's escalation) must still FAIL,
+    # even alongside an info-only minio timeout.
     from ci.praktika.result import Result
 
-    assert _decide([("query_log", 124)]).status == Result.Status.FAIL
-    assert _decide([("minio_audit_logs", 1)]).status == Result.Status.FAIL
+    assert _decide([("query_log", 124, "")]).status == Result.Status.FAIL
+    assert _decide([("minio_audit_logs", 1, "")]).status == Result.Status.FAIL
+    # 137 with no KILL diagnostic = OOM/external kill of clickhouse local -> FAIL
+    assert _decide([("minio_audit_logs", 137, "")]).status == Result.Status.FAIL
     assert (
-        _decide([("minio_audit_logs", 124), ("part_log", 137)]).status
+        _decide([("minio_audit_logs", 124, ""), ("part_log", 137, _KILL_DIAG)]).status
         == Result.Status.FAIL
     )

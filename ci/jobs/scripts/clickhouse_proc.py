@@ -1315,8 +1315,13 @@ clickhouse-client --query "SELECT count() FROM test.visits"
 
     # Exit codes coreutils `timeout` uses on expiry: 124 when the child dies on
     # the initial SIGTERM, 128+9 = 137 when a SIGTERM-ignoring child is escalated
-    # with SIGKILL after --kill-after. Both mean the dump exceeded its cap.
+    # with SIGKILL after --kill-after. Both can mean the dump exceeded its cap.
     _TIMEOUT_EXIT_CODES = (124, 137)
+    # `timeout --verbose` prints this exact line to stderr when IT escalates to
+    # SIGKILL after --kill-after. It is the only positive proof that a 137 exit
+    # came from our wrapper's own KILL and not from an OOM/external SIGKILL of
+    # `clickhouse local` (which also exits 137 but prints no such line).
+    _TIMEOUT_KILL_DIAG = "sending signal KILL to command"
 
     def _annotate_timeout(self, res, stderr):
         # If `res` is one of timeout's expiry codes, prepend the "timed out"
@@ -1327,15 +1332,31 @@ clickhouse-client --query "SELECT count() FROM test.visits"
         return stderr
 
     @classmethod
-    def _is_info_only_dump_failure(cls, table, res):
+    def _timeout_wrapper_expired(cls, res, stderr):
+        # True only when the failure is our `timeout` wrapper firing on its cap:
+        #   124 -> child died on the initial SIGTERM (unambiguous timeout).
+        #   137 -> ambiguous: `timeout --kill-after` escalation exits 137, but so
+        #          does ANY SIGKILL death (OOM-killer, external kill) of the
+        #          wrapped `clickhouse local`. Only trust 137 as a timeout when
+        #          `timeout --verbose` left its own KILL diagnostic in stderr;
+        #          otherwise it is a genuine kill and must still fail the check.
+        if res == 124:
+            return True
+        if res == 137:
+            return cls._TIMEOUT_KILL_DIAG in (stderr or "")
+        return False
+
+    @classmethod
+    def _is_info_only_dump_failure(cls, table, res, stderr):
         # A bounded timeout on a minio_* table is info-only, not a real failure.
         # minio_audit_logs / minio_server_logs are minio's own operational logs
         # (fed via a webhook), not ClickHouse server diagnostics; on s3 runs they
         # can balloon past the 600s dump cap. That is expected volume, not a bug,
         # so it stays visible in the report but must not redden an otherwise-green
         # check. Every other failure (real CH system tables, non-timeout minio
-        # errors, too-many-rows) is a genuine signal and still fails the check.
-        return "minio" in table and res in cls._TIMEOUT_EXIT_CODES
+        # errors, too-many-rows, an OOM/external SIGKILL that only *looks* like a
+        # timeout) is a genuine signal and still fails the check.
+        return "minio" in table and cls._timeout_wrapper_expired(res, stderr)
 
     def dump_system_tables(self):
         # Stop server so we can safely read data with clickhouse-local.
@@ -1390,8 +1411,11 @@ clickhouse-client --query "SELECT count() FROM test.visits"
         # on s3 runs) must not consume the whole 9000s job budget. On expiry
         # timeout sends SIGTERM and returns 124; a dump that ignores SIGTERM is
         # escalated with SIGKILL after --kill-after and returns 128+9 = 137.
-        # Both are timeouts, annotated by _annotate_timeout below.
-        dump_prefix = f"timeout --signal=TERM --kill-after=60 {self.DUMP_SYSTEM_TABLE_TIMEOUT} "
+        # --verbose makes timeout print "sending signal KILL to command" on its
+        # own escalation; _timeout_wrapper_expired uses that to tell a real
+        # --kill-after escalation apart from an OOM/external SIGKILL that also
+        # exits 137 but must still fail the check.
+        dump_prefix = f"timeout --verbose --signal=TERM --kill-after=60 {self.DUMP_SYSTEM_TABLE_TIMEOUT} "
 
         Utils.clean_dir(p_temp_dir / "system_tables")
         res = True
@@ -1420,8 +1444,11 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                 verbose=True,
             )
             if res != 0:
+                # Classify before annotation: _annotate_timeout prepends text but
+                # keeps the original stderr (with timeout's --verbose KILL
+                # diagnostic) intact, so either order works; use the raw stderr.
+                info_only = self._is_info_only_dump_failure(table, res, stderr)
                 stderr = self._annotate_timeout(res, stderr)
-                info_only = self._is_info_only_dump_failure(table, res)
                 prefix = "INFO" if info_only else "ERROR"
                 print(f"{prefix}: Failed to dump system table: {table}\nError: {stderr}")
                 scraping_system_table.set_info(
