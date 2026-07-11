@@ -169,6 +169,14 @@ SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE t
 SELECT '--- toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 
+-- Result-type nullability alone is NOT enough: `ifNull(k, CAST(0, 'Nullable(UInt32)'))` and the
+-- `coalesce` form keep a `Nullable(UInt32)` result type, yet map NULL to 0 and can never be NULL. The
+-- guard tests the wrapper's actual behavior on a NULL input, so these must NOT prune to the NULL granule.
+SELECT '--- ifNull(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- coalesce(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE coalesce(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
+
 -- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
 -- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
 -- `startsWith(s, p)` (the gate is derived from `atom_map` in `predicateIsBooleanResult`).
@@ -241,6 +249,11 @@ SELECT 'ifnull_ndf_null_corw_off', count() FROM pk_null WHERE ifNull(k, 0) IS NO
 -- `k <=> NULL`; wrapping it in a NULL-erasing `ifNull` makes it always-false again.
 SELECT 'touint32_ndf_null', count() FROM pk_null WHERE toUInt32(k) IS NOT DISTINCT FROM NULL;
 SELECT 'touint32_ifnull_ndf_null', count() FROM pk_null WHERE toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL;
+-- Nullable-but-non-NULL fallback: always false; the exact-count / implicit-projection path must return 0
+-- (a wrong prune to the NULL granule would return the NULL-row count instead).
+SELECT 'ifnull_nfb_ndf_null', count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL;
+SELECT 'coalesce_nfb_ndf_null', count() FROM pk_null WHERE coalesce(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL;
+SELECT 'ifnull_nfb_ndf_null_iproj', count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL SETTINGS optimize_use_implicit_projections = 1;
 -- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
 SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
 SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;

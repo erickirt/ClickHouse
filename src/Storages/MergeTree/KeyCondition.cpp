@@ -707,6 +707,8 @@ const KeyCondition::AtomMap KeyCondition::atom_map
         }
 };
 
+DataTypePtr getArgumentTypeOfMonotonicFunction(const IFunctionBase & func);
+
 /// The `isNull`/`isNotNull` atoms deliberately ignore the key monotonic-functions chain ("nulls are
 /// kept"): they narrow a Nullable index to the NULL granule as if the wrapper were absent. That is only
 /// sound when EVERY function in the chain preserves NULL (maps a NULL input to a NULL output). Some
@@ -718,29 +720,37 @@ const KeyCondition::AtomMap KeyCondition::atom_map
 /// an always-false predicate (wrong results). When any chain step erases NULL we must decline the null
 /// atom and fall back to a full scan.
 ///
-/// The test is SEMANTIC, not a name allowlist: a function preserves NULL iff, whenever it takes a
-/// Nullable argument, its result type is also Nullable. This correctly keeps NULL-preserving
-/// conversions such as `toUInt32(Nullable(UInt32))` (result `Nullable(UInt32)`) while rejecting
-/// `CAST(k, 'UInt32')`, `ifNull`, `coalesce`, and `assumeNotNull` (all produce a non-Nullable result
-/// from a Nullable input).
+/// The test is BEHAVIORAL, not a name allowlist and not a result-type proxy: we execute the wrapper on
+/// a single NULL of its key-argument type and check whether the output is actually NULL. Deciding from
+/// the result *type*'s nullability is unsound because `ifNull(k, CAST(0, 'Nullable(UInt32)'))` and
+/// `coalesce(k, CAST(0, 'Nullable(UInt32)'))` keep a Nullable result type yet always map NULL to 0.
+/// Running the function is the only criterion that is correct for every monotonic-chain function:
+///   - `toUInt32(Nullable(UInt32))`      -> NULL in yields NULL out          -> preserves;
+///   - `CAST(k, 'UInt32')`               -> throws on NULL                   -> does not preserve;
+///   - `ifNull` / `coalesce` / `assumeNotNull` (any fallback) -> non-NULL out -> do not preserve.
 static bool functionPreservesNulls(const IFunctionBase & func)
 {
-    bool has_nullable_argument = false;
-    for (const auto & arg_type : func.getArgumentTypes())
-    {
-        if (arg_type && isNullableOrLowCardinalityNullable(arg_type))
-        {
-            has_nullable_argument = true;
-            break;
-        }
-    }
+    auto key_arg_type = getArgumentTypeOfMonotonicFunction(func);
 
-    /// A function that never sees a Nullable argument cannot erase a NULL in this chain.
-    if (!has_nullable_argument)
+    /// If the wrapper does not even receive a Nullable value at this point in the chain, there is no
+    /// NULL for it to erase here, so it trivially preserves NULLs.
+    if (!key_arg_type || !isNullableOrLowCardinalityNullable(key_arg_type))
         return true;
 
-    const auto & result_type = func.getResultType();
-    return result_type && isNullableOrLowCardinalityNullable(result_type);
+    try
+    {
+        /// `func.execute` takes only the non-const (key) argument(s); a `FunctionWithOptionalConstArg`
+        /// splices its bound constant back in, so `ifNull` / `coalesce` see their real fallback.
+        ColumnsWithTypeAndName args{{key_arg_type->createColumnConst(1, Null{}), key_arg_type, "x"}};
+        auto result = func.execute(args, func.getResultType(), 1, /* dry_run = */ false);
+        result = result->convertToFullColumnIfConst();
+        return !result->empty() && result->isNullAt(0);
+    }
+    catch (...)
+    {
+        /// A wrapper that throws on NULL (e.g. CAST to a non-Nullable type) cannot preserve NULLs.
+        return false;
+    }
 }
 
 static bool monotonicChainPreservesNulls(const KeyCondition::MonotonicFunctionsChain & chain)

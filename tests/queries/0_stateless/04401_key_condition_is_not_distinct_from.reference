@@ -66,6 +66,10 @@
 1
 --- toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---
 0
+--- ifNull(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---
+0
+--- coalesce(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---
+0
 --- startsWith(s, p) IS TRUE prunes via primary key like the bare atom ---
 1
 --- bare startsWith(s, p) prunes via primary key (reference) ---
@@ -113,6 +117,9 @@ ifnull_isnull	0
 ifnull_ndf_null_corw_off	0
 touint32_ndf_null	5000
 touint32_ifnull_ndf_null	0
+ifnull_nfb_ndf_null	0
+coalesce_nfb_ndf_null	0
+ifnull_nfb_ndf_null_iproj	0
 ifnull_bare	1
 ifnull_istrue	1
 coalesce_istrue	1
