@@ -168,6 +168,68 @@ def test_writes_field_ids_nested_avro(started_cluster_iceberg_with_spark):
     ]
 
 
+# Regression for the Avro Map(String, Tuple(...)) case (bot review on #109994):
+# the Avro field-id writer must descend into a map's value schema to reach a
+# record nested inside e.g. Map(String, Tuple(a Int32, b String)), so paths like
+# `m.value.a` get field-ids. This asserts the nested map-value subfield IDs are
+# present in the Avro data file (and that Spark reads the map back).
+def test_writes_field_ids_map_tuple_avro(started_cluster_iceberg_with_spark):
+    import avro.datafile
+    import avro.io
+
+    instance = started_cluster_iceberg_with_spark.instances["node1"]
+    spark = started_cluster_iceberg_with_spark.spark_session
+    storage_type = "local"
+    TABLE_NAME = "test_field_ids_map_tuple_avro_" + get_uuid_str()
+    local_path = f"/var/lib/clickhouse/user_files/iceberg_data/default/{TABLE_NAME}"
+
+    create_iceberg_table(
+        storage_type,
+        instance,
+        TABLE_NAME,
+        started_cluster_iceberg_with_spark,
+        "(id Int32, m Map(String, Tuple(a Int32, b String)))",
+        2,
+        format="Avro",
+    )
+
+    instance.query(
+        f"INSERT INTO {TABLE_NAME} VALUES (1, {{'k1': (10, 'x'), 'k2': (11, 'y')}}), (2, {{'k3': (20, 'z')}})",
+        settings={"allow_insert_into_iceberg": 1},
+    )
+    assert instance.query(f"SELECT id FROM {TABLE_NAME} ORDER BY id") == "1\n2\n"
+
+    default_download_directory(
+        started_cluster_iceberg_with_spark,
+        storage_type,
+        f"{local_path}/",
+        f"{local_path}/",
+    )
+
+    data_files = glob.glob(f"{local_path}/data/*.avro")
+    assert data_files, "no Avro data file was written"
+
+    with open(data_files[0], "rb") as f:
+        reader = avro.datafile.DataFileReader(f, avro.io.DatumReader())
+        writer_schema = reader.datum_reader.writers_schema
+        reader.close()
+
+    field_ids = _avro_field_ids(writer_schema)
+    # The nested map-value struct subfields must carry field-ids reached through
+    # the map wrapper. Without the map-value recursion these keys would be absent.
+    assert "m.value.a" in field_ids, field_ids
+    assert "m.value.b" in field_ids, field_ids
+    assert field_ids["m.value.a"] != field_ids["m.value.b"]
+
+    rows = spark.read.format("iceberg").load(local_path).orderBy("id").collect()
+    assert len(rows) == 2
+    assert {k: (v.a, v.b) for k, v in rows[0].m.items()} == {
+        "k1": (10, "x"),
+        "k2": (11, "y"),
+    }
+    assert {k: (v.a, v.b) for k, v in rows[1].m.items()} == {"k3": (20, "z")}
+
+
 # Regression for the ORC rewrite path (bot review on #109994): the mapper-driven
 # String -> ORC `string` rule must also apply when ClickHouse-written data files
 # are rewritten by compaction (OPTIMIZE), not only on the initial write. The
