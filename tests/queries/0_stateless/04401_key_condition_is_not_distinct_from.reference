@@ -56,6 +56,18 @@
 1
 --- startsWith(s, p) IN (true) prunes via primary key like the bare atom ---
 1
+--- ifNull(k = 42, 0) IS TRUE prunes via primary key like the bare wrapped atom ---
+1
+--- bare ifNull(k = 42, 0) prunes via primary key (reference) ---
+1
+--- coalesce(k = 42, 0) IS TRUE prunes via primary key like the bare wrapped atom ---
+1
+--- ifNull(k = 42, 0) != false prunes via primary key like the bare wrapped atom ---
+1
+--- ifNull(k = 42, 0) IN (true) prunes via primary key like the bare wrapped atom ---
+1
+--- ifNull(k = 42, 0) IS TRUE does NOT prune when allow_key_condition_coalesce_rewrite = 0 (0/) ---
+0
 --- correctness is preserved across all forms ---
 ndf_nonnull	1
 eq_nonnull	1
@@ -76,6 +88,11 @@ in_truefalse_eq	100000
 notin_true_eq	99999
 k_in_true_means_eq_1	1
 ndf_null_left	5000
+ifnull_bare	1
+ifnull_istrue	1
+coalesce_istrue	1
+ifnull_ne_false	1
+ifnull_in_true	1
 startswith_bare	111
 startswith_istrue	111
 startswith_ne_false	111

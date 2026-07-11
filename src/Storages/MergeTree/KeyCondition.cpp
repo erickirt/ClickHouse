@@ -987,6 +987,36 @@ static const ActionsDAG::Node * tryRewriteCoalesceComparison(
     return &inverted_dag.addFunction(or_func, std::move(or_children), "");
 }
 
+/// True if `node` is a two-argument `ifNull(X, 0)` / `coalesce(X, 0)` with a falsy numeric-zero
+/// constant fallback - the exact shape `tryRewriteCoalesceCondition` peels to its inner predicate `X`
+/// in boolean context. Shared with `predicateIsBooleanResult` so the boolean-result gate and the
+/// actual peel stay in sync.
+static bool isFalsyZeroCoalesceCondition(const ActionsDAG::Node & node)
+{
+    if (node.type != ActionsDAG::ActionType::FUNCTION)
+        return false;
+
+    const auto & name = node.function_base->getName();
+    if (name != "coalesce" && name != "ifNull")
+        return false;
+
+    if (node.children.size() != 2)
+        return false;
+
+    const ActionsDAG::Node * fallback = node.children[1];
+    if (fallback->type != ActionsDAG::ActionType::COLUMN || !fallback->column || !isColumnConst(*fallback->column))
+        return false;
+
+    const Field fallback_value = (*fallback->column)[0];
+    switch (fallback_value.getType())
+    {
+        case Field::Types::UInt64:  return fallback_value.safeGet<UInt64>() == 0;
+        case Field::Types::Int64:   return fallback_value.safeGet<Int64>() == 0;
+        case Field::Types::Float64: return fallback_value.safeGet<Float64>() == 0.0;
+        default: return false;
+    }
+}
+
 /// Rewrite an `ifNull(X, 0)` / `coalesce(X, 0)` used as a condition to `X` for key analysis, so the wrapped
 /// predicate becomes a prunable key atom. `ifNull(X, 0)` is truthy exactly when `X` is truthy, for any
 /// `X`, so no whitelist of inner functions is needed; but its value differs from `X` on NULL rows, so
@@ -1004,35 +1034,11 @@ static const ActionsDAG::Node * tryRewriteCoalesceCondition(
     if (name != "coalesce" && name != "ifNull")
         return nullptr;
 
-    if (node.children.size() != 2)
+    if (!isFalsyZeroCoalesceCondition(node))
         return nullptr;
-
-    const ActionsDAG::Node * predicate = node.children[0];
-    const ActionsDAG::Node * fallback = node.children[1];
-
-    if (fallback->type != ActionsDAG::ActionType::COLUMN || !fallback->column || !isColumnConst(*fallback->column))
-        return nullptr;
-
-    const Field fallback_value = (*fallback->column)[0];
-    switch (fallback_value.getType())
-    {
-        case Field::Types::UInt64:
-            if (fallback_value.safeGet<UInt64>() != 0)
-                return nullptr;
-            break;
-        case Field::Types::Int64:
-            if (fallback_value.safeGet<Int64>() != 0)
-                return nullptr;
-            break;
-        case Field::Types::Float64:
-            if (fallback_value.safeGet<Float64>() != 0.0)
-                return nullptr;
-            break;
-        default: return nullptr;
-    }
 
     /// The unwrapped predicate replaces the boolean wrapper, so it stays in boolean context.
-    return &cloneDAGWithInversionPushDown(*predicate, inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
+    return &cloneDAGWithInversionPushDown(*node.children[0], inverted_dag, inputs_mapping, context, false, /* boolean_context */ true);
 }
 
 /// Boolean-valued functions (result in {0, 1, NULL}) that are NOT `atom_map` atoms: the logical
@@ -1062,7 +1068,16 @@ static const std::set<std::string_view> extra_boolean_result_functions
 /// connectives and boolean comparisons that are not atoms (`extra_boolean_result_functions`). This
 /// way `startsWith(s, 'ab') IS TRUE` and `has([1, 10], id) IS TRUE` peel to the prunable atom instead
 /// of being left behind.
-static bool predicateIsBooleanResult(const ActionsDAG::Node * predicate)
+///
+/// When `allow_coalesce_rewrite` is set, an inner falsy-zero `ifNull(Y, 0)` / `coalesce(Y, 0)` is
+/// itself boolean-valued exactly when `Y` is (`ifNull(Y, 0)` is in {0, 1, NULL} iff `Y` is), so the
+/// gate recurses into `Y`. This composes the outer positive-boolean-wrapper peel with the existing
+/// `tryRewriteCoalesceCondition`: `ifNull(k = 42, 0) IS TRUE` passes the gate, the outer peel enters
+/// boolean context, and the recursion in `cloneDAGWithInversionPushDown` then unwraps the `ifNull`
+/// to the prunable `k = 42`. Without this the gate rejects `ifNull` (not an atom / extra), the outer
+/// peel declines, and the fallback clone with `boolean_context = false` denies the coalesce rewrite
+/// its chance too, leaving `isNotDistinctFrom(ifNull(equals(k, 42), 0), true)` at `Condition: true`.
+static bool predicateIsBooleanResult(const ActionsDAG::Node * predicate, bool allow_coalesce_rewrite)
 {
     const ActionsDAG::Node * unwrapped = predicate;
     while (unwrapped->type == ActionsDAG::ActionType::ALIAS
@@ -1076,6 +1091,11 @@ static bool predicateIsBooleanResult(const ActionsDAG::Node * predicate)
 
     if (unwrapped->type != ActionsDAG::ActionType::FUNCTION)
         return false;
+
+    /// `ifNull(Y, 0)` / `coalesce(Y, 0)` is boolean-valued iff `Y` is - recurse so the outer peel
+    /// composes with the coalesce rewrite (only when that rewrite is enabled).
+    if (allow_coalesce_rewrite && isFalsyZeroCoalesceCondition(*unwrapped))
+        return predicateIsBooleanResult(unwrapped->children[0], allow_coalesce_rewrite);
 
     const auto & unwrapped_name = unwrapped->function_base->getName();
     return KeyCondition::atom_map.contains(unwrapped_name)
@@ -1134,7 +1154,7 @@ static const ActionsDAG::Node * tryRewriteIsTrueCondition(
     if (const_value.getType() != Field::Types::UInt64 || const_value.safeGet<UInt64>() != expected_const)
         return nullptr;
 
-    if (!predicateIsBooleanResult(predicate))
+    if (!predicateIsBooleanResult(predicate, context->getSettingsRef()[Setting::allow_key_condition_coalesce_rewrite]))
         return nullptr;
 
     /// The unwrapped predicate replaces the boolean wrapper, so it stays in boolean context.
@@ -1217,7 +1237,7 @@ static const ActionsDAG::Node * tryRewriteInTruthyCondition(
             return nullptr;
     }
 
-    if (!predicateIsBooleanResult(predicate))
+    if (!predicateIsBooleanResult(predicate, context->getSettingsRef()[Setting::allow_key_condition_coalesce_rewrite]))
         return nullptr;
 
     /// The unwrapped predicate replaces the `IN` wrapper, so it stays in boolean context.

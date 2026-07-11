@@ -139,6 +139,28 @@ SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM spk WHERE start
 SELECT '--- startsWith(s, p) IN (true) prunes via primary key like the bare atom ---';
 SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM spk WHERE startsWith(s, '999') IN (true)) WHERE explain ILIKE '%Granules: 1/%';
 
+-- The positive-boolean-wrapper peel composes with the existing `ifNull(X, 0)` / `coalesce(X, 0)`
+-- boolean rewrite (gated by `allow_key_condition_coalesce_rewrite`): `ifNull(k = 42, 0) IS TRUE`
+-- (and the `!= false` / `IN (true)` forms) must prune the same as bare `ifNull(k = 42, 0)`.
+SELECT '--- ifNull(k = 42, 0) IS TRUE prunes via primary key like the bare wrapped atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- bare ifNull(k = 42, 0) prunes via primary key (reference) ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE ifNull(k = 42, 0)) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- coalesce(k = 42, 0) IS TRUE prunes via primary key like the bare wrapped atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE coalesce(k = 42, 0) IS TRUE) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- ifNull(k = 42, 0) != false prunes via primary key like the bare wrapped atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE ifNull(k = 42, 0) != false) WHERE explain ILIKE '%Granules: 1/%';
+
+SELECT '--- ifNull(k = 42, 0) IN (true) prunes via primary key like the bare wrapped atom ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE ifNull(k = 42, 0) IN (true)) WHERE explain ILIKE '%Granules: 1/%';
+
+-- With the coalesce rewrite disabled the composed peel must NOT prune (behavior preserved when off).
+SELECT '--- ifNull(k = 42, 0) IS TRUE does NOT prune when allow_key_condition_coalesce_rewrite = 0 (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE SETTINGS allow_key_condition_coalesce_rewrite = 0) WHERE explain ILIKE '%Granules: 1/%';
+
 SELECT '--- correctness is preserved across all forms ---';
 SELECT 'ndf_nonnull', count() FROM pk WHERE k IS NOT DISTINCT FROM 42;
 SELECT 'eq_nonnull', count() FROM pk WHERE k = 42;
@@ -164,6 +186,12 @@ SELECT 'notin_true_eq', count() FROM pk WHERE (k = 42) NOT IN (true);
 SELECT 'k_in_true_means_eq_1', count() FROM pk WHERE k IN (true);
 -- `key <=> NULL` returns the NULL rows (like IS NULL); the const-on-left form matches too.
 SELECT 'ndf_null_left', count() FROM pk_null WHERE NULL IS NOT DISTINCT FROM k;
+-- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
+SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
+SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;
+SELECT 'coalesce_istrue', count() FROM pk WHERE coalesce(k = 42, 0) IS TRUE;
+SELECT 'ifnull_ne_false', count() FROM pk WHERE ifNull(k = 42, 0) != false;
+SELECT 'ifnull_in_true', count() FROM pk WHERE ifNull(k = 42, 0) IN (true);
 -- startsWith wrapper forms match the bare atom.
 SELECT 'startswith_bare', count() FROM spk WHERE startsWith(s, '999');
 SELECT 'startswith_istrue', count() FROM spk WHERE startsWith(s, '999') IS TRUE;
