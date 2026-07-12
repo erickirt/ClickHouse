@@ -211,6 +211,12 @@ Chunk NATSSource::generateImpl()
             break;
     }
 
+    if (isCancelled() || storage.isConsumeCancelRequested(cancel_epoch))
+    {
+        consumption_aborted = true;
+        return {};
+    }
+
     if (total_rows == 0)
         return {};
 

@@ -137,10 +137,18 @@ void RabbitMQSource::updateChannel()
 Chunk RabbitMQSource::generate()
 {
     auto chunk = generateImpl();
-    if (!chunk && ack_in_suffix && !consumption_aborted)
+    if (!chunk && ack_in_suffix)
     {
-        LOG_TEST(log, "Will send ack on select");
-        sendAck();
+        if (consumption_aborted)
+        {
+            LOG_TEST(log, "Will requeue messages on aborted select");
+            sendNack(/*requeue=*/true);
+        }
+        else
+        {
+            LOG_TEST(log, "Will send ack on select");
+            sendAck();
+        }
     }
 
     return chunk;
@@ -371,7 +379,7 @@ Chunk RabbitMQSource::generateImpl()
         }
     }
 
-    if (aborted)
+    if (aborted || storage.isConsumeCancelRequested(cancel_epoch))
     {
         consumption_aborted = true;
         LOG_TRACE(log, "Consumption interrupted: discarding in-flight block of {} rows", total_rows);

@@ -164,6 +164,8 @@ void INATSConsumer::onMsg(natsConnection *, natsSubscription *, natsMsg * msg, v
     catch (...)
     {
         tryLogCurrentException(nats_consumer->log, "Could not push to received queue");
+        if (owned_msg)
+            nats_consumer->nackMessage(owned_msg.get());
     }
 
     if (!nats_consumer->needsAck())

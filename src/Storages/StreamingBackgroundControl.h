@@ -13,7 +13,7 @@ namespace DB
 /// engines even though each engine's durable boundary (Kafka offset commit, RabbitMQ ack, NATS ack,
 /// S3Queue file-marked-Processed) and abort mechanism differ.
 ///
-/// The unit of background work is one "cycle" = one `streamToViews()` iteration: drain a block from the
+/// The unit of background work is one "cycle" = one `streamToViews` iteration: drain a block from the
 /// source, insert it into the dependent materialized views, then reach the durable boundary. The five
 /// verbs map onto three pieces of state by deciding whether future cycles are blocked and whether the
 /// in-flight cycle is aborted before that boundary:
