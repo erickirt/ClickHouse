@@ -727,134 +727,127 @@ static ValueComparisonResult compareComparisonFilters(const ComparisonFilterInfo
     if (is_nan(lc) || is_nan(rc))
         return ValueComparisonResult::NONE;
 
-    try
+    /// equals vs anything: check whether the equals value satisfies the other condition.
+    /// If yes → PRUNE_RIGHT (e.g. `a = 3 AND a < 5`), if no → ALWAYS_FALSE (e.g. `a = 3 AND a > 5`).
+    if (lf == ComparisonFunction::EQUALS)
     {
-        /// equals vs anything: check whether the equals value satisfies the other condition.
-        /// If yes → PRUNE_RIGHT (e.g. `a = 3 AND a < 5`), if no → ALWAYS_FALSE (e.g. `a = 3 AND a > 5`).
-        if (lf == ComparisonFunction::EQUALS)
+        bool prune_right = false;
+        switch (rf)
         {
-            bool prune_right = false;
-            switch (rf)
-            {
-            case ComparisonFunction::LESS:
-                prune_right = accurateLess(lc, rc);
-                break;
-            case ComparisonFunction::LESS_OR_EQUALS:
-                prune_right = accurateLessOrEqual(lc, rc);
-                break;
-            case ComparisonFunction::GREATER:
-                prune_right = accurateLess(rc, lc);
-                break;
-            case ComparisonFunction::GREATER_OR_EQUALS:
-                prune_right = accurateLessOrEqual(rc, lc);
-                break;
-            case ComparisonFunction::NOT_EQUALS:
-                prune_right = !accurateEquals(lc, rc);
-                break;
-            case ComparisonFunction::EQUALS:
-                prune_right = accurateEquals(lc, rc);
-                break;
-            }
-            return prune_right ? ValueComparisonResult::PRUNE_RIGHT : ValueComparisonResult::ALWAYS_FALSE;
+        case ComparisonFunction::LESS:
+            prune_right = accurateLess(lc, rc);
+            break;
+        case ComparisonFunction::LESS_OR_EQUALS:
+            prune_right = accurateLessOrEqual(lc, rc);
+            break;
+        case ComparisonFunction::GREATER:
+            prune_right = accurateLess(rc, lc);
+            break;
+        case ComparisonFunction::GREATER_OR_EQUALS:
+            prune_right = accurateLessOrEqual(rc, lc);
+            break;
+        case ComparisonFunction::NOT_EQUALS:
+            prune_right = !accurateEquals(lc, rc);
+            break;
+        case ComparisonFunction::EQUALS:
+            prune_right = accurateEquals(lc, rc);
+            break;
         }
-
-        /// Right is equals — swap arguments and invert the result.
-        if (rf == ComparisonFunction::EQUALS)
-            return invertComparisonResult(compareComparisonFilters(right, left));
-
-        /// notEquals vs range: if the range already excludes the notEquals value,
-        /// the notEquals is redundant (e.g. `a != 3 AND a < 3` → PRUNE_LEFT).
-        /// When the values are equal and the range is inclusive, strengthen the range
-        /// (e.g. `a != 3 AND a <= 3` → `a < 3`, returned as STRENGTHEN_RIGHT).
-        /// Otherwise both are independent (e.g. `a != 3 AND a < 5` → NONE).
-        /// notEquals vs notEquals: duplicate → PRUNE_RIGHT, otherwise NONE.
-        if (lf == ComparisonFunction::NOT_EQUALS)
-        {
-            bool prune_left = false;
-            bool can_strengthen_right = false;
-            switch (rf)
-            {
-            case ComparisonFunction::LESS:
-                prune_left = !accurateLess(lc, rc);
-                break;
-            case ComparisonFunction::LESS_OR_EQUALS:
-                prune_left = accurateLess(rc, lc);
-                if (!prune_left)
-                    can_strengthen_right = accurateEquals(lc, rc);
-                break;
-            case ComparisonFunction::GREATER:
-                prune_left = !accurateLess(rc, lc);
-                break;
-            case ComparisonFunction::GREATER_OR_EQUALS:
-                prune_left = accurateLess(lc, rc);
-                if (!prune_left)
-                    can_strengthen_right = accurateEquals(lc, rc);
-                break;
-            case ComparisonFunction::NOT_EQUALS:
-                if (accurateEquals(lc, rc))
-                    return ValueComparisonResult::PRUNE_RIGHT;
-                break;
-            case ComparisonFunction::EQUALS:
-                UNREACHABLE();
-            }
-            if (prune_left)
-                return ValueComparisonResult::PRUNE_LEFT;
-            if (can_strengthen_right)
-                return ValueComparisonResult::STRENGTHEN_RIGHT;
-            return ValueComparisonResult::NONE;
-        }
-
-        /// Right is notEquals — swap arguments and invert the result.
-        if (rf == ComparisonFunction::NOT_EQUALS)
-            return invertComparisonResult(compareComparisonFilters(right, left));
-
-        /// Same-direction ranges (both > or both <): the tighter bound wins.
-        /// E.g. `a > 1 AND a > 3` → PRUNE_LEFT.  When values are equal, < beats <=, > beats >=.
-        if (isGreaterThanCompare(lf) && isGreaterThanCompare(rf))
-        {
-            if (accurateLess(rc, lc))
-                return ValueComparisonResult::PRUNE_RIGHT;
-            if (accurateLess(lc, rc))
-                return ValueComparisonResult::PRUNE_LEFT;
-            /// Equal values: > is stricter than >=.
-            if (lf == ComparisonFunction::GREATER_OR_EQUALS)
-                return ValueComparisonResult::PRUNE_LEFT;
-            return ValueComparisonResult::PRUNE_RIGHT;
-        }
-
-        /// Same logic for both-less: tighter (smaller) bound wins.
-        if (isLessThanCompare(lf) && isLessThanCompare(rf))
-        {
-            if (accurateLess(lc, rc))
-                return ValueComparisonResult::PRUNE_RIGHT;
-            if (accurateLess(rc, lc))
-                return ValueComparisonResult::PRUNE_LEFT;
-            /// Equal values: < is stricter than <=.
-            if (lf == ComparisonFunction::LESS_OR_EQUALS)
-                return ValueComparisonResult::PRUNE_LEFT;
-            return ValueComparisonResult::PRUNE_RIGHT;
-        }
-
-        /// Opposite-direction ranges (< vs >): check whether the interval is non-empty.
-        /// E.g. `a < 5 AND a > 1` → NONE, `a < 1 AND a > 5` → ALWAYS_FALSE.
-        /// Both inclusive (<= and >=) allows a single-point interval: `a <= 3 AND a >= 3` → NONE.
-        if (isLessThanCompare(lf))
-        {
-            chassert(isGreaterThanCompare(rf));
-            bool both_inclusive = (lf == ComparisonFunction::LESS_OR_EQUALS && rf == ComparisonFunction::GREATER_OR_EQUALS);
-            if (both_inclusive)
-                return accurateLessOrEqual(rc, lc) ? ValueComparisonResult::NONE : ValueComparisonResult::ALWAYS_FALSE;
-            return accurateLess(rc, lc) ? ValueComparisonResult::NONE : ValueComparisonResult::ALWAYS_FALSE;
-        }
-
-        /// Greater vs less — swap to reuse the less-vs-greater branch above.
-        chassert(isGreaterThanCompare(lf) && isLessThanCompare(rf));
-        return invertComparisonResult(compareComparisonFilters(right, left));
+        return prune_right ? ValueComparisonResult::PRUNE_RIGHT : ValueComparisonResult::ALWAYS_FALSE;
     }
-    catch (const Exception &) /// Ok: comparison failure means we can't optimize, not an error
+
+    /// Right is equals — swap arguments and invert the result.
+    if (rf == ComparisonFunction::EQUALS)
+        return invertComparisonResult(compareComparisonFilters(right, left));
+
+    /// notEquals vs range: if the range already excludes the notEquals value,
+    /// the notEquals is redundant (e.g. `a != 3 AND a < 3` → PRUNE_LEFT).
+    /// When the values are equal and the range is inclusive, strengthen the range
+    /// (e.g. `a != 3 AND a <= 3` → `a < 3`, returned as STRENGTHEN_RIGHT).
+    /// Otherwise both are independent (e.g. `a != 3 AND a < 5` → NONE).
+    /// notEquals vs notEquals: duplicate → PRUNE_RIGHT, otherwise NONE.
+    if (lf == ComparisonFunction::NOT_EQUALS)
     {
+        bool prune_left = false;
+        bool can_strengthen_right = false;
+        switch (rf)
+        {
+        case ComparisonFunction::LESS:
+            prune_left = !accurateLess(lc, rc);
+            break;
+        case ComparisonFunction::LESS_OR_EQUALS:
+            prune_left = accurateLess(rc, lc);
+            if (!prune_left)
+                can_strengthen_right = accurateEquals(lc, rc);
+            break;
+        case ComparisonFunction::GREATER:
+            prune_left = !accurateLess(rc, lc);
+            break;
+        case ComparisonFunction::GREATER_OR_EQUALS:
+            prune_left = accurateLess(lc, rc);
+            if (!prune_left)
+                can_strengthen_right = accurateEquals(lc, rc);
+            break;
+        case ComparisonFunction::NOT_EQUALS:
+            if (accurateEquals(lc, rc))
+                return ValueComparisonResult::PRUNE_RIGHT;
+            break;
+        case ComparisonFunction::EQUALS:
+            UNREACHABLE();
+        }
+        if (prune_left)
+            return ValueComparisonResult::PRUNE_LEFT;
+        if (can_strengthen_right)
+            return ValueComparisonResult::STRENGTHEN_RIGHT;
         return ValueComparisonResult::NONE;
     }
+
+    /// Right is notEquals — swap arguments and invert the result.
+    if (rf == ComparisonFunction::NOT_EQUALS)
+        return invertComparisonResult(compareComparisonFilters(right, left));
+
+    /// Same-direction ranges (both > or both <): the tighter bound wins.
+    /// E.g. `a > 1 AND a > 3` → PRUNE_LEFT.  When values are equal, < beats <=, > beats >=.
+    if (isGreaterThanCompare(lf) && isGreaterThanCompare(rf))
+    {
+        if (accurateLess(rc, lc))
+            return ValueComparisonResult::PRUNE_RIGHT;
+        if (accurateLess(lc, rc))
+            return ValueComparisonResult::PRUNE_LEFT;
+        /// Equal values: > is stricter than >=.
+        if (lf == ComparisonFunction::GREATER_OR_EQUALS)
+            return ValueComparisonResult::PRUNE_LEFT;
+        return ValueComparisonResult::PRUNE_RIGHT;
+    }
+
+    /// Same logic for both-less: tighter (smaller) bound wins.
+    if (isLessThanCompare(lf) && isLessThanCompare(rf))
+    {
+        if (accurateLess(lc, rc))
+            return ValueComparisonResult::PRUNE_RIGHT;
+        if (accurateLess(rc, lc))
+            return ValueComparisonResult::PRUNE_LEFT;
+        /// Equal values: < is stricter than <=.
+        if (lf == ComparisonFunction::LESS_OR_EQUALS)
+            return ValueComparisonResult::PRUNE_LEFT;
+        return ValueComparisonResult::PRUNE_RIGHT;
+    }
+
+    /// Opposite-direction ranges (< vs >): check whether the interval is non-empty.
+    /// E.g. `a < 5 AND a > 1` → NONE, `a < 1 AND a > 5` → ALWAYS_FALSE.
+    /// Both inclusive (<= and >=) allows a single-point interval: `a <= 3 AND a >= 3` → NONE.
+    if (isLessThanCompare(lf))
+    {
+        chassert(isGreaterThanCompare(rf));
+        bool both_inclusive = (lf == ComparisonFunction::LESS_OR_EQUALS && rf == ComparisonFunction::GREATER_OR_EQUALS);
+        if (both_inclusive)
+            return accurateLessOrEqual(rc, lc) ? ValueComparisonResult::NONE : ValueComparisonResult::ALWAYS_FALSE;
+        return accurateLess(rc, lc) ? ValueComparisonResult::NONE : ValueComparisonResult::ALWAYS_FALSE;
+    }
+
+    /// Greater vs less — swap to reuse the less-vs-greater branch above.
+    chassert(isGreaterThanCompare(lf) && isLessThanCompare(rf));
+    return invertComparisonResult(compareComparisonFilters(right, left));
 }
 
 /// Rebuild the `original_node` of a filter after its `function` has been changed (e.g. by strengthening).
