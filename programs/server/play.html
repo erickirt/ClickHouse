@@ -3660,8 +3660,11 @@ let activation_num = 0;
 /// While a tab activation is rebuilding the active tab's parameter inputs, this holds the
 /// activation's request token. `restoreEditor` sets it right before the `updateQueryParams`
 /// await (the `param_*` DOM inputs still hold the PREVIOUS tab's values during that await) and
-/// clears it once the restored parameters are committed. `captureActiveTab` uses it to avoid
-/// snapshotting the stale inputs into the newly-active tab while the restore is in flight.
+/// clears it once the restored parameters are committed. `captureActiveTab` treats ANY non-null
+/// token as "the inputs are not committed yet": a run that supersedes the restore (`postOne`/
+/// `postAll` bump `activation_num` mid-await) leaves the stale inputs in place without ever
+/// committing them, so the guard must survive that bump and stay armed until the next
+/// activation's restore really commits (a superseded `restoreEditor` bails without touching it).
 let params_restore_pending_token = null;
 
 /// Tabs let the user keep several independent queries side by side. Each tab owns its
@@ -5724,10 +5727,12 @@ function captureActiveTab() {
     /// While an activation is restoring this tab's parameter inputs (after the `updateQueryParams`
     /// await in `restoreEditor`, before `setParamValues`), the `param_*` DOM inputs still hold the
     /// previously active tab's values. Snapshotting them now would overwrite this tab's own
-    /// parameters with the previous tab's. Skip the capture until the restore commits; `tab.query`
-    /// is safe (set before the await). The guard lifts once a newer activation advances
-    /// `activation_num`, so it can never suppress capture indefinitely.
-    if (params_restore_pending_token !== activation_num) tab.params = getParamValues();
+    /// parameters with the previous tab's. Skip the capture until a restore commits (which nulls
+    /// the token); `tab.query` is safe (set before the await). A run during the restore does NOT
+    /// lift the guard: it supersedes the restore before the inputs are committed, so they stay
+    /// stale until the next activation restores them (every activation starts a restore, and the
+    /// latest one always commits, so capture cannot stay suppressed across a tab switch).
+    if (params_restore_pending_token === null) tab.params = getParamValues();
 }
 
 /// Abort a tab's in-flight query (if any) and supersede its run generation so its late responses
@@ -6423,11 +6428,12 @@ async function postOne()
     /// tab's content — so snapshot the editor text + selection BEFORE the await and parse the
     /// snapshot, rather than dropping a launched run just because the active tab changed. Only a
     /// newer run/cancel in the SAME tab (which bumps `tab.reqNum`, tracked by `my_run`) supersedes
-    /// it. Detect an in-flight parameter restore before bumping `activation_num` so the run sources
-    /// parameters from this tab's saved snapshot, not the previous tab's stale DOM inputs.
+    /// it. Detect an in-flight parameter restore (the token stays non-null until a restore
+    /// commits) so the run sources parameters from this tab's saved snapshot, not the previous
+    /// tab's stale DOM inputs.
     const tab = getActiveTab();
     if (!tab) return;
-    const params_restore_pending = params_restore_pending_token === activation_num;
+    const params_restore_pending = params_restore_pending_token !== null;
     /// Bump `activation_num` so a concurrent, still-awaiting `activateTab` restore bails instead of
     /// overwriting the editor after this run starts; the run itself is no longer gated on it.
     ++activation_num;
@@ -6489,7 +6495,7 @@ async function postAll()
     if (!tab) return;
     /// See `postOne`: snapshot the editor before the lexer await, keep the launched run alive on a
     /// tab switch, and supersede only on a newer run/cancel in the same tab (`my_run`/`tab.reqNum`).
-    const params_restore_pending = params_restore_pending_token === activation_num;
+    const params_restore_pending = params_restore_pending_token !== null;
     ++activation_num;
     const my_run = ++tab.reqNum;
     document.body.scrollTo(0, 0);
@@ -8186,9 +8192,9 @@ function setParamValues(values)
 
 /// Resolve the parameter values a run must execute with, and keep the `param_*` inputs in sync.
 ///
-/// Normally the live DOM inputs are authoritative. But when a tab activation / Back-Forward
-/// restore is still pending for this run's generation, the destination tab's saved parameters
-/// have not yet been written to the inputs — that write happens only after `restoreEditor`'s
+/// Normally the live DOM inputs are authoritative. But while a tab activation / Back-Forward
+/// restore has not committed yet, the destination tab's saved parameters
+/// have not been written to the inputs — that write happens only after `restoreEditor`'s
 /// tokenization await, which the `++activation_num` in `postOne`/`postAll` has just superseded — so the
 /// inputs still hold the previously active tab's values. Sourcing them would execute this tab's
 /// query against the wrong bindings (a correctness bug, not just a stale UI). Take the values
