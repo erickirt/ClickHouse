@@ -5607,6 +5607,7 @@ function tabRuntimeDefaults() {
         downloadParams: {},
         downloadVisible: false, /// whether the download / copy buttons apply to this tab
         copyVisible: false,
+        launchQuery: undefined, /// editor text snapshotted when this tab's run was launched (see `saveHistory`)
         barEl: null,            /// cached tab-bar row + indicator nodes (see renderTabBar/updateTabIndicator)
         spinnerEl: null,
         checkEl: null,
@@ -6210,7 +6211,13 @@ function refreshCurrentHistoryEntry(tab) {
 function saveHistory(stateData, titleForDoc, tab) {
     tab = tab || getActiveTab();
     if (!tab) return;
-    tab.query = stateData.query;
+    /// Adopt the launch-time editor text only while the tab's draft still matches it. A run can
+    /// finish in the background after the user edited the query and switched away: by then
+    /// `captureActiveTab` (or the live input handler) has saved the newer draft into `tab.query`,
+    /// and overwriting it with the old launch text would lose that draft. The statement that
+    /// produced the result is still recorded in `result.query` below either way.
+    const query_unchanged = tab.launchQuery === undefined || tab.query === tab.launchQuery;
+    if (query_unchanged) tab.query = stateData.query;
     tab.result = {
         ran: true,   /// marks a genuine run; the tab bar's visibility keys off this
         /// The single statement that produced this result (in multi-query mode it differs
@@ -6232,7 +6239,9 @@ function saveHistory(stateData, titleForDoc, tab) {
     if (tab.id === activeTabId) {
         /// This entry was produced by an actual run, so it may carry `run=1` (a reload/shared link
         /// re-runs it). Editor-only writers (`syncHistory`/`refreshCurrentHistoryEntry`) never do.
-        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ true);
+        /// When the draft diverged from the launch text, the entry carries the UNRUN draft, which
+        /// must never be auto-runnable (see `writeHistoryEntry` on the `run=1` invariant).
+        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged);
     } else {
         /// Background run finished: reflect its new result in the tab bar and persist it, without
         /// disturbing the active tab's URL/history entry.
@@ -6426,8 +6435,11 @@ async function postOne()
     document.body.scrollTo(0, 0);
     beginFlight(tab);
 
-    /// Snapshot the shared editor before any await (see above).
+    /// Snapshot the shared editor before any await (see above). The launch text is also recorded
+    /// on the tab so `saveHistory` can tell, at completion, whether the tab's draft has since
+    /// moved on (an edit made while the query ran must not be clobbered by the launch text).
     const editor_text = query_area.value;
+    tab.launchQuery = editor_text;
     const sel_start = query_area.selectionStart;
     const sel_end = query_area.selectionEnd;
     const has_selection = sel_start !== sel_end;
@@ -6484,6 +6496,7 @@ async function postAll()
     beginFlight(tab);
 
     const editor_text = query_area.value;
+    tab.launchQuery = editor_text;   /// see `postOne`: lets `saveHistory` detect a newer draft
     const sel_start = query_area.selectionStart;
     const parsed = await splitAllQueries(editor_text);
     if (my_run !== tab.reqNum) return;
