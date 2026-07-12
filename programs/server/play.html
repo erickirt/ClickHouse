@@ -5137,6 +5137,86 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
     }, parsed[0].query);
 }
 
+/// Render a saved failed-query snapshot (`ok: false`) into `el`, mirroring the live mid-stream
+/// failure rendering in `postImpl`. The saved `data` is the full raw reply that arrived before the
+/// query failed: the partial output (table rows or raw bytes) followed by the failure signal —
+/// either a transport-level `__exception__` marker block, or an in-band `{"exception":...}` line
+/// (for a `*WithProgress` stream) / `exception` field (for a single-document JSON/XML format).
+/// The live path deliberately KEEPS that partial output and renders the error beneath it (see the
+/// table branch's `rowCount > 0` handling and the raw branch's line echoing in `postImpl`), so the
+/// restore must replay the same prefix instead of collapsing to `error only` — otherwise a
+/// mid-stream failure that showed `partial result + error` live degrades to `error only` on the
+/// first tab switch or reload. `data` with no parseable failure signal is a plain error string that
+/// `postImpl`'s catch saved (network error, early abort, incomplete chunked encoding, so `format`
+/// may even be missing); render it as the error alone, with no raw echo.
+function renderFailedSnapshot(el, data, format) {
+    if (format === default_format) {
+        /// Table branch — mirror `postImpl` (rows are `{"row":...}` / `{"meta":...}` / `{"totals":...}`
+        /// / `{"progress":...}` lines): replay them until the failure signal, keep the partial rows,
+        /// then render the error underneath.
+        let fragment = document.createDocumentFragment();
+        let inband_exception = null;
+        let marker_seen = false;
+        const lines = data.split('\n');
+        for (let idx = 0; idx < lines.length; ++idx) {
+            const line = lines[idx];
+            /// The transport marker occupies a whole line and everything from it on is the marker
+            /// block, not rows (see `EXCEPTION_MARKER`); stop replaying and recover the message below.
+            if (line.replace(/\r$/, '') === EXCEPTION_MARKER) { marker_seen = true; break; }
+            if (line.trim().length === 0) continue;
+            let parsed;
+            /// A truncated/garbled tail (e.g. the reply was cut off) should not throw out of the whole
+            /// restore: stop replaying rows and fall back to the recovered message below.
+            try { parsed = JSON.parse(line); } catch (e) { break; }
+            /// The in-band failure line (`http_write_exception_in_output_format`); like the live path,
+            /// treat it as the terminal failure rather than an ordinary row.
+            if (parsed.exception) { inband_exception = parsed.exception; break; }
+            if (!el.update(parsed, fragment)) break;
+        }
+        el.flushFragment(fragment);
+        if (el.rowCount > 0) {
+            el.renderTotals();
+            el.applyColumnColors();
+            el.transposeIfNeeded();
+        } else {
+            el.clear();
+        }
+        const message = inband_exception
+            ?? (marker_seen ? parseExceptionMarker(data) : null)
+            ?? parseInbandException(data, format)
+            ?? data;
+        el.renderError(message);
+        return;
+    }
+
+    /// Transport-level `__exception__` marker: echo the raw prefix that arrived before the marker
+    /// block (the block itself stays hidden, as the live raw branch withholds it), then the error.
+    const marker_message = parseExceptionMarker(data);
+    if (marker_message !== null) {
+        const lines = data.split('\n');
+        let prefix = '';
+        for (let idx = 0; idx < lines.length; ++idx) {
+            if (lines[idx].replace(/\r$/, '') === EXCEPTION_MARKER) break;
+            prefix += lines[idx] + '\n';
+        }
+        if (prefix.length) el.updateRaw(prefix);
+        el.renderError(marker_message);
+        return;
+    }
+
+    /// In-band `{"exception":...}` line / `exception` field: the live raw branch echoes the whole
+    /// reply (the exception line included) and renders the parsed error beneath it.
+    const inband_message = parseInbandException(data, format);
+    if (inband_message !== null) {
+        el.updateRaw(data);
+        el.renderError(inband_message);
+        return;
+    }
+
+    /// No mid-stream failure signal — a plain error string from `postImpl`'s catch. Render it alone.
+    el.renderError(data);
+}
+
 /// Render one saved multi-query statement snapshot into `el`, mirroring the live per-statement
 /// rendering in `postImpl` (table / chart / EXPLAIN graph / raw / error), minus the streaming.
 /// `token` guards the awaited chart/graph loaders: a superseding activation bails before touching
@@ -5148,22 +5228,7 @@ async function renderSnapshotIntoElement(el, snap, token) {
     const format = snap.format;
 
     if (!snap.ok) {
-        let has_exception = false;
-        for (const line of snap.data.split('\n')) {
-            if (line.startsWith(`{"exception":`)) {
-                el.update(JSON.parse(line));
-                has_exception = true;
-                break;
-            }
-        }
-        if (!has_exception) {
-            /// A mid-stream failure is saved as the raw reply, which ends with a low-level
-            /// `__exception__` marker block rather than a `{"exception":...}` line, or (for a
-            /// single-object JSON format) carries the failure as an in-band `exception` field.
-            /// Recover the message so the restored result shows the real error, not the raw bytes.
-            const message = parseExceptionMarker(snap.data) ?? parseInbandException(snap.data, format);
-            el.renderError(message ?? snap.data);
-        }
+        renderFailedSnapshot(el, snap.data, format);
         return;
     }
 
@@ -5379,22 +5444,7 @@ async function restoreFromHistory(state, token) {
         /// original run.
         logoEl.style.display = 'none';
 
-        let has_exception = false;
-        for (const line of result.data.split('\n')) {
-            if (line.startsWith(`{"exception":`)) {
-                resultEl.update(JSON.parse(line));
-                has_exception = true;
-                break;
-            }
-        }
-        if (!has_exception) {
-            /// A mid-stream failure is saved as the raw reply, which ends with a low-level
-            /// `__exception__` marker block rather than a `{"exception":...}` line, or (for a
-            /// single-object JSON format) carries the failure as an in-band `exception` field.
-            /// Recover the message so the restored result shows the real error, not the raw bytes.
-            const message = parseExceptionMarker(result.data) ?? parseInbandException(result.data, format);
-            resultEl.renderError(message ?? result.data);
-        }
+        renderFailedSnapshot(resultEl, result.data, format);
 
         progressEl.clear();
         return;
