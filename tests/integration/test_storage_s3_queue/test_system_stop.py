@@ -473,6 +473,84 @@ def test_cancel_during_direct_select_does_not_commit_files(started_cluster):
     )
 
 
+def test_cancel_during_direct_select_aborts_without_commit_on_select(started_cluster):
+    # With commit_on_select=0 (the default) a direct SELECT reads without consuming its files, but a
+    # SYSTEM CANCEL mid-read must still abort it.
+    node = started_cluster.instances["instance"]
+    table = f"s3queue_direct_cancel_nocommit_{generate_random_string()}"
+    files_path = f"{table}_data"
+    rows = 500000
+    create_table(
+        started_cluster,
+        node,
+        table,
+        "unordered",
+        files_path,
+        additional_settings={
+            "commit_on_select": 0,
+            "processing_threads_num": 1,
+        },
+    )
+    # One file large enough to need several reader->pull calls, so the sleep failpoint lands between
+    # pulls with the file still in Processing state.
+    s3_function = (
+        f"s3('http://{started_cluster.minio_host}:{started_cluster.minio_port}/"
+        f"{started_cluster.minio_bucket}/{files_path}/{table}.csv', 'minio', '{minio_secret_key}')"
+    )
+    node.query(
+        f"INSERT INTO FUNCTION {s3_function} "
+        f"SELECT number AS column1, number AS column2, number AS column3 FROM numbers({rows})"
+    )
+
+    node.query("SYSTEM ENABLE FAILPOINT object_storage_queue_sleep_in_generate")
+    select = f"SELECT count() FROM {table} SETTINGS stream_like_engine_allow_direct_select = 1"
+    result = {}
+
+    def run_select():
+        result["answer"], result["error"] = node.query_and_get_answer_with_error(select)
+
+    reader = threading.Thread(target=run_select)
+    try:
+        reader.start()
+        # Wait until the source is parked in the sleep failpoint (a file Processing with rows already
+        # read), so the CANCEL below lands mid-read rather than before or after it.
+        deadline = time.time() + 30
+        parked = False
+        while time.time() < deadline:
+            in_progress = int(
+                node.query(
+                    f"SELECT count() FROM system.s3queue_metadata_cache "
+                    f"WHERE zookeeper_path ilike '%{table}%' "
+                    f"AND status = 'Processing' AND rows_processed > 0"
+                )
+            )
+            if in_progress >= 1:
+                parked = True
+                break
+            time.sleep(0.1)
+        assert parked, "sleep failpoint did not park the direct SELECT mid-read"
+        node.query(f"SYSTEM CANCEL {table}")
+    finally:
+        reader.join(timeout=60)
+        node.query("SYSTEM DISABLE FAILPOINT object_storage_queue_sleep_in_generate")
+
+    # CANCEL must abort the read even though the read would not have committed anything.
+    assert result.get("error"), (
+        "SYSTEM CANCEL during a commit_on_select=0 direct SELECT must abort it, but the read completed"
+    )
+
+    # The abort must not corrupt the queue state: a fresh read still sees the whole file.
+    reread = 0
+    for _ in range(30):
+        reread = int(node.query(select))
+        if reread == rows:
+            break
+        time.sleep(1)
+    assert reread == rows, (
+        f"the file must stay fully readable after the aborted SELECT: got {reread}, expected {rows}"
+    )
+
+
 def test_stopped_state_does_not_persist_across_restart(started_cluster):
     # The STOP state lives in in-memory action locks, not in on-disk metadata, so it does not survive
     # a server restart: a STOPped table resumes consuming on its own after the node restarts, with no

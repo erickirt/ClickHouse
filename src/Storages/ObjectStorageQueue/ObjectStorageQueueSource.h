@@ -184,6 +184,7 @@ public:
         const StorageID & storage_id_,
         LoggerPtr log_,
         bool commit_once_processed_,
+        bool is_direct_select_,
         bool add_deduplication_info_,
         bool is_deduplication_v2_,
         IStreamingStorage & streaming_storage_);
@@ -259,6 +260,7 @@ private:
     const std::shared_ptr<ObjectStorageQueueLog> system_queue_log;
     const StorageID storage_id;
     const bool commit_once_processed;
+    const bool is_direct_select;
     IStreamingStorage & streaming_storage;
     const UInt64 cancel_epoch;
     const bool add_deduplication_info;

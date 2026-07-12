@@ -190,6 +190,7 @@ private:
         size_t max_block_size,
         ContextPtr local_context,
         bool commit_once_processed,
+        bool is_direct_select,
         size_t max_processed_files_override = 0);
 
     /// Get number of dependent materialized views.

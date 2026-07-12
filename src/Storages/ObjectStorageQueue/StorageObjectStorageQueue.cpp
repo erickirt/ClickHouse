@@ -676,7 +676,8 @@ void ReadFromObjectStorageQueue::initializePipeline(QueryPipelineBuilder & pipel
             iterator,
             max_block_size,
             context,
-            commit_once_processed));
+            commit_once_processed,
+            /*is_direct_select=*/true));
 
     auto pipe = Pipe::unitePipes(std::move(pipes));
     if (pipe.empty())
@@ -697,6 +698,7 @@ std::shared_ptr<ObjectStorageQueueSource> StorageObjectStorageQueue::createSourc
     size_t max_block_size,
     ContextPtr local_context,
     bool commit_once_processed,
+    bool is_direct_select,
     size_t max_processed_files_override)
 {
     CommitSettings commit_settings_copy;
@@ -734,6 +736,7 @@ std::shared_ptr<ObjectStorageQueueSource> StorageObjectStorageQueue::createSourc
         getStorageID(),
         log,
         commit_once_processed,
+        is_direct_select,
         add_deduplication_info,
         is_deduplication_v2,
         *this);
@@ -960,6 +963,7 @@ bool StorageObjectStorageQueue::streamToViews(size_t streaming_tasks_index, UInt
                 DBMS_DEFAULT_BUFFER_SIZE,
                 queue_context,
                 /*commit_once_processed=*/false,
+                /*is_direct_select=*/false,
                 effective_max_files);
 
             pipes.emplace_back(source);

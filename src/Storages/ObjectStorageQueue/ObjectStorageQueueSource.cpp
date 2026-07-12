@@ -956,6 +956,7 @@ ObjectStorageQueueSource::ObjectStorageQueueSource(
     const StorageID & storage_id_,
     LoggerPtr log_,
     bool commit_once_processed_,
+    bool is_direct_select_,
     bool add_deduplication_info_,
     bool is_deduplication_v2_,
     IStreamingStorage & streaming_storage_)
@@ -980,6 +981,7 @@ ObjectStorageQueueSource::ObjectStorageQueueSource(
     , system_queue_log(system_queue_log_)
     , storage_id(storage_id_)
     , commit_once_processed(commit_once_processed_)
+    , is_direct_select(is_direct_select_)
     , streaming_storage(streaming_storage_)
     , cancel_epoch(streaming_storage_.currentCancelEpoch())
     , add_deduplication_info(add_deduplication_info_)
@@ -1034,7 +1036,7 @@ Chunk ObjectStorageQueueSource::generateImpl()
 {
     while (true)
     {
-        if (commit_once_processed && streaming_storage.isConsumeCancelRequested(cancel_epoch))
+        if (is_direct_select && streaming_storage.isConsumeCancelRequested(cancel_epoch))
             throw Exception(ErrorCodes::QUERY_WAS_CANCELLED, "Consumption aborted by SYSTEM STOP or SYSTEM CANCEL");
 
         if (isCancelled())
