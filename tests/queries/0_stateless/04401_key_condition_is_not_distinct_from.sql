@@ -177,6 +177,28 @@ SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE ifNul
 SELECT '--- coalesce(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE coalesce(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 
+-- Preserving NULL is necessary but NOT sufficient for the `isNull` atom reuse: the `FUNCTION_IS_NULL`
+-- evaluators ignore the monotonic chain, so the wrapper must also be TOTAL on the key domain. An
+-- overflow-checked conversion is NULL-preserving yet PARTIAL: `toDateTime(d)` on a `Date32` value
+-- outside the DateTime range raises VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE under
+-- `date_time_overflow_behavior = 'throw'`. Analyzing `isNull(toDateTime(d))` like `isNull(d)` would
+-- prune the out-of-range NON-NULL granule as always-false, so a scan that should raise silently
+-- returns rows instead. The `d32_null` key crosses the DateTime range: the `1900-01-01` granule (and
+-- the `2260-01-01` granule) overflow, the mid-range granule does not, and NULLs sort last.
+SET session_timezone = 'UTC';
+DROP TABLE IF EXISTS d32_null;
+CREATE TABLE d32_null (d Nullable(Date32)) ENGINE = MergeTree ORDER BY d
+    SETTINGS index_granularity = 8192, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, allow_nullable_key = 1, add_minmax_index_for_numeric_columns = 0;
+INSERT INTO d32_null SELECT toDate32('1900-01-01') FROM numbers(8192);
+INSERT INTO d32_null SELECT toDate32('2000-01-01') + number FROM numbers(8192);
+INSERT INTO d32_null SELECT NULL FROM numbers(100);
+OPTIMIZE TABLE d32_null FINAL;
+
+SELECT '--- isNull(toDateTime(d)) (overflow-checked, PARTIAL) does NOT prune, keeps all granules ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM d32_null WHERE isNull(toDateTime(d)) SETTINGS date_time_overflow_behavior = 'throw') WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 3/3%';
+SELECT '--- toDateTime(d) IS NOT DISTINCT FROM NULL (overflow-checked, PARTIAL) does NOT prune ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'throw') WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 3/3%';
+
 -- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
 -- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
 -- `startsWith(s, p)` (the gate is derived from `atom_map` in `predicateIsBooleanResult`).
@@ -254,6 +276,14 @@ SELECT 'touint32_ifnull_ndf_null', count() FROM pk_null WHERE toUInt32(ifNull(k,
 SELECT 'ifnull_nfb_ndf_null', count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL;
 SELECT 'coalesce_nfb_ndf_null', count() FROM pk_null WHERE coalesce(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL;
 SELECT 'ifnull_nfb_ndf_null_iproj', count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL SETTINGS optimize_use_implicit_projections = 1;
+-- Overflow-checked conversion (`toDateTime(Date32)` under 'throw') is PARTIAL: because the wrapper is
+-- not routed to the `isNull` atom, the out-of-range non-NULL granule is scanned and the query raises,
+-- exactly like a full scan (rather than being silently pruned to an always-false result).
+SELECT 'todatetime_isnull_throws' FROM d32_null WHERE isNull(toDateTime(d)) SETTINGS date_time_overflow_behavior = 'throw'; -- { serverError VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE }
+SELECT 'todatetime_ndf_null_throws' FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'throw'; -- { serverError VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE }
+-- Under 'ignore', `toDateTime` saturates instead of throwing, so the scan succeeds and the always-false
+-- predicate returns 0 (the wrapper still declines the atom, so no wrong NULL-granule prune).
+SELECT 'todatetime_ndf_null_ignore', count() FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'ignore';
 -- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
 SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
 SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;

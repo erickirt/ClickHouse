@@ -754,10 +754,36 @@ static bool functionPreservesNulls(const IFunctionBase & func)
     }
 }
 
-static bool monotonicChainPreservesNulls(const KeyCondition::MonotonicFunctionsChain & chain)
+/// Preserving NULL is necessary but not sufficient for reusing the `isNull` atom. The two
+/// `FUNCTION_IS_NULL` evaluators ignore `out.monotonic_functions_chain` entirely (see
+/// "No need to apply monotonic functions as nulls are kept"), so narrowing to the NULL granule and
+/// marking it exact-true silently assumes the wrapper is also TOTAL on the key domain: every non-NULL
+/// key value must stay defined. Overflow-checked conversions break this. `toDateTime(k)` on a
+/// `Date32` key under `date_time_overflow_behavior = 'throw'` is NULL-preserving, yet an out-of-range
+/// non-NULL value raises `VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE` instead of yielding a defined result.
+/// Analyzing `isNull(toDateTime(k))` like `isNull(k)` then prunes such a non-NULL granule as
+/// definitely-false, so a query that should have raised on scan returns a (wrong) result instead.
+///
+/// `canBeSafelyCast` is a conservative, type-level "no value of the source type overflows the target"
+/// test: when it holds the conversion cannot throw, so the step is total. When it does not hold we
+/// treat the step as partial and decline the reuse (falling back to a full scan is always correct).
+static bool functionIsTotalOnKeyDomain(const IFunctionBase & func)
+{
+    auto arg_type = getArgumentTypeOfMonotonicFunction(func);
+    if (!arg_type)
+        return false;
+
+    auto from_type = removeNullable(removeLowCardinality(arg_type));
+    auto to_type = removeNullable(removeLowCardinality(func.getResultType()));
+    return canBeSafelyCast(from_type, to_type);
+}
+
+/// A monotonic wrapper chain may be routed to the `isNull` atom only when every step both preserves
+/// NULL (maps NULL -> NULL) and is total on the key domain (never throws on a defined value).
+static bool monotonicChainSupportsNullAtom(const KeyCondition::MonotonicFunctionsChain & chain)
 {
     for (const auto & func : chain)
-        if (func && !functionPreservesNulls(*func))
+        if (func && (!functionPreservesNulls(*func) || !functionIsTotalOnKeyDomain(*func)))
             return false;
     return true;
 }
@@ -3876,10 +3902,12 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
             if ((func_name == "empty" || func_name == "notEmpty") && !isString(*key_expr_type))
                 return false;
 
-            /// The `isNull`/`isNotNull` atoms ignore the monotonic-functions chain (nulls are kept),
-            /// so a NULL-erasing wrapper (`ifNull`, `coalesce`, `assumeNotNull`) in the chain would make
-            /// e.g. `isNull(ifNull(k, 0))` analyzed like `isNull(k)` and wrongly match the NULL granule.
-            if ((func_name == "isNull" || func_name == "isNotNull") && !monotonicChainPreservesNulls(chain))
+            /// The `isNull`/`isNotNull` atoms ignore the monotonic-functions chain (nulls are kept), so
+            /// the chain must both preserve NULL and be total on the key domain. A NULL-erasing wrapper
+            /// (`ifNull(k, 0)`) or an overflow-checked conversion (`toDateTime(date32_k)` under
+            /// `date_time_overflow_behavior = 'throw'`) would otherwise make e.g. `isNull(wrapper(k))`
+            /// analyzed like `isNull(k)` and wrongly prune a granule the predicate does not cover.
+            if ((func_name == "isNull" || func_name == "isNotNull") && !monotonicChainSupportsNullAtom(chain))
                 return false;
         }
         else if (num_args == 2)
@@ -3942,11 +3970,13 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
                     if (key_column_num == static_cast<size_t>(-1))
                         throw Exception(ErrorCodes::LOGICAL_ERROR, "`key_column_num` wasn't initialized. It is a bug.");
 
-                    /// The `isNull` atom ignores the monotonic-functions chain (nulls are kept), so a
-                    /// NULL-erasing wrapper (`ifNull`, `coalesce`, `assumeNotNull`) must not be routed
-                    /// here: `ifNull(k, 0) IS NOT DISTINCT FROM NULL` is always false, but `isNull(k)`
-                    /// would match the NULL granule and mark it exact-true (wrong results).
-                    if (!monotonicChainPreservesNulls(chain))
+                    /// The `isNull` atom ignores the monotonic-functions chain (nulls are kept), so the
+                    /// chain must preserve NULL AND be total on the key domain to be routed here. A
+                    /// NULL-erasing wrapper (`ifNull(k, 0) IS NOT DISTINCT FROM NULL` is always false)
+                    /// or an overflow-checked conversion (`toDateTime(date32_k)` under
+                    /// `date_time_overflow_behavior = 'throw'`) would otherwise be analyzed like
+                    /// `isNull(k)` and prune a granule the predicate does not cover (wrong results).
+                    if (!monotonicChainSupportsNullAtom(chain))
                         return false;
 
                     out.key_columns.push_back(key_column_num);
