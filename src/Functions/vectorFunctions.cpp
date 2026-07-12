@@ -2598,8 +2598,8 @@ SELECT dotProductTransposed(vec, array(1, 2), 16) FROM qbit;
     const auto quantized_used_dims_argument = FunctionDocumentation::Argument{
         "used_dims",
         "Optional. Number of leading dimensions to read, for a reduced-dimension (Matryoshka) search on a strided `QBit`. Must be a "
-        "multiple of the QBit stride not exceeding its dimension, and the reference vector must have exactly this many elements. Only "
-        "the stride groups covering these dimensions are read.",
+        "multiple of the QBit stride not exceeding its dimension, and the reference vector must have at least this many elements (any "
+        "extra trailing elements are ignored). Only the stride groups covering these dimensions are read.",
         {"UInt"}};
     const FunctionDocumentation::IntroducedIn introduced_in_transposed_quantized = {26, 7};
 

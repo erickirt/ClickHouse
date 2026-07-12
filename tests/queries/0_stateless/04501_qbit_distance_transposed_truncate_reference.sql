@@ -96,3 +96,75 @@ SELECT id, round(dotProductTransposed(vec, ref, 32), 4) FROM qbit_plain ORDER BY
 DROP TABLE qbit_strided;
 DROP TABLE qbit_plain;
 DROP TABLE qbit_i8;
+
+-- The quantized transposed distance functions (L2DistanceTransposedQuantized, cosineDistanceTransposedQuantized,
+-- dotProductTransposedQuantized) share the same reference-vector handling, so an oversized reference — the full-precision Float32
+-- query or a quantized Array(Int8) query — is truncated to `used_dims` (or to the QBit dimension in the 3-argument form) as well.
+DROP TABLE IF EXISTS qbit_quant;
+DROP TABLE IF EXISTS qbit_quant_plain;
+CREATE TABLE qbit_quant (id UInt32, vec QBit(Int8, 16, 8)) ENGINE = Memory;
+INSERT INTO qbit_quant
+SELECT id, codes::QBit(Int8, 16, 8)
+FROM
+(
+    SELECT 1 AS id, arrayMap(x -> quantizeBFloat16ToInt8(toBFloat16(x)), arrayMap(i -> (i - 8) / 10, range(16))) AS codes
+    UNION ALL
+    SELECT 2 AS id, arrayMap(x -> quantizeBFloat16ToInt8(toBFloat16(x)), arrayMap(i -> (8 - i) / 10, range(16))) AS codes
+)
+ORDER BY id;
+
+SELECT 'quantized strided 4-arg used_dims=8, const Float32 ref (L2, cosine, dot)';
+WITH arrayMap(i -> (i - 4) / 10, range(20))::Array(Float32) AS full
+SELECT
+    min(L2DistanceTransposedQuantized(vec, full, 8, 8) = L2DistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8)),
+    min(cosineDistanceTransposedQuantized(vec, full, 8, 8) = cosineDistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8)),
+    min(dotProductTransposedQuantized(vec, full, 8, 8) = dotProductTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8))
+FROM qbit_quant;
+
+SELECT 'quantized strided 4-arg used_dims=8, non-const Float32 ref (L2, cosine, dot)';
+WITH materialize(arrayMap(i -> (i - 4) / 10, range(20))::Array(Float32)) AS full
+SELECT
+    min(L2DistanceTransposedQuantized(vec, full, 8, 8) = L2DistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8)),
+    min(cosineDistanceTransposedQuantized(vec, full, 8, 8) = cosineDistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8)),
+    min(dotProductTransposedQuantized(vec, full, 8, 8) = dotProductTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8))
+FROM qbit_quant;
+
+SELECT 'quantized strided 4-arg used_dims=8, const Array(Int8) ref (L2, cosine, dot)';
+WITH arrayMap(x -> quantizeBFloat16ToInt8(toBFloat16(x)), arrayMap(i -> (i - 10) / 10, range(20))) AS full_codes
+SELECT
+    min(L2DistanceTransposedQuantized(vec, full_codes, 8, 8) = L2DistanceTransposedQuantized(vec, arraySlice(full_codes, 1, 8), 8, 8)),
+    min(cosineDistanceTransposedQuantized(vec, full_codes, 8, 8) = cosineDistanceTransposedQuantized(vec, arraySlice(full_codes, 1, 8), 8, 8)),
+    min(dotProductTransposedQuantized(vec, full_codes, 8, 8) = dotProductTransposedQuantized(vec, arraySlice(full_codes, 1, 8), 8, 8))
+FROM qbit_quant;
+
+SET optimize_qbit_distance_function_reads = 0;
+SELECT 'quantized strided 4-arg used_dims=8, optimization off (L2, cosine, dot)';
+WITH arrayMap(i -> (i - 4) / 10, range(20))::Array(Float32) AS full
+SELECT
+    min(L2DistanceTransposedQuantized(vec, full, 8, 8) = L2DistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8)),
+    min(cosineDistanceTransposedQuantized(vec, full, 8, 8) = cosineDistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8)),
+    min(dotProductTransposedQuantized(vec, full, 8, 8) = dotProductTransposedQuantized(vec, arraySlice(full, 1, 8), 8, 8))
+FROM qbit_quant;
+SET optimize_qbit_distance_function_reads = 1;
+
+CREATE TABLE qbit_quant_plain (id UInt32, vec QBit(Int8, 8)) ENGINE = Memory;
+INSERT INTO qbit_quant_plain
+SELECT id, codes::QBit(Int8, 8)
+FROM
+(
+    SELECT 1 AS id, arrayMap(x -> quantizeBFloat16ToInt8(toBFloat16(x)), arrayMap(i -> (i - 4) / 10, range(8))) AS codes
+    UNION ALL
+    SELECT 2 AS id, arrayMap(x -> quantizeBFloat16ToInt8(toBFloat16(x)), arrayMap(i -> (4 - i) / 10, range(8))) AS codes
+)
+ORDER BY id;
+
+SELECT 'quantized nonstrided 3-arg, const Float32 ref (L2, cosine, dot)';
+WITH arrayMap(i -> (i - 4) / 10, range(20))::Array(Float32) AS full
+SELECT
+    min(L2DistanceTransposedQuantized(vec, full, 8) = L2DistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8)),
+    min(cosineDistanceTransposedQuantized(vec, full, 8) = cosineDistanceTransposedQuantized(vec, arraySlice(full, 1, 8), 8)),
+    min(dotProductTransposedQuantized(vec, full, 8) = dotProductTransposedQuantized(vec, arraySlice(full, 1, 8), 8))
+FROM qbit_quant_plain;
+
+DROP TABLE qbit_quant;
+DROP TABLE qbit_quant_plain;

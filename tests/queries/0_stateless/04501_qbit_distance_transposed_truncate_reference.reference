@@ -18,3 +18,13 @@ concrete: strided (first 8 dims, ref truncated) dot product
 concrete: non-strided baseline over the same 8 dims
 1	204
 2	408
+quantized strided 4-arg used_dims=8, const Float32 ref (L2, cosine, dot)
+1	1	1
+quantized strided 4-arg used_dims=8, non-const Float32 ref (L2, cosine, dot)
+1	1	1
+quantized strided 4-arg used_dims=8, const Array(Int8) ref (L2, cosine, dot)
+1	1	1
+quantized strided 4-arg used_dims=8, optimization off (L2, cosine, dot)
+1	1	1
+quantized nonstrided 3-arg, const Float32 ref (L2, cosine, dot)
+1	1	1
