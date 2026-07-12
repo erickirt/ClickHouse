@@ -229,11 +229,12 @@ static std::shared_ptr<FunctionNode> getFlattenedLogicalExpression(const Functio
 
 /// Helper types and functions for comparison chain pruning in `tryOptimizeAndCompareNotEqualsChain`.
 
-/// Comparison pruning groups operands by structural equality of the compared expression, which is
-/// only sound for deterministic expressions. Two syntactically identical non-deterministic calls
-/// (e.g. `rand() % 2`) are independent evaluations and may differ for the same row, so folding or
-/// merging them (e.g. `rand() % 2 < 1 AND rand() % 2 >= 1` → false) would be incorrect. Such
-/// expressions must be excluded from pruning, conflict detection and NOT IN conversion.
+/// Comparison pruning groups operands by structural equality of the compared expression. By the
+/// documented common subexpression elimination rule, syntactically identical expressions in a query
+/// are considered to have identical values and executed once, so grouping several occurrences of a
+/// non-deterministic expression such as `rand() % 2` would in fact be well-defined. Even so, we
+/// conservatively exclude any operand containing a non-deterministic function from pruning, conflict
+/// detection and NOT IN conversion, rather than letting these rewrites depend on that folding.
 static bool hasNonDeterministicFunction(const QueryTreeNodePtr & node)
 {
     std::vector<const IQueryTreeNode *> nodes_to_process;
@@ -1895,10 +1896,11 @@ private:
                 continue;
             }
 
-            /// Non-deterministic expressions must not be pruned/merged: structurally identical
-            /// occurrences (e.g. `rand() % 2`) are independent evaluations, so folding them
-            /// (e.g. `rand() % 2 < 1 AND rand() % 2 >= 1` → false) or merging notEquals into NOT IN
-            /// would change results. Keep such operands as-is.
+            /// Conservatively skip operands containing a non-deterministic function: while common
+            /// subexpression elimination means structurally identical occurrences (e.g. `rand() % 2`)
+            /// share a single value, we do not want pruning, folding (e.g. `rand() % 2 < 1 AND
+            /// rand() % 2 >= 1` → false) or merging notEquals into NOT IN to rely on that. Keep such
+            /// operands as-is.
             if (hasNonDeterministicFunction(expression))
             {
                 all_operands.emplace_back(argument_index, argument);
@@ -2140,10 +2142,12 @@ private:
             const auto & lhs = function_arguments[0];
             const auto & rhs = function_arguments[1];
 
-            /// Skip comparisons whose operands contain a non-deterministic function: transitive
-            /// inference would treat independent evaluations (e.g. two `rand()` calls) as the same
-            /// value and could infer false facts (e.g. from `rand() % 2 = number % 2 AND rand() % 2 = 1`
-            /// it would derive `number % 2 = 1`), which the conflict detector then folds away.
+            /// Conservatively skip comparisons whose operands contain a non-deterministic function.
+            /// Common subexpression elimination makes structurally identical occurrences (e.g. two
+            /// `rand() % 2`) share one value, so transitive inference over them (e.g. deriving
+            /// `number % 2 = 1` from `rand() % 2 = number % 2 AND rand() % 2 = 1`) would be consistent
+            /// with that; still, we do not want the inference, or the conflict detection that consumes
+            /// it, to depend on that folding.
             if (hasNonDeterministicFunction(lhs) || hasNonDeterministicFunction(rhs))
                 continue;
 
