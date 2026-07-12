@@ -52,25 +52,44 @@ ConnectionEstablisher::ConnectionEstablisher(
 void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::string & fail_message)
 {
     /// A pooled connection is handed out without pinging it first - a ping would add an unnecessary
-    /// Ping-Pong round trip when the connection is still alive. If a connection that we did manage to
-    /// establish then fails its very first request, it was most likely closed by the server while it
-    /// was idle in the pool. In the synchronous case we reconnect once and retry, so that a single
-    /// available replica is not dropped just because its pooled connection went stale. In the
-    /// asynchronous case we do not retry here - stale connections are handled by retrying the next
-    /// replica (see ConnectionPoolWithFailover).
+    /// Ping-Pong round trip when the connection is still alive. A connection that the server has
+    /// closed while it was idle in the pool is detected by a zero-timeout poll and recovered by
+    /// reconnecting (see Connection::forceConnected). If a pooled connection nevertheless fails its
+    /// very first request (e.g. the server went away without closing it), in the synchronous case we
+    /// reconnect once and retry, so that a single available replica is not dropped just because its
+    /// pooled connection went stale. In the asynchronous case we do not retry here - stale
+    /// connections are handled by retrying the next replica (see ConnectionPoolWithFailover).
     const bool can_reconnect = !async_callback;
+
+    /// Whether the connection was taken from the pool already established. Only such a connection
+    /// can be stale; a failure of a freshly established one is a genuine replica problem, and
+    /// retrying it is left to the caller (with its error accounting).
+    bool had_pooled_connection = false;
 
     auto try_establish = [&]()
     {
         ProfileEvents::increment(ProfileEvents::DistributedConnectionTries);
-        result.entry = pool->get(*timeouts, settings);
+
+        had_pooled_connection = false;
+        result.entry = pool->getUnchecked(*timeouts, settings);
+        had_pooled_connection = result.entry->isConnected();
+
         AsyncCallbackSetter<Connection> async_setter(&*result.entry, std::move(async_callback));
 
-        /// For tests: simulate a connection that the server has closed while it was idle in the pool,
+        /// For tests: simulate a pooled connection that the server has closed while it was idle,
         /// so that the reconnect-and-retry path below is exercised.
         fiu_do_on(FailPoints::connection_stale_on_establish, {
+            had_pooled_connection = true;
             throw Exception(ErrorCodes::NETWORK_ERROR, "Injected stale connection failure while establishing the connection");
         });
+
+        /// Establish the connection, or revalidate a pooled one, under the async callback: with the
+        /// callback installed, Connection::connect uses a non-blocking connect and yields on it, so
+        /// a caller that multiplexes several connection attempts (e.g. hedged connections) can
+        /// preempt a slow connect or handshake and switch to another replica. `result.entry` is
+        /// assigned before connecting, so the connection being established is visible to the
+        /// multi-address timeout handling of ConnectionEstablisherAsync.
+        result.entry->forceConnected(*timeouts);
 
         UInt64 server_revision = 0;
         if (table_to_check)
@@ -160,10 +179,7 @@ void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::
 
             fail_message = getCurrentExceptionMessage(/* with_stacktrace = */ false);
 
-            /// Whether we managed to take an already established connection from the pool before the
-            /// failure. If we could not even connect, there is nothing stale to reconnect.
-            const bool had_connection = !result.entry.isNull();
-            if (had_connection)
+            if (!result.entry.isNull())
             {
                 result.entry->disconnect();
                 result.reset();
@@ -172,7 +188,7 @@ void ConnectionEstablisher::run(ConnectionEstablisher::TryResult & result, std::
             /// Reconnect and retry once if a previously established (pooled) connection went stale.
             /// The failed request is safe to repeat: it is either a read-only status request, or the
             /// connection was closed before the request reached a live server.
-            if (can_reconnect && tries == 0 && had_connection)
+            if (can_reconnect && tries == 0 && had_pooled_connection)
             {
                 ProfileEvents::increment(ProfileEvents::DistributedConnectionReconnectCount);
                 continue;

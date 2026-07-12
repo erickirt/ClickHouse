@@ -146,9 +146,14 @@ ConnectionPoolFactory & ConnectionPoolFactory::instance()
 
 IConnectionPool::Entry ConnectionPool::get(const DB::ConnectionTimeouts& timeouts, const DB::Settings& settings)
 {
-    Entry entry = Base::get(settings[Setting::connection_pool_max_wait_ms].totalMilliseconds());
+    Entry entry = getUnchecked(timeouts, settings);
     entry->forceConnected(timeouts);
     return entry;
+}
+
+IConnectionPool::Entry ConnectionPool::getUnchecked(const DB::ConnectionTimeouts&, const DB::Settings& settings)
+{
+    return Base::get(settings[Setting::connection_pool_max_wait_ms].totalMilliseconds());
 }
 
 }

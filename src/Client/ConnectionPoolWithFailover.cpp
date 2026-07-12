@@ -92,6 +92,11 @@ IConnectionPool::Entry ConnectionPoolWithFailover::get(const ConnectionTimeouts 
     return Base::get(max_ignored_errors, fallback_to_stale_replicas, try_get_entry, get_priority);
 }
 
+IConnectionPool::Entry ConnectionPoolWithFailover::getUnchecked(const ConnectionTimeouts & timeouts, const Settings & settings)
+{
+    return get(timeouts, settings);
+}
+
 ConnectionPoolWithFailover::Status ConnectionPoolWithFailover::getStatus() const
 {
     const auto [states, pools, error_decrease_time] = getPoolExtendedStates();

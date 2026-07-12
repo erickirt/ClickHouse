@@ -26,9 +26,10 @@ public:
     /// Establish connection and save it in result, write possible exception message in fail_message.
     /// The connection is returned from the connection pool and it can be stale (the server may have
     /// closed it while it was idle). The pooled connection is not pinged before use: pinging it adds
-    /// an unnecessary Ping-Pong round trip when the connection is still alive. A stale connection is
-    /// handled by retrying - either here (a connection that fails its first request is reconnected
-    /// once) or at a higher level (ConnectionPoolWithFailover retries the next replica).
+    /// an unnecessary Ping-Pong round trip when the connection is still alive. Instead, a stale
+    /// connection is detected by a zero-timeout poll (see Connection::forceConnected) or, failing
+    /// that, by retrying - either here (a pooled connection that fails its first request is
+    /// reconnected once) or at a higher level (ConnectionPoolWithFailover retries the next replica).
     void run(TryResult & result, std::string & fail_message);
 
     /// Set async callback that will be called when reading from socket blocks.
@@ -74,7 +75,6 @@ public:
     TryResult getResult() const { return result; }
 
     const std::string & getFailMessage() const { return fail_message; }
-
 
 private:
     bool checkBeforeTaskResume() override;
