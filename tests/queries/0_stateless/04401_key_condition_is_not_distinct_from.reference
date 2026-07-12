@@ -80,6 +80,12 @@
 0
 --- isNull(intDiv(k, 2)) (non-zero divisor, total) DOES prune to the NULL granule ---
 1
+--- isNull(intDiv(k, -1)) on Int8 (min / -1 overflows, PARTIAL) does NOT prune, keeps all granules ---
+0
+--- intDiv(k, -1) IS NOT DISTINCT FROM NULL on Int8 (PARTIAL) does NOT prune ---
+0
+--- isNull(intDiv(k, -1)) on Int64 (constant-divisor wrap, total) DOES prune to the NULL granule ---
+1
 --- startsWith(s, p) IS TRUE prunes via primary key like the bare atom ---
 1
 --- bare startsWith(s, p) prunes via primary key (reference) ---
@@ -132,6 +138,7 @@ coalesce_nfb_ndf_null	0
 ifnull_nfb_ndf_null_iproj	0
 todatetime_ndf_null_ignore	100
 intdiv2_ndf_null	1
+intdivm1_i64_ndf_null	1
 ifnull_bare	1
 ifnull_istrue	1
 coalesce_istrue	1
