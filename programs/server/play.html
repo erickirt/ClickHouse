@@ -3700,9 +3700,6 @@ function markBootstrapDirty(e) {
     bootstrap_dirty = true;
 }
 
-/// Start of the last query
-let last_query_start = 0;
-
 const current_url = new URL(window.location);
 const opened_locally = location.protocol == 'file:';
 
@@ -4806,7 +4803,9 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
 async function postSingle(tab, posted_request_num, query, history_query_text, params_restore_pending)
 {
     const paramValuesSnapshot = resolveRunParams(params_restore_pending);
-    last_query_start = performance.now();
+    /// Per-run start time: tabs execute concurrently, so a shared global would be overwritten
+    /// by whichever tab launched last and misreport the elapsed time of the others.
+    const query_start = performance.now();
     const el = tab.resultEl;
     const active = () => tab.id === activeTabId;
 
@@ -4849,7 +4848,7 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
                 format: result.format,
                 ok: result.response_ok,
                 data: result.reply.length > 100000 ? null : result.reply,
-                elapsed_ns: 1e6 * (performance.now() - last_query_start),
+                elapsed_ns: 1e6 * (performance.now() - query_start),
                 params: paramValuesSnapshot,
             }, undefined, tab);
         }
@@ -4875,7 +4874,7 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     tab.downloadParams = paramValuesSnapshot;
 
     if (result.is_raw || result.is_image) {
-        el.elapsedNs = 1e6 * (performance.now() - last_query_start);
+        el.elapsedNs = 1e6 * (performance.now() - query_start);
     }
     tab.finalStats = { rowCount: el.rowCount, elapsedNs: el.elapsedNs, incomplete: el.incompleteResult };
 
@@ -4920,7 +4919,8 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
 async function postMulti(tab, posted_request_num, parsed, params_restore_pending, editorText)
 {
     const paramValuesSnapshot = resolveRunParams(params_restore_pending);
-    last_query_start = performance.now();
+    /// Per-run start time, as in `postSingle`: concurrent tabs must not share it.
+    const query_start = performance.now();
     const active = () => tab.id === activeTabId;
 
     tab.downloadVisible = false;
@@ -5053,7 +5053,7 @@ async function postMulti(tab, posted_request_num, parsed, params_restore_pending
     tab.failed = had_error;
     tab.finalStats = {
         rowCount: total_rows,
-        elapsedNs: max_elapsed_ns || 1e6 * (performance.now() - last_query_start),
+        elapsedNs: max_elapsed_ns || 1e6 * (performance.now() - query_start),
         incomplete: any_incomplete,
     };
 
