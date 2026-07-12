@@ -707,157 +707,22 @@ const KeyCondition::AtomMap KeyCondition::atom_map
         }
 };
 
-DataTypePtr getArgumentTypeOfMonotonicFunction(const IFunctionBase & func);
-
-/// The `isNull`/`isNotNull` atoms deliberately ignore the key monotonic-functions chain ("nulls are
-/// kept"): they narrow a Nullable index to the NULL granule as if the wrapper were absent. That is only
-/// sound when EVERY function in the chain preserves NULL (maps a NULL input to a NULL output). Some
-/// monotonic wrappers do not: `ifNull(k, 0)` / `coalesce(k, 0)` / `assumeNotNull(k)` map NULL to a
-/// non-NULL value, and a `CAST(k, 'UInt32')` to a non-Nullable type turns a NULL row into a thrown
-/// "Cannot convert NULL value" (or, on the pruning path, silently drops it). For such wrappers
-/// `isNull(wrapper(k))` is actually always false, but reusing the bare `isNull` atom would match the
-/// NULL granule and mark it exact-true -> exact-count / implicit-projection paths count those rows for
-/// an always-false predicate (wrong results). When any chain step erases NULL we must decline the null
-/// atom and fall back to a full scan.
-///
-/// The test is BEHAVIORAL, not a name allowlist and not a result-type proxy: we execute the wrapper on
-/// a single NULL of its key-argument type and check whether the output is actually NULL. Deciding from
-/// the result *type*'s nullability is unsound because `ifNull(k, CAST(0, 'Nullable(UInt32)'))` and
-/// `coalesce(k, CAST(0, 'Nullable(UInt32)'))` keep a Nullable result type yet always map NULL to 0.
-/// Running the function is the only criterion that is correct for every monotonic-chain function:
-///   - `toUInt32(Nullable(UInt32))`      -> NULL in yields NULL out          -> preserves;
-///   - `CAST(k, 'UInt32')`               -> throws on NULL                   -> does not preserve;
-///   - `ifNull` / `coalesce` / `assumeNotNull` (any fallback) -> non-NULL out -> do not preserve.
-static bool functionPreservesNulls(const IFunctionBase & func)
-{
-    auto key_arg_type = getArgumentTypeOfMonotonicFunction(func);
-
-    /// If the wrapper does not even receive a Nullable value at this point in the chain, there is no
-    /// NULL for it to erase here, so it trivially preserves NULLs.
-    if (!key_arg_type || !isNullableOrLowCardinalityNullable(key_arg_type))
-        return true;
-
-    try
-    {
-        /// `func.execute` takes only the non-const (key) argument(s); a `FunctionWithOptionalConstArg`
-        /// splices its bound constant back in, so `ifNull` / `coalesce` see their real fallback.
-        ColumnsWithTypeAndName args{{key_arg_type->createColumnConst(1, Null{}), key_arg_type, "x"}};
-        auto result = func.execute(args, func.getResultType(), 1, /* dry_run = */ false);
-        result = result->convertToFullColumnIfConst();
-        return !result->empty() && result->isNullAt(0);
-    }
-    catch (...)
-    {
-        /// Ok to swallow here: a wrapper that throws on a NULL input (e.g. CAST to a non-Nullable
-        /// type) cannot preserve NULLs, which is exactly what we report by returning false.
-        return false;
-    }
-}
-
-/// Collect boundary values of a native integer key domain (min, max, and the near-zero points -1/0/1
-/// where arithmetic wrappers tend to raise) as `Field`s. Returns nullopt for any other type, where the
-/// caller falls back to a conservative type-level check. Only the native integer widths are enumerated:
-/// they are the domains where wrappers like `intDiv` have value-dependent overflow that no type-level
-/// or monotonicity heuristic sees.
-template <typename T>
-static std::vector<Field> makeIntegerExtremes()
-{
-    std::vector<Field> extremes;
-    extremes.push_back(Field(NearestFieldType<T>(std::numeric_limits<T>::min())));
-    extremes.push_back(Field(NearestFieldType<T>(std::numeric_limits<T>::max())));
-    if constexpr (is_signed_v<T>)
-        extremes.push_back(Field(NearestFieldType<T>(-1)));
-    extremes.push_back(Field(NearestFieldType<T>(0)));
-    extremes.push_back(Field(NearestFieldType<T>(1)));
-    return extremes;
-}
-
-static std::optional<std::vector<Field>> integerDomainExtremes(const DataTypePtr & type)
-{
-    switch (type->getTypeId())
-    {
-        case TypeIndex::UInt8:   return makeIntegerExtremes<UInt8>();
-        case TypeIndex::UInt16:  return makeIntegerExtremes<UInt16>();
-        case TypeIndex::UInt32:  return makeIntegerExtremes<UInt32>();
-        case TypeIndex::UInt64:  return makeIntegerExtremes<UInt64>();
-        case TypeIndex::UInt128: return makeIntegerExtremes<UInt128>();
-        case TypeIndex::UInt256: return makeIntegerExtremes<UInt256>();
-        case TypeIndex::Int8:    return makeIntegerExtremes<Int8>();
-        case TypeIndex::Int16:   return makeIntegerExtremes<Int16>();
-        case TypeIndex::Int32:   return makeIntegerExtremes<Int32>();
-        case TypeIndex::Int64:   return makeIntegerExtremes<Int64>();
-        case TypeIndex::Int128:  return makeIntegerExtremes<Int128>();
-        case TypeIndex::Int256:  return makeIntegerExtremes<Int256>();
-        default:                 return std::nullopt;
-    }
-}
-
-/// Preserving NULL is necessary but not sufficient for reusing the `isNull` atom. The two
-/// `FUNCTION_IS_NULL` evaluators ignore `out.monotonic_functions_chain` entirely (see
-/// "No need to apply monotonic functions as nulls are kept"), so narrowing to the NULL granule and
-/// marking it exact-true silently assumes the wrapper is TOTAL on the key domain: every non-NULL key
-/// value must stay defined. A wrapper can be partial in ways no type-level or monotonicity heuristic
-/// sees, and whether it actually throws even depends on the concrete execution path chosen:
-///   - `toDateTime(k)` on a `Date32` key under `date_time_overflow_behavior = 'throw'` raises
-///     `VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE` on an out-of-range value (conversion overflow);
-///   - `intDiv(k, 0)` raises `ILLEGAL_DIVISION` on every row;
-///   - `intDiv(k, -1)` raises `Int_MIN / -1` overflow, but ONLY for key widths without the
-///     constant-divisor specialization (`Int8`/`Int16`/`Int128`); `Int32`/`Int64` take
-///     `DivideIntegralByConstantImpl` which deliberately wraps `min / -1` and never throws.
-/// A monotonicity check cannot capture any of these: `intDiv(k, -1)` reports `is_always_monotonic`.
-///
-/// So probe the boundary directly (as the review suggested): run the wrapper on the extreme values of
-/// its integer key domain via the same `execute` path a scan uses. If it throws on any of them the
-/// wrapper is not total and we decline. For non-integer key domains, where enumerating extremes is not
-/// meaningful, fall back to the conservative type-level `canBeSafelyCast` test (this still declines
-/// `toDateTime(Date32)`, whose result type differs from its argument type). Both paths are
-/// conservative: when unsure we decline, and declining only forces a full scan, which is always
-/// correct.
-static bool functionIsTotalOnKeyDomain(const IFunctionBase & func)
-{
-    auto arg_type = getArgumentTypeOfMonotonicFunction(func);
-    if (!arg_type)
-        return false;
-
-    auto from_type = removeNullable(removeLowCardinality(arg_type));
-
-    if (auto extremes = integerDomainExtremes(from_type))
-    {
-        /// `func.execute` takes only the non-const (key) argument(s); a `FunctionWithOptionalConstArg`
-        /// splices its bound constant back in, so `intDiv(k, c)` sees its real divisor. Feed all
-        /// boundary values in a single column so the vectorized (constant-divisor) path is exercised
-        /// exactly as it is during a scan.
-        auto column = from_type->createColumn();
-        for (const auto & field : *extremes)
-            column->insert(field);
-        try
-        {
-            ColumnsWithTypeAndName args{{std::move(column), from_type, "x"}};
-            func.execute(args, func.getResultType(), extremes->size(), /* dry_run = */ false);
-            return true;
-        }
-        catch (...)
-        {
-            /// Ok to swallow here: a wrapper that raises on a defined boundary value (e.g.
-            /// `intDiv(k, 0)`, or `intDiv(k, -1)` on an `Int8`/`Int16`/`Int128` key) is not total,
-            /// which is exactly what we report by returning false.
-            return false;
-        }
-    }
-
-    /// Non-integer key domain: conservative type-level fallback.
-    auto to_type = removeNullable(removeLowCardinality(func.getResultType()));
-    return canBeSafelyCast(from_type, to_type);
-}
-
-/// A monotonic wrapper chain may be routed to the `isNull` atom only when every step both preserves
-/// NULL (maps NULL -> NULL) and is total on the key domain (never throws on a defined value).
+/// The `isNull`/`isNotNull` atoms (and the `key IS NOT DISTINCT FROM NULL` branch that reuses them)
+/// deliberately ignore the key monotonic-functions chain ("nulls are kept"): they narrow a Nullable
+/// index to the NULL granule as if the wrapper were absent. That is only sound for a BARE key. A
+/// monotonic wrapper can change which rows are NULL or whether the predicate is even defined:
+///   - `ifNull(k, 0)` / `coalesce(k, 0)` / `assumeNotNull(k)` map NULL to a non-NULL value, so
+///     `isNull(wrapper(k))` is actually always false;
+///   - `CAST(k, 'UInt32')` throws on a NULL row;
+///   - `toDateTime(k)` on a `Date32` key or `intDiv(k, c)` throw on out-of-range / illegal non-NULL
+///     values, so the predicate should raise on some granules rather than be pruned.
+/// Reusing the bare `isNull` atom in any of these cases would match the NULL granule and mark it
+/// exact-true, so exact-count / implicit-projection paths return wrong results. We therefore reuse the
+/// null atom only when the key is not wrapped at all; a wrapped key falls back to a full scan, which is
+/// always correct.
 static bool monotonicChainSupportsNullAtom(const KeyCondition::MonotonicFunctionsChain & chain)
 {
-    for (const auto & func : chain)
-        if (func && (!functionPreservesNulls(*func) || !functionIsTotalOnKeyDomain(*func)))
-            return false;
-    return true;
+    return chain.empty();
 }
 
 /// Functions with range inversion cannot be relaxed. It will become stricter instead.
@@ -3975,10 +3840,9 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
                 return false;
 
             /// The `isNull`/`isNotNull` atoms ignore the monotonic-functions chain (nulls are kept), so
-            /// the chain must both preserve NULL and be total on the key domain. A NULL-erasing wrapper
-            /// (`ifNull(k, 0)`) or an overflow-checked conversion (`toDateTime(date32_k)` under
-            /// `date_time_overflow_behavior = 'throw'`) would otherwise make e.g. `isNull(wrapper(k))`
-            /// analyzed like `isNull(k)` and wrongly prune a granule the predicate does not cover.
+            /// they are sound only for a bare key. A wrapped key (`isNull(ifNull(k, 0))`,
+            /// `isNull(toDateTime(date32_k))`, ...) would otherwise be analyzed like `isNull(k)` and
+            /// wrongly prune a granule the predicate does not cover; decline and fall back to a scan.
             if ((func_name == "isNull" || func_name == "isNotNull") && !monotonicChainSupportsNullAtom(chain))
                 return false;
         }
@@ -4042,12 +3906,11 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
                     if (key_column_num == static_cast<size_t>(-1))
                         throw Exception(ErrorCodes::LOGICAL_ERROR, "`key_column_num` wasn't initialized. It is a bug.");
 
-                    /// The `isNull` atom ignores the monotonic-functions chain (nulls are kept), so the
-                    /// chain must preserve NULL AND be total on the key domain to be routed here. A
-                    /// NULL-erasing wrapper (`ifNull(k, 0) IS NOT DISTINCT FROM NULL` is always false)
-                    /// or an overflow-checked conversion (`toDateTime(date32_k)` under
-                    /// `date_time_overflow_behavior = 'throw'`) would otherwise be analyzed like
-                    /// `isNull(k)` and prune a granule the predicate does not cover (wrong results).
+                    /// The `isNull` atom ignores the monotonic-functions chain (nulls are kept), so it is
+                    /// sound only for a bare key. A wrapped key (`ifNull(k, 0) IS NOT DISTINCT FROM NULL`
+                    /// is always false; `toDateTime(date32_k) IS NOT DISTINCT FROM NULL` may raise) would
+                    /// otherwise be analyzed like `isNull(k)` and prune a granule the predicate does not
+                    /// cover (wrong results); decline and fall back to a scan.
                     if (!monotonicChainSupportsNullAtom(chain))
                         return false;
 

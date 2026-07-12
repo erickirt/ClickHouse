@@ -137,11 +137,14 @@ SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE N
 SELECT '--- bare IS NULL prunes to the NULL granule (reference for the above) ---';
 SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE k IS NULL) WHERE explain ILIKE '%Granules: 1/%';
 
--- A NULL-erasing wrapper (`ifNull`, `coalesce`, `assumeNotNull`) around the key must NOT be routed to
--- the `isNull` atom: `ifNull(k, 0) IS NOT DISTINCT FROM NULL` is always false (`ifNull(k, 0)` is never
--- NULL), but reusing `isNull(k)` would narrow the index to the NULL granule and mark it exact-true,
--- so exact-count / implicit-projection paths would count those rows for an always-false predicate.
--- It must fall back to a full scan (no `Granules: 1/` prune), under coalesce-rewrite on AND off.
+-- The `isNull` atom ignores the monotonic-functions chain (nulls are kept), so it is reused only for a
+-- bare Nullable key. Any monotonic wrapper around the key declines the atom and falls back to a full
+-- scan, which is always correct. A wrapper can be unsound for the atom in several ways: it can erase
+-- NULL (`ifNull` / `coalesce` / `assumeNotNull` / `CAST` to a non-Nullable type make `wrapper(k) <=>
+-- NULL` always false), or be partial (`toDateTime(Date32)` / `intDiv(k, 0)` throw on some non-NULL
+-- rows). Reusing `isNull(k)` for any of these would narrow the index to the NULL granule and mark it
+-- exact-true, so exact-count / implicit-projection paths return wrong results. All wrapped forms below
+-- must NOT prune (no `Granules: 1/`).
 SELECT '--- ifNull(k, 0) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 SELECT '--- ifNull(k, 0) IS NOT DISTINCT FROM NULL does NOT prune with coalesce rewrite off (0/) ---';
@@ -152,39 +155,24 @@ SELECT '--- assumeNotNull(k) IS NOT DISTINCT FROM NULL does NOT prune to the NUL
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE assumeNotNull(k) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 SELECT '--- bare isNull(ifNull(k, 0)) does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE isNull(ifNull(k, 0))) WHERE explain ILIKE '%Granules: 1/%';
-
--- The NULL-preservation guard is SEMANTIC (result type stays Nullable), not a name allowlist. A `CAST`
--- to a non-Nullable type erases NULL just like `ifNull`: `CAST(k, 'UInt32') IS NOT DISTINCT FROM NULL`
--- is always false, but reusing `isNull(k)` would prune to the NULL granule and mark it exact-true, so
--- exact-count paths would count rows for an always-false predicate. It must NOT prune.
 SELECT '--- CAST(k, non-Nullable) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE CAST(k, 'UInt32') IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 SELECT '--- bare isNull(CAST(k, non-Nullable)) does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE isNull(CAST(k, 'UInt32'))) WHERE explain ILIKE '%Granules: 1/%';
--- A NULL-PRESERVING conversion (`toUInt32(Nullable(UInt32))` stays `Nullable(UInt32)`) must STILL prune
--- to the NULL granule, exactly like bare `k IS NULL`: it maps NULL to NULL, so `isNull` reuse is sound.
-SELECT '--- toUInt32(k) (NULL-preserving) IS NOT DISTINCT FROM NULL DOES prune to the NULL granule ---';
-SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE toUInt32(k) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
--- A nested chain erases NULL if ANY step does: `toUInt32(ifNull(k, 0))` -> the inner ifNull erases.
+-- A NULL-preserving conversion (`toUInt32(Nullable(UInt32))` stays Nullable) is still a wrapper, so it
+-- also declines and does NOT prune (the count is unchanged: a full scan returns the same NULL rows).
+SELECT '--- toUInt32(k) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE toUInt32(k) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 SELECT '--- toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL does NOT prune to the NULL granule (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
-
--- Result-type nullability alone is NOT enough: `ifNull(k, CAST(0, 'Nullable(UInt32)'))` and the
--- `coalesce` form keep a `Nullable(UInt32)` result type, yet map NULL to 0 and can never be NULL. The
--- guard tests the wrapper's actual behavior on a NULL input, so these must NOT prune to the NULL granule.
 SELECT '--- ifNull(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 SELECT '--- coalesce(k, Nullable non-NULL fallback) IS NOT DISTINCT FROM NULL does NOT prune (0/) ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM pk_null WHERE coalesce(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL) WHERE explain ILIKE '%Granules: 1/%';
 
--- Preserving NULL is necessary but NOT sufficient for the `isNull` atom reuse: the `FUNCTION_IS_NULL`
--- evaluators ignore the monotonic chain, so the wrapper must also be TOTAL on the key domain. An
--- overflow-checked conversion is NULL-preserving yet PARTIAL: `toDateTime(d)` on a `Date32` value
--- outside the DateTime range raises VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE under
--- `date_time_overflow_behavior = 'throw'`. Analyzing `isNull(toDateTime(d))` like `isNull(d)` would
--- prune the out-of-range NON-NULL granule as always-false, so a scan that should raise silently
--- returns rows instead. The `d32_null` key crosses the DateTime range: the `1900-01-01` granule (and
--- the `2260-01-01` granule) overflow, the mid-range granule does not, and NULLs sort last.
+-- A partial wrapper is scanned (and raises) instead of being pruned as always-false: `toDateTime(d)` on
+-- a `Date32` value outside the DateTime range raises under `date_time_overflow_behavior = 'throw'`. The
+-- `d32_null` key crosses the range: the `1900-01-01` granule overflows, the mid-range granule does not.
 SET session_timezone = 'UTC';
 DROP TABLE IF EXISTS d32_null;
 CREATE TABLE d32_null (d Nullable(Date32)) ENGINE = MergeTree ORDER BY d
@@ -194,49 +182,23 @@ INSERT INTO d32_null SELECT toDate32('2000-01-01') + number FROM numbers(8192);
 INSERT INTO d32_null SELECT NULL FROM numbers(100);
 OPTIMIZE TABLE d32_null FINAL;
 
-SELECT '--- isNull(toDateTime(d)) (overflow-checked, PARTIAL) does NOT prune, keeps all granules ---';
+SELECT '--- isNull(toDateTime(d)) does NOT prune, keeps all granules ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM d32_null WHERE isNull(toDateTime(d)) SETTINGS date_time_overflow_behavior = 'throw') WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 3/3%';
-SELECT '--- toDateTime(d) IS NOT DISTINCT FROM NULL (overflow-checked, PARTIAL) does NOT prune ---';
+SELECT '--- toDateTime(d) IS NOT DISTINCT FROM NULL does NOT prune ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'throw') WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 3/3%';
 
--- A type-level cast check is not enough to prove totality: `intDiv(k, 0)` is `Int64 -> Int64`, so a
--- `canBeSafelyCast`-only test admits it, yet it raises `ILLEGAL_DIVISION` on every non-NULL row.
--- Totality is proven behaviorally: the wrapper is run on the extreme values of its integer key domain,
--- and declined if it raises. So `intDiv(k, 0)` does NOT reuse the `isNull` atom and the non-NULL
--- granule is scanned (and raises) instead of being pruned as always-false. `intDiv(k, 2)` has a
--- non-zero divisor and stays total, so it prunes.
 DROP TABLE IF EXISTS i64_null;
 CREATE TABLE i64_null (k Nullable(Int64)) ENGINE = MergeTree ORDER BY k
     SETTINGS index_granularity = 1, allow_nullable_key = 1, add_minmax_index_for_numeric_columns = 0;
 INSERT INTO i64_null VALUES (5);
 INSERT INTO i64_null VALUES (NULL);
 
-SELECT '--- isNull(intDiv(k, 0)) (throws on every row, PARTIAL) does NOT prune, keeps all granules ---';
+SELECT '--- isNull(intDiv(k, 0)) does NOT prune, keeps all granules ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE isNull(intDiv(k, 0)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 2/2%';
-SELECT '--- intDiv(k, 0) IS NOT DISTINCT FROM NULL (throws on every row, PARTIAL) does NOT prune ---';
+SELECT '--- intDiv(k, 0) IS NOT DISTINCT FROM NULL does NOT prune ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE intDiv(k, 0) IS NOT DISTINCT FROM NULL SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 2/2%';
-SELECT '--- isNull(intDiv(k, 2)) (non-zero divisor, total) DOES prune to the NULL granule ---';
-SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE isNull(intDiv(k, 2)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: 1/%';
-
--- `intDiv(k, -1)` totality is key-width dependent, which a monotonicity heuristic cannot see (it is
--- reported `is_always_monotonic` for a `-1` divisor). On an `Int8` key `intDiv(Int8_MIN, -1)` overflows
--- and raises `ILLEGAL_DIVISION` (the generic division path), so the wrapper is PARTIAL and must NOT
--- reuse the `isNull` atom. The behavioral boundary probe catches it: `intDiv(Int8_MIN, -1)` throws, so
--- the granule is kept and the scan raises like a full scan.
-DROP TABLE IF EXISTS i8_null;
-CREATE TABLE i8_null (k Nullable(Int8)) ENGINE = MergeTree ORDER BY k
-    SETTINGS index_granularity = 1, allow_nullable_key = 1, add_minmax_index_for_numeric_columns = 0;
-INSERT INTO i8_null VALUES (-128);
-INSERT INTO i8_null VALUES (NULL);
-
-SELECT '--- isNull(intDiv(k, -1)) on Int8 (min / -1 overflows, PARTIAL) does NOT prune, keeps all granules ---';
-SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i8_null WHERE isNull(intDiv(k, -1)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 2/2%';
-SELECT '--- intDiv(k, -1) IS NOT DISTINCT FROM NULL on Int8 (PARTIAL) does NOT prune ---';
-SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i8_null WHERE intDiv(k, -1) IS NOT DISTINCT FROM NULL SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 2/2%';
--- On an `Int64` key `intDiv(k, -1)` takes the constant-divisor specialization that deliberately wraps
--- `Int64_MIN / -1` and never raises, so it is TOTAL and DOES prune to the NULL granule.
-SELECT '--- isNull(intDiv(k, -1)) on Int64 (constant-divisor wrap, total) DOES prune to the NULL granule ---';
-SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE isNull(intDiv(k, -1)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: 1/%';
+SELECT '--- isNull(intDiv(k, 2)) (also wrapped) does NOT prune ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE isNull(intDiv(k, 2)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: 1/%';
 
 -- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
 -- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
@@ -306,35 +268,23 @@ SELECT 'coalesce_ndf_null', count() FROM pk_null WHERE coalesce(k, 0) IS NOT DIS
 SELECT 'assumenotnull_ndf_null', count() FROM pk_null WHERE assumeNotNull(k) IS NOT DISTINCT FROM NULL;
 SELECT 'ifnull_isnull', count() FROM pk_null WHERE isNull(ifNull(k, 0));
 SELECT 'ifnull_ndf_null_corw_off', count() FROM pk_null WHERE ifNull(k, 0) IS NOT DISTINCT FROM NULL SETTINGS allow_key_condition_coalesce_rewrite = 0;
--- A NULL-preserving conversion (`toUInt32(Nullable)` stays Nullable) matches the NULL rows like bare
--- `k <=> NULL`; wrapping it in a NULL-erasing `ifNull` makes it always-false again.
+-- A wrapper over the key declines the atom and full-scans, so the count still matches the true result:
+-- `toUInt32(k) <=> NULL` matches the NULL rows; the NULL-erasing / non-NULL-fallback forms are all false.
 SELECT 'touint32_ndf_null', count() FROM pk_null WHERE toUInt32(k) IS NOT DISTINCT FROM NULL;
 SELECT 'touint32_ifnull_ndf_null', count() FROM pk_null WHERE toUInt32(ifNull(k, 0)) IS NOT DISTINCT FROM NULL;
--- Nullable-but-non-NULL fallback: always false; the exact-count / implicit-projection path must return 0
--- (a wrong prune to the NULL granule would return the NULL-row count instead).
 SELECT 'ifnull_nfb_ndf_null', count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL;
 SELECT 'coalesce_nfb_ndf_null', count() FROM pk_null WHERE coalesce(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL;
 SELECT 'ifnull_nfb_ndf_null_iproj', count() FROM pk_null WHERE ifNull(k, CAST(0, 'Nullable(UInt32)')) IS NOT DISTINCT FROM NULL SETTINGS optimize_use_implicit_projections = 1;
--- Overflow-checked conversion (`toDateTime(Date32)` under 'throw') is PARTIAL: because the wrapper is
--- not routed to the `isNull` atom, the out-of-range non-NULL granule is scanned and the query raises,
--- exactly like a full scan (rather than being silently pruned to an always-false result).
+-- Partial wrappers are scanned, not pruned to always-false, so the out-of-range non-NULL granule raises
+-- exactly like a full scan (`toDateTime(Date32)` under 'throw', `intDiv(k, 0)`).
 SELECT 'todatetime_isnull_throws' FROM d32_null WHERE isNull(toDateTime(d)) SETTINGS date_time_overflow_behavior = 'throw'; -- { serverError VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE }
 SELECT 'todatetime_ndf_null_throws' FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'throw'; -- { serverError VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE }
--- Under 'ignore', `toDateTime` saturates instead of throwing, so the scan succeeds and the always-false
--- predicate returns 0 (the wrapper still declines the atom, so no wrong NULL-granule prune).
+-- Under 'ignore', `toDateTime` saturates instead of throwing, so the scan succeeds and returns 0.
 SELECT 'todatetime_ndf_null_ignore', count() FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'ignore';
--- `intDiv(k, 0)` raises on the non-NULL granule instead of being pruned to an always-false result: the
--- scan behaves like a full scan (raises), it does not silently return the NULL-row count.
 SELECT 'intdiv0_isnull_throws' FROM i64_null WHERE isNull(intDiv(k, 0)); -- { serverError ILLEGAL_DIVISION }
 SELECT 'intdiv0_ndf_null_throws' FROM i64_null WHERE intDiv(k, 0) IS NOT DISTINCT FROM NULL; -- { serverError ILLEGAL_DIVISION }
--- `intDiv(k, 2)` is NULL-preserving and total, so it reuses the atom and correctly returns the
--- NULL-row count (matching a full scan of `intDiv(k, 2) IS NULL`).
+-- `intDiv(k, 2)` never raises, so the full scan returns the NULL-row count.
 SELECT 'intdiv2_ndf_null', count() FROM i64_null WHERE intDiv(k, 2) IS NOT DISTINCT FROM NULL;
--- `intDiv(k, -1)` on an `Int64` key takes the constant-divisor wrap (never raises) and is total, so it
--- reuses the atom and correctly returns the NULL-row count (the `Int8` partiality is asserted above via
--- the EXPLAIN no-prune check; a runtime-throw assertion is not used because parallel-part execution can
--- return the matching NULL row before the out-of-range non-NULL row's `intDiv` is evaluated).
-SELECT 'intdivm1_i64_ndf_null', count() FROM i64_null WHERE intDiv(k, -1) IS NOT DISTINCT FROM NULL;
 -- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
 SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
 SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;
@@ -382,4 +332,3 @@ DROP TABLE part;
 DROP TABLE spk;
 DROP TABLE IF EXISTS d32_null;
 DROP TABLE IF EXISTS i64_null;
-DROP TABLE IF EXISTS i8_null;
