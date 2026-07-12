@@ -5104,6 +5104,50 @@ async function postMulti(tab, posted_request_num, parsed, params_restore_pending
     }, parsed[0].query, tab);
 }
 
+/// Restore an `ok: false` result snapshot into `el`, mirroring how the live streaming path leaves
+/// a failed query (see the mid-stream exception handling in `postImpl`): the rows that streamed
+/// before a `{"exception":...}` line are replayed first and the exception is rendered beneath
+/// them, so reopening or reloading a failed tab keeps its partial result. Falls back to a bare
+/// error when the snapshot produced no rows, or when its payload is not row JSON at all (e.g. a
+/// non-200 error body). Returns true when partial rows were replayed as a table, so the caller
+/// can run its usual table layout passes.
+function restoreErrorSnapshot(el, data)
+{
+    let exception_line = null;
+    const row_lines = [];
+    for (const line of data.split('\n')) {
+        if (line.length === 0) continue;
+        if (line.startsWith(`{"exception":`)) { exception_line = line; break; }
+        row_lines.push(line);
+    }
+    if (exception_line === null) {
+        el.renderError(data);
+        return false;
+    }
+    if (row_lines.length > 0) {
+        try {
+            const fragment = document.createDocumentFragment();
+            for (const line of row_lines) {
+                if (!el.update(JSON.parse(line), fragment)) break;
+            }
+            el.flushFragment(fragment);
+        } catch (e) {
+            /// The pre-exception lines are not row JSON (a plain-text error body that merely
+            /// contains an exception line): drop the half-replayed content and show the error alone.
+            el.clear();
+        }
+    }
+    if (el.rowCount > 0) {
+        el.renderTotals();
+        el.applyColumnColors();
+        el.renderError(JSON.parse(exception_line).exception);
+        return true;
+    }
+    el.clear();
+    el.renderError(JSON.parse(exception_line).exception);
+    return false;
+}
+
 /// Render one saved multi-query statement snapshot into `el`, mirroring the live per-statement
 /// rendering in `postImpl` (table / chart / EXPLAIN graph / raw / error), minus the streaming.
 /// `matToken` (a snapshot of `tab.reqNum`) guards the awaited chart/graph loaders: a superseding
@@ -5115,15 +5159,9 @@ async function renderSnapshotIntoElement(el, snap, tab, matToken) {
     const format = snap.format;
 
     if (!snap.ok) {
-        let has_exception = false;
-        for (const line of snap.data.split('\n')) {
-            if (line.startsWith(`{"exception":`)) {
-                el.update(JSON.parse(line));
-                has_exception = true;
-                break;
-            }
-        }
-        if (!has_exception) el.renderError(snap.data);
+        /// Replay any rows that streamed before a mid-stream exception, as the live path
+        /// leaves them; the replayed table gets the same transpose pass as the success path.
+        if (restoreErrorSnapshot(el, snap.data)) el.transposeIfNeeded();
         return;
     }
 
@@ -5342,16 +5380,11 @@ async function materializeResult(tab) {
         tab.logoVisible = false;
         tab.progressPhase = 'error';
         tab.failed = true;
-        let has_exception = false;
-        for (const line of result.data.split('\n')) {
-            if (line.startsWith(`{"exception":`)) {
-                el.update(JSON.parse(line));
-                has_exception = true;
-                break;
-            }
-        }
-        if (!has_exception) {
-            el.renderError(result.data);
+        /// Replay any rows that streamed before a mid-stream exception, as the live path leaves
+        /// them; the replayed table needs the same layout passes as the success restore below.
+        if (restoreErrorSnapshot(el, result.data)) {
+            el.transposeIfNeeded();
+            el._changeTableLayout();
         }
         return;
     } else if (format == default_format) {
