@@ -764,9 +764,24 @@ static bool functionPreservesNulls(const IFunctionBase & func)
 /// Analyzing `isNull(toDateTime(k))` like `isNull(k)` then prunes such a non-NULL granule as
 /// definitely-false, so a query that should have raised on scan returns a (wrong) result instead.
 ///
-/// `canBeSafelyCast` is a conservative, type-level "no value of the source type overflows the target"
-/// test: when it holds the conversion cannot throw, so the step is total. When it does not hold we
-/// treat the step as partial and decline the reuse (falling back to a full scan is always correct).
+/// Totality is proven with two independent guards, because a wrapper can throw on a defined key value
+/// in two unrelated ways and neither guard covers the other:
+///
+///  1. Conversion overflow (a source value is in range of its type but out of range of the target).
+///     `canBeSafelyCast` is a conservative, type-level "no value of the source type overflows the
+///     target" test: e.g. `toDateTime(k)` on a `Date32` key fails it, so we decline. It compares only
+///     *types*, so it cannot see a value-dependent error whose result type equals its argument type.
+///
+///  2. Value-dependent partiality (the result type equals the argument type, so guard 1 passes, yet
+///     some concrete value raises). `intDiv(k, 0)` is `Int64 -> Int64` and passes `canBeSafelyCast`,
+///     but raises `ILLEGAL_DIVISION` on every row. For this we reuse the function's own knowledge:
+///     `getMonotonicityForRange` already reports `variable / 0` as non-monotonic (undefined on the
+///     range, see `FunctionBinaryArithmetic.h`), so requiring the wrapper to be monotonic across its
+///     whole input range rejects such throwing divisors. Wrappers that are defined on the whole domain
+///     (`toInt64`, `plus`, `intDiv(k, c != 0)`) report `is_always_monotonic` and are still admitted.
+///
+/// Both guards are conservative: when either is unsure we decline, and declining only forces a full
+/// scan, which is always correct.
 static bool functionIsTotalOnKeyDomain(const IFunctionBase & func)
 {
     auto arg_type = getArgumentTypeOfMonotonicFunction(func);
@@ -775,7 +790,16 @@ static bool functionIsTotalOnKeyDomain(const IFunctionBase & func)
 
     auto from_type = removeNullable(removeLowCardinality(arg_type));
     auto to_type = removeNullable(removeLowCardinality(func.getResultType()));
-    return canBeSafelyCast(from_type, to_type);
+    if (!canBeSafelyCast(from_type, to_type))
+        return false;
+
+    /// Query monotonicity on the `Nullable`/`LowCardinality`-stripped argument type: the numeric
+    /// monotonicity implementations match the concrete inner type (e.g. `ToNumberMonotonicity` takes
+    /// its "identity conversion is always monotonic" fast path only for a bare `DataTypeNumber`), so a
+    /// `Nullable(UInt32)` wrapper would otherwise hide that `toUInt32(k)` is total.
+    if (!func.hasInformationAboutMonotonicity())
+        return false;
+    return func.getMonotonicityForRange(*from_type, Field(), Field()).is_always_monotonic;
 }
 
 /// A monotonic wrapper chain may be routed to the `isNull` atom only when every step both preserves

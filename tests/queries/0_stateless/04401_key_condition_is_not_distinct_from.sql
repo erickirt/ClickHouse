@@ -199,6 +199,24 @@ SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM d32_null WHERE isNu
 SELECT '--- toDateTime(d) IS NOT DISTINCT FROM NULL (overflow-checked, PARTIAL) does NOT prune ---';
 SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'throw') WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 3/3%';
 
+-- A type-level cast check is not enough to prove totality: `intDiv(k, 0)` is `Int64 -> Int64`, so a
+-- `canBeSafelyCast`-only test admits it, yet it raises `ILLEGAL_DIVISION` on every non-NULL row. The
+-- monotonicity guard rejects it (`getMonotonicityForRange` reports `variable / 0` as non-monotonic),
+-- so it does NOT reuse the `isNull` atom and the non-NULL granule is scanned (and raises) instead of
+-- being pruned as always-false. `intDiv(k, 2)` has a non-zero divisor and stays total, so it prunes.
+DROP TABLE IF EXISTS i64_null;
+CREATE TABLE i64_null (k Nullable(Int64)) ENGINE = MergeTree ORDER BY k
+    SETTINGS index_granularity = 1, allow_nullable_key = 1, add_minmax_index_for_numeric_columns = 0;
+INSERT INTO i64_null VALUES (5);
+INSERT INTO i64_null VALUES (NULL);
+
+SELECT '--- isNull(intDiv(k, 0)) (throws on every row, PARTIAL) does NOT prune, keeps all granules ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE isNull(intDiv(k, 0)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 2/2%';
+SELECT '--- intDiv(k, 0) IS NOT DISTINCT FROM NULL (throws on every row, PARTIAL) does NOT prune ---';
+SELECT count() FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE intDiv(k, 0) IS NOT DISTINCT FROM NULL SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: %/%' AND explain NOT ILIKE '%Granules: 2/2%';
+SELECT '--- isNull(intDiv(k, 2)) (non-zero divisor, total) DOES prune to the NULL granule ---';
+SELECT count() > 0 FROM (EXPLAIN indexes = 1 SELECT count() FROM i64_null WHERE isNull(intDiv(k, 2)) SETTINGS optimize_use_implicit_projections = 0) WHERE explain ILIKE '%Granules: 1/%';
+
 -- The boolean-wrapper peel must reach ANY prunable boolean atom, not just comparisons:
 -- `startsWith(s, p) IS TRUE` / `!= false` / `IN (true)` must prune the String key the same as bare
 -- `startsWith(s, p)` (the gate is derived from `atom_map` in `predicateIsBooleanResult`).
@@ -284,6 +302,13 @@ SELECT 'todatetime_ndf_null_throws' FROM d32_null WHERE toDateTime(d) IS NOT DIS
 -- Under 'ignore', `toDateTime` saturates instead of throwing, so the scan succeeds and the always-false
 -- predicate returns 0 (the wrapper still declines the atom, so no wrong NULL-granule prune).
 SELECT 'todatetime_ndf_null_ignore', count() FROM d32_null WHERE toDateTime(d) IS NOT DISTINCT FROM NULL SETTINGS date_time_overflow_behavior = 'ignore';
+-- `intDiv(k, 0)` raises on the non-NULL granule instead of being pruned to an always-false result: the
+-- scan behaves like a full scan (raises), it does not silently return the NULL-row count.
+SELECT 'intdiv0_isnull_throws' FROM i64_null WHERE isNull(intDiv(k, 0)); -- { serverError ILLEGAL_DIVISION }
+SELECT 'intdiv0_ndf_null_throws' FROM i64_null WHERE intDiv(k, 0) IS NOT DISTINCT FROM NULL; -- { serverError ILLEGAL_DIVISION }
+-- `intDiv(k, 2)` is NULL-preserving and total, so it reuses the atom and correctly returns the
+-- NULL-row count (matching a full scan of `intDiv(k, 2) IS NULL`).
+SELECT 'intdiv2_ndf_null', count() FROM i64_null WHERE intDiv(k, 2) IS NOT DISTINCT FROM NULL;
 -- ifNull / coalesce composed wrapper forms match the bare wrapped atom.
 SELECT 'ifnull_bare', count() FROM pk WHERE ifNull(k = 42, 0);
 SELECT 'ifnull_istrue', count() FROM pk WHERE ifNull(k = 42, 0) IS TRUE;
@@ -329,3 +354,5 @@ DROP TABLE pk_null;
 DROP TABLE mm;
 DROP TABLE part;
 DROP TABLE spk;
+DROP TABLE IF EXISTS d32_null;
+DROP TABLE IF EXISTS i64_null;
