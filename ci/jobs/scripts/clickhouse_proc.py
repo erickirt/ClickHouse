@@ -1324,10 +1324,14 @@ clickhouse-client --query "SELECT count() FROM test.visits"
     _TIMEOUT_KILL_DIAG = "sending signal KILL to command"
 
     def _annotate_timeout(self, res, stderr):
-        # If `res` is one of timeout's expiry codes, prepend the "timed out"
-        # annotation so a stuck dump is reported as a timeout rather than an
-        # opaque non-zero failure. Returns the (possibly) annotated stderr.
-        if res in self._TIMEOUT_EXIT_CODES:
+        # Prepend the "timed out" annotation only for a PROVEN wrapper timeout,
+        # so a stuck dump is reported as a timeout rather than an opaque non-zero
+        # failure. Reuse _timeout_wrapper_expired (not raw _TIMEOUT_EXIT_CODES
+        # membership): 124 is always a timeout, but a bare 137 is an OOM/external
+        # SIGKILL of `clickhouse local`, not our wrapper -- stamping it with
+        # timeout text would misdiagnose a genuine kill. Returns the (possibly)
+        # annotated stderr.
+        if self._timeout_wrapper_expired(res, stderr):
             return f"timed out after {self.DUMP_SYSTEM_TABLE_TIMEOUT}s\n{stderr}"
         return stderr
 

@@ -135,6 +135,9 @@ def test_production_code_bounds_each_dump_with_timeout():
     assert "_TIMEOUT_EXIT_CODES = (124, 137)" in src
     # The annotation helper must be applied to every dump branch (replica 0/1/2).
     assert src.count("self._annotate_timeout(res, stderr)") == 3
+    # _annotate_timeout must gate on the proven-timeout predicate, not raw exit
+    # code membership, so a bare-137 OOM/external kill is not mislabeled a timeout.
+    assert "if self._timeout_wrapper_expired(res, stderr):" in src
 
 
 # --- info-only bounded timeout on minio_* diagnostic tables ------------------
@@ -184,6 +187,38 @@ def test_timeout_wrapper_expired_distinguishes_137_kill_source():
     # non-timeout exit codes are never a timeout
     assert e(1, _KILL_DIAG) is False
     assert e(0, "") is False
+
+
+def test_annotate_timeout_only_stamps_proven_timeouts():
+    # clickhouse-gh[bot] follow-up finding. _annotate_timeout must reuse the
+    # proven-timeout predicate, NOT bare _TIMEOUT_EXIT_CODES membership:
+    #   124 -> unambiguous timeout -> annotate.
+    #   137 WITH timeout's --verbose KILL diagnostic -> our wrapper -> annotate.
+    #   137 WITHOUT the diagnostic -> OOM/external SIGKILL of `clickhouse local`
+    #        (correctly still FAILs) -> must NOT be stamped "timed out after 600s",
+    #        or triage is misled into blaming a timeout for a genuine kill.
+    #   any non-timeout code -> never annotated.
+    proc_cls = _load_proc_class()
+
+    class _Stub:
+        DUMP_SYSTEM_TABLE_TIMEOUT = 600
+        _TIMEOUT_KILL_DIAG = proc_cls._TIMEOUT_KILL_DIAG
+        _timeout_wrapper_expired = proc_cls._timeout_wrapper_expired
+
+    annotate = proc_cls._annotate_timeout.__get__(_Stub())
+    tag = "timed out after 600s"
+
+    # 124 -> annotated
+    assert annotate(124, "boom").startswith(tag)
+    # 137 WITH the KILL diagnostic -> annotated, original stderr preserved
+    out = annotate(137, "x\n" + _KILL_DIAG)
+    assert out.startswith(tag) and _KILL_DIAG in out
+    # 137 WITHOUT the diagnostic (OOM/external kill) -> NOT annotated
+    assert annotate(137, "Killed") == "Killed"
+    assert annotate(137, "") == ""
+    # non-timeout exit codes -> never annotated
+    assert annotate(1, "real dump error") == "real dump error"
+    assert annotate(0, "") == ""
 
 
 def test_info_only_classifier_matches_only_proven_minio_timeouts():
