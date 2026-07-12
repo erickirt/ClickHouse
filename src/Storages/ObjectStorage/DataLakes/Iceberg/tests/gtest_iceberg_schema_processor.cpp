@@ -125,6 +125,25 @@ TEST(IcebergSchemaProcessor, GetSimpleTypeUnknownThrows)
     EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("unknown_type"), DB::Exception);
 }
 
+/// The Iceberg primitive type grammar is a closed set: scalars, decimal(P, S) and fixed[N] whose
+/// only parameters are integers, geography/geometry whose parameters are bare identifiers, and the
+/// list/map/struct wrappers. None of them carries a quoted string literal. A spelling that embeds
+/// one (e.g. "MyType('Hello ( world )')") matches no branch of getSimpleType and is rejected before
+/// any comparison runs, so canonicalizeTypeSpacing never sees whitespace inside a quoted literal.
+TEST(IcebergSchemaProcessor, GetSimpleTypeWithStringLiteralArgumentThrows)
+{
+    EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("MyType('Hello ( world )')"), DB::Exception);
+}
+
+/// The same string-literal-bearing spelling must be rejected as an initial schema type, i.e. the
+/// parser guards the entry point so a quoted literal never reaches the whitespace canonicalization.
+TEST(IcebergSchemaProcessor, InitialSchemaTypeWithStringLiteralArgumentThrows)
+{
+    auto schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"MyType('Hello ( world )')"}]})json");
+    IcebergSchemaProcessor processor;
+    EXPECT_THROW(processor.addIcebergTableSchema(schema), DB::Exception);
+}
+
 /// The primitive parser must accept the same inner-whitespace spellings that the
 /// whitespace-insensitive comparison treats as equivalent. Without canonicalizing the type string
 /// before parsing, readIntText does not skip the leading space, so "decimal( 20, 0 )" and
