@@ -12,7 +12,10 @@ CREATE TABLE bool_pk
 )
 ENGINE = MergeTree
 ORDER BY (b, id)
-SETTINGS index_granularity = 8, allow_nullable_key = 1;
+-- Pin the layout so the granule-count assertions below are stable: randomized
+-- adaptive granularity (index_granularity_bytes) could split the table into a
+-- different number of marks and break the hard-coded SelectedMarks counts.
+SETTINGS index_granularity = 8, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, allow_nullable_key = 1;
 
 -- One part with three granules of 8 rows each, sorted by `b`:
 -- granule 0 = only `false`, granule 1 = only `true`, granule 2 = only NULL.
@@ -69,7 +72,7 @@ DROP TABLE bool_pk;
 -- Assert the granule pruning is preserved (1 of 10 granules) via `EXPLAIN indexes = 1`.
 DROP TABLE IF EXISTS int_pk;
 CREATE TABLE int_pk (k UInt32) ENGINE = MergeTree ORDER BY k
-SETTINGS index_granularity = 8, add_minmax_index_for_numeric_columns = 0;
+SETTINGS index_granularity = 8, index_granularity_bytes = 0, min_bytes_for_wide_part = 0, add_minmax_index_for_numeric_columns = 0;
 INSERT INTO int_pk SELECT number FROM numbers(80) SETTINGS max_insert_threads = 1;
 OPTIMIZE TABLE int_pk FINAL;
 
