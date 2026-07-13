@@ -4796,6 +4796,33 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
     }
 }
 
+/// Build a compact stand-in for a failed reply too large to persist in full. The success path
+/// drops an oversized result to `null` (it stays reproducible via `run=1`), but doing that for a
+/// failure would lose the error entirely and make the tab reopen blank. Keep the essential error
+/// text within the same size budget: the `{"exception":...}` line if the stream carried one — the
+/// rows that streamed before it are what made the reply large and cannot be kept — otherwise a
+/// bounded prefix of the error body. `restoreErrorSnapshot` renders either form on restore.
+function compactFailureSnapshot(reply)
+{
+    /// Locate the `{"exception":...}` line without splitting the whole (potentially huge) reply.
+    let start = reply.startsWith(`{"exception":`) ? 0 : reply.indexOf(`\n{"exception":`);
+    if (start !== -1)
+    {
+        if (start > 0) ++start;   /// skip the leading newline
+        let end = reply.indexOf('\n', start);
+        if (end === -1) end = reply.length;
+        const line = reply.slice(start, end);
+        /// Keep the whole exception line when it fits, so the restore replays it as the exception.
+        if (line.length <= 100000) return line;
+        /// A single exception line over the budget: store just its message text (which the restore
+        /// renders as a plain error) rather than a truncated, unparseable JSON line.
+        try { return JSON.parse(line).exception.slice(0, 100000); }
+        catch (e) { return line.slice(0, 100000); }
+    }
+    /// A plain (non-row) error body with no exception line: keep a bounded prefix.
+    return reply.slice(0, 100000);
+}
+
 /// Execute a single query (legacy path, used for single-query mode) in the given `tab`, rendering
 /// into that tab's own persistent result element. All shared-chrome updates (progress bar under
 /// Run, download/copy buttons, page hue) are applied only when `tab` is the active one; otherwise
@@ -4850,7 +4877,9 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
                 resultQuery: query,
                 format: result.format,
                 ok: result.response_ok,
-                data: result.reply.length > 100000 ? null : result.reply,
+                /// Unlike the success path, never drop a failure to `null`: keep at least a compact
+                /// summary so a reload restores the error instead of reopening the tab blank.
+                data: result.reply.length > 100000 ? compactFailureSnapshot(result.reply) : result.reply,
                 elapsed_ns: 1e6 * (performance.now() - query_start),
                 params: paramValuesSnapshot,
             }, undefined, tab);
@@ -5369,7 +5398,11 @@ async function materializeResult(tab) {
         return;
     }
 
-    if (!result.data) { tab.progressPhase = 'idle'; return; }
+    /// A finished failed run must restore as an error even when its body was too large to store in
+    /// full (persisted as a compact summary) or was not stored at all (a legacy/edge snapshot with
+    /// `data: null`): fall through to the `!result.ok` branch below rather than reopening blank. A
+    /// never-run tab has no `ok` field, so it still resolves to idle here.
+    if (!result.data && result.ok !== false) { tab.progressPhase = 'idle'; return; }
 
     let is_table = false;
     let is_raw = false;
@@ -5380,11 +5413,17 @@ async function materializeResult(tab) {
         tab.logoVisible = false;
         tab.progressPhase = 'error';
         tab.failed = true;
-        /// Replay any rows that streamed before a mid-stream exception, as the live path leaves
-        /// them; the replayed table needs the same layout passes as the success restore below.
-        if (restoreErrorSnapshot(el, result.data)) {
-            el.transposeIfNeeded();
-            el._changeTableLayout();
+        if (result.data) {
+            /// Replay any rows that streamed before a mid-stream exception, as the live path leaves
+            /// them; the replayed table needs the same layout passes as the success restore below.
+            if (restoreErrorSnapshot(el, result.data)) {
+                el.transposeIfNeeded();
+                el._changeTableLayout();
+            }
+        } else {
+            /// The failure body was not stored (too large with no exception line to keep, or a
+            /// legacy snapshot): show a notice so the tab restores as failed rather than blank.
+            el.renderError('The query failed, but its error output was not stored.');
         }
         return;
     } else if (format == default_format) {
