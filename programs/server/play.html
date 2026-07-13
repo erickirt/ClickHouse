@@ -3670,10 +3670,14 @@ let activation_num = 0;
 /// activation's request token. `restoreEditor` sets it right before the `updateQueryParams`
 /// await (the `param_*` DOM inputs still hold the PREVIOUS tab's values during that await) and
 /// clears it once the restored parameters are committed. `captureActiveTab` treats ANY non-null
-/// token as "the inputs are not committed yet": a run that supersedes the restore (`postOne`/
-/// `postAll` bump `activation_num` mid-await) leaves the stale inputs in place without ever
-/// committing them, so the guard must survive that bump and stay armed until the next
-/// activation's restore really commits (a superseded `restoreEditor` bails without touching it).
+/// token as "the inputs are not committed yet". A run that supersedes the restore (`postOne`/
+/// `postAll` bump `activation_num` mid-await) leaves the inputs uncommitted during the await, but it
+/// does NOT start a new restore, so it keeps this token: the superseded `restoreEditor` still runs
+/// its tail when the await resolves, commits this tab's parameters into the rebuilt inputs and
+/// clears the token. Only a newer ACTIVATION overwrites this token with its own; that restore then
+/// owns the guard and the superseded one bails without touching it. Keying the bail on token
+/// ownership (not `activation_num`) keeps the guard from staying latched until the next tab switch,
+/// which would decouple the visible inputs from the values a later run actually sends.
 let params_restore_pending_token = null;
 
 /// Tabs let the user keep several independent queries side by side. Each tab owns its
@@ -5356,7 +5360,16 @@ async function restoreEditor(state, token) {
     /// `persist`, or a quick second navigation) does not snapshot those stale inputs into this tab.
     params_restore_pending_token = token;
     const params_ok = await updateQueryParams();
-    if (token !== activation_num) return;
+    /// If a NEWER activation's restore has taken over the shared editor and parameter inputs, it now
+    /// owns `params_restore_pending_token` (every `restoreEditor` stamps it with its own token): stop,
+    /// so we neither overwrite that tab's freshly restored parameters nor clear its pending guard. A
+    /// run in the SAME tab that superseded this activation (`postOne`/`postAll` bump `activation_num`
+    /// without starting a new restore) still owns this token, so fall through: commit this tab's
+    /// parameters into the now-rebuilt inputs and release the guard. Keying the bail on the token
+    /// owner rather than on `activation_num` is what stops the guard from staying latched until the
+    /// next tab switch — which would leave the visible `param_*` inputs decoupled from the values a
+    /// later run actually sends (a run would keep sourcing the saved snapshot instead of the inputs).
+    if (params_restore_pending_token !== token) return;
     const restored_params = {};
     if (params_ok)
     {
@@ -5825,10 +5838,10 @@ function captureActiveTab() {
     /// await in `restoreEditor`, before `setParamValues`), the `param_*` DOM inputs still hold the
     /// previously active tab's values. Snapshotting them now would overwrite this tab's own
     /// parameters with the previous tab's. Skip the capture until a restore commits (which nulls
-    /// the token); `tab.query` is safe (set before the await). A run during the restore does NOT
-    /// lift the guard: it supersedes the restore before the inputs are committed, so they stay
-    /// stale until the next activation restores them (every activation starts a restore, and the
-    /// latest one always commits, so capture cannot stay suppressed across a tab switch).
+    /// the token); `tab.query` is safe (set before the await). A run that supersedes the restore
+    /// keeps the guard armed only until that restore's tail commits (its tail runs even when a
+    /// same-tab run superseded the activation, so the guard is not latched indefinitely); a switch
+    /// to another tab hands the guard to that tab's own restore.
     if (params_restore_pending_token === null) tab.params = getParamValues();
 }
 
