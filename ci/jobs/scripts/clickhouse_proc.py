@@ -560,11 +560,12 @@ profiles:
         # False). Every step MUST stay non-strict: a strict=True step would
         # raise before we can record the reason and signal failure. Record the
         # concrete failing sub-step so it reaches CIDB test_context_raw.
+        # Only the server logs are collected. The audit webhook emits one event
+        # per S3 API request with no severity/level filter, so on s3 runs
+        # system.minio_audit_logs balloons to millions of rows and its dump
+        # hangs past the 600s cap. minio has no way to raise its severity, and
+        # the audit stream is no longer needed, so it is dropped at the source.
         setup_steps = [
-            (
-                "create system.minio_audit_logs table",
-                'clickhouse-client --enable_json_type=1 --query "CREATE TABLE system.minio_audit_logs (log JSON(time DateTime64(9))) ENGINE = MergeTree ORDER BY tuple()"',
-            ),
             (
                 "create system.minio_server_logs table",
                 'clickhouse-client --enable_json_type=1 --query "CREATE TABLE system.minio_server_logs (log JSON(time DateTime64(9))) ENGINE = MergeTree ORDER BY tuple()"',
@@ -572,10 +573,6 @@ profiles:
             (
                 "set clickminio logger_webhook config",
                 '/mc admin config set clickminio logger_webhook:ch_server_webhook endpoint="http://localhost:8123/?async_insert=1&wait_for_async_insert=0&async_insert_busy_timeout_min_ms=5000&async_insert_busy_timeout_max_ms=5000&async_insert_max_query_number=1000&async_insert_max_data_size=10485760&date_time_input_format=best_effort&query=INSERT%20INTO%20system.minio_server_logs%20FORMAT%20JSONAsObject" queue_size=1000000 batch_size=500',
-            ),
-            (
-                "set clickminio audit_webhook config",
-                '/mc admin config set clickminio audit_webhook:ch_audit_webhook endpoint="http://localhost:8123/?async_insert=1&wait_for_async_insert=0&async_insert_busy_timeout_min_ms=5000&async_insert_busy_timeout_max_ms=5000&async_insert_max_query_number=1000&async_insert_max_data_size=10485760&date_time_input_format=best_effort&query=INSERT%20INTO%20system.minio_audit_logs%20FORMAT%20JSONAsObject" queue_size=1000000 batch_size=500',
             ),
         ]
         for what, command in setup_steps:
@@ -979,10 +976,6 @@ clickhouse-client --query "SELECT count() FROM test.visits"
                 "/mc admin config reset clickminio logger_webhook:ch_server_webhook",
                 verbose=True,
             )
-            Shell.check(
-                "/mc admin config reset clickminio audit_webhook:ch_audit_webhook",
-                verbose=True,
-            )
 
         if self.kafka_proc:
             print("Stopping Redpanda broker")
@@ -1353,9 +1346,9 @@ clickhouse-client --query "SELECT count() FROM test.visits"
     @classmethod
     def _is_info_only_dump_failure(cls, table, res, stderr):
         # A bounded timeout on a minio_* table is info-only, not a real failure.
-        # minio_audit_logs / minio_server_logs are minio's own operational logs
-        # (fed via a webhook), not ClickHouse server diagnostics; on s3 runs they
-        # can balloon past the 600s dump cap. That is expected volume, not a bug,
+        # minio_server_logs is minio's own operational log (fed via a webhook),
+        # not ClickHouse server diagnostics; on s3 runs it can balloon past the
+        # 600s dump cap. That is expected volume, not a bug,
         # so it stays visible in the report but must not redden an otherwise-green
         # check. Every other failure (real CH system tables, non-timeout minio
         # errors, too-many-rows, an OOM/external SIGKILL that only *looks* like a
@@ -1383,7 +1376,6 @@ clickhouse-client --query "SELECT count() FROM test.visits"
             "error_log",
             "query_metric_log",
             "part_log",
-            "minio_audit_logs",
             "minio_server_logs",
         ]
         ROWS_COUNT_IN_SYSTEM_TABLE_LIMIT = 20_000_000
@@ -1411,7 +1403,7 @@ clickhouse-client --query "SELECT count() FROM test.visits"
         #
         command_args_post = "-- --zookeeper.implementation=testkeeper"
 
-        # Bound each dump: a single hanging table (e.g. a huge minio_audit_logs
+        # Bound each dump: a single hanging table (e.g. a huge minio_server_logs
         # on s3 runs) must not consume the whole 9000s job budget. On expiry
         # timeout sends SIGTERM and returns 124; a dump that ignores SIGTERM is
         # escalated with SIGKILL after --kill-after and returns 128+9 = 137.
@@ -1540,7 +1532,7 @@ clickhouse-client --query "SELECT count() FROM test.visits"
 
         if scraping_system_table.info:
             # Genuine failure -> FAIL; info-only (bounded minio_* timeout) stays
-            # OK so an otherwise-green PR is not reddened by minio audit-log
+            # OK so an otherwise-green PR is not reddened by minio server-log
             # volume, while the detail remains visible in the report.
             if real_failure:
                 scraping_system_table.set_status(Result.Status.FAIL)
