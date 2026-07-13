@@ -2694,6 +2694,12 @@ void IMergeTreeDataPart::checkConsistencyWithProjections(bool require_part_metad
 
 void IMergeTreeDataPart::calculateColumnsAndSecondaryIndicesSizesOnDisk() const
 {
+    /// The per-column / per-secondary-index size maps are cached on the part for its whole lifetime,
+    /// so build them in the dedicated arena. The write/merge/mutation finalize path calls this
+    /// outside any arena scope; the load path already runs inside one, where this nests harmlessly.
+    /// Enter the arena before locking so the `thread.arena` switch/restore stays out of the critical
+    /// section (`lock` is destroyed first, releasing the mutex, then the arena scope restores).
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     UniqueLock lock(columns_and_secondary_indices_sizes_mutex);
     calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked();
 }
