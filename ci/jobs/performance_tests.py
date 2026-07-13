@@ -1262,8 +1262,9 @@ def main():
             f"rm -rf {db_path}/preprocessed_configs {db_path}/data/system {db_path}/metadata/system {db_path}/status",
             f"cp -al {db_path} {perf_left}/db ||:",
             f"cp -al {db_path} {perf_right}/db ||:",
-            f"cp -R {temp_dir}/coordination0 {perf_left}/coordination",
-            f"cp -R {temp_dir}/coordination0 {perf_right}/coordination",
+            # Each server bootstraps its own (embedded, non-replicated) keeper, so
+            # an empty storage dir is enough.
+            f"mkdir -p {perf_left}/coordination {perf_right}/coordination",
             # Symlink user_files from the repository into both servers' user_files directories
             f'for f in ./tests/performance/user_files/*; do [ -e "$f" ] || continue; ln -sf "$(readlink -f "$f")" {perf_left}/db/user_files/; ln -sf "$(readlink -f "$f")" {perf_right}/db/user_files/; done',
         ]
