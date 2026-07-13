@@ -6458,6 +6458,15 @@ function beginFlight(tab) {
     /// would wipe the live DOM, reset chart zoom/selection, and defeat the whole point of
     /// persistent panels). Back/Forward still forces a re-render by resetting `materialized`.
     tab.materialized = true;
+    /// The new run supersedes the tab's stored snapshot: the live panel is authoritative now, so
+    /// drop the previous result immediately. Otherwise a debounced `persist` / `refreshCurrentHistoryEntry`
+    /// (scheduled by the editor edit that preceded this run) would serialize the OLD snapshot under
+    /// the NEW query text, and a rerun that is cancelled or reloaded before `saveHistory` records a
+    /// fresh snapshot would reopen showing the previous result attached to the new query.
+    /// `saveHistory` installs the new snapshot on completion; persist the cleared state now so a
+    /// reload mid-run does not resurrect the stale one.
+    tab.result = null;
+    scheduleSave();
     updateTabIndicator(tab);
     refreshFavicon();
     /// Reveal the tab bar (with its `[+]`) the moment a run starts on an otherwise-hidden bar, so
