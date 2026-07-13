@@ -313,11 +313,45 @@ size_t filterPartsByProjection(
     return filtered_parts;
 }
 
+static bool projectionPartHasRequiredColumns(
+    const IMergeTreeDataPart & projection_part,
+    const IMergeTreeDataPart & parent_part,
+    const ProjectionDescription & projection,
+    const StorageMetadataPtr & parent_metadata,
+    const Names & required_column_names)
+{
+    /// The projection's column set is re-derived from its query at every table load, so it can drift
+    /// from what an existing projection part stores (e.g. an ALIAS column selected by the projection
+    /// was re-pointed by ALTER, changing the materialized source column or the aggregate-state column
+    /// name). Reading a column the projection part lacks would fill defaults and return wrong data,
+    /// so such parts must be read from the parent instead. The only legitimate absence is a parent
+    /// TABLE column the parent part lacks too: it was added after the part was written, and the
+    /// default fill is then correct and identical on either read path (see 04412).
+    const auto & parent_table_columns = parent_metadata->getColumns();
+
+    for (const auto & name : required_column_names)
+    {
+        if (projection_part.tryGetColumn(name))
+            continue;
+
+        /// Virtual columns are provided by the reading step, never stored in the part.
+        if (projection.metadata->virtuals.has(name))
+            continue;
+
+        if (parent_part.tryGetColumn(name)
+            || !parent_table_columns.hasColumnOrSubcolumn(GetColumnsOptions::AllPhysical, name))
+            return false;
+    }
+
+    return true;
+}
+
 bool analyzeProjectionCandidate(
     ProjectionCandidate & candidate,
     const MergeTreeDataSelectExecutor & reader,
     MergeTreeData::MutationsSnapshotPtr empty_mutations_snapshot,
     const Names & required_column_names,
+    const StorageMetadataPtr & parent_metadata,
     ReadFromMergeTree::AnalysisResult & parent_reading_select_result,
     const SelectQueryInfo & projection_query_info,
     const ContextPtr & context)
@@ -328,7 +362,9 @@ bool analyzeProjectionCandidate(
     {
         const auto & created_projections = part_with_ranges.data_part->getProjectionParts();
         auto it = created_projections.find(candidate.projection->name);
-        if (it != created_projections.end() && !it->second->is_broken)
+        if (it != created_projections.end() && !it->second->is_broken
+            && projectionPartHasRequiredColumns(
+                *it->second, *part_with_ranges.data_part, *candidate.projection, parent_metadata, required_column_names))
         {
             projection_parts.push_back(RangesInDataPart(
                 it->second,
