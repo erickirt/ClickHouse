@@ -71,6 +71,9 @@ public:
     /// Creates virtual path in tree according to the path. Only leaf of this path will be physical (will have remote info).
     void recordDirectoryPath(const std::string & path, DirectoryRemoteInfo info);
     void recordFile(const std::string & path, FileRemoteInfo info);
+    /// Same as recordFile, but replaces the info if the file is already recorded
+    /// (an existing path is rewritten). Returns the previous info in that case.
+    std::optional<FileRemoteInfo> upsertFile(const std::string & path, FileRemoteInfo info);
 
     void unlinkTree(const std::string & path);
 

@@ -240,6 +240,34 @@ void InMemoryDirectoryTree::recordFile(const std::string & path, FileRemoteInfo 
     remote_layout_files_count.add();
 }
 
+std::optional<FileRemoteInfo> InMemoryDirectoryTree::upsertFile(const std::string & path, FileRemoteInfo info)
+{
+    std::lock_guard guard(mutex);
+    const auto normalized_path = normalizePath(path);
+    const auto inode = walk(normalized_path.parent_path());
+
+    if (!inode)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' does not exist", normalized_path.string());
+
+    if (inode->isVirtual())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Creation of a file under the virtual directory is not possible");
+
+    if (inode->subdirectories.contains(normalized_path.filename()))
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "There is a subdirectory '{}' under the path '{}'. Can't create file", normalized_path.filename().string(), normalized_path.parent_path().string());
+
+    auto it = inode->remote_info->files.find(normalized_path.filename());
+    if (it == inode->remote_info->files.end())
+    {
+        inode->remote_info->files.emplace(normalized_path.filename(), std::move(info));
+        remote_layout_files_count.add();
+        return std::nullopt;
+    }
+
+    auto previous_info = std::move(it->second);
+    it->second = std::move(info);
+    return previous_info;
+}
+
 void InMemoryDirectoryTree::unlinkTree(const std::string & path)
 {
     std::lock_guard guard(mutex);

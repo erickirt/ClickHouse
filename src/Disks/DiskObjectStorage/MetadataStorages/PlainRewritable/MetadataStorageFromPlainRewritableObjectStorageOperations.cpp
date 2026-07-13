@@ -337,11 +337,11 @@ void MetadataStorageFromPlainObjectStorageWriteFileOperation::execute()
 {
     LOG_TEST(getLogger("MetadataStorageFromPlainObjectStorageWriteFileOperation"), "Creating metadata for a file '{}', size: {}", path, object.bytes_size);
 
-    if (!fs_tree->existsFile(path))
-    {
-        fs_tree->recordFile(path, {object.bytes_size, std::time(nullptr)});
-        written = true;
-    }
+    /// The file may already be recorded when an existing path is rewritten. The info must be
+    /// replaced in that case: readers take the file size from the tree, so keeping the previous
+    /// entry would bound reads of the new object by the stale size.
+    previous_info = fs_tree->upsertFile(path, {object.bytes_size, std::time(nullptr)});
+    written = true;
 }
 
 void MetadataStorageFromPlainObjectStorageWriteFileOperation::undo()
@@ -349,7 +349,10 @@ void MetadataStorageFromPlainObjectStorageWriteFileOperation::undo()
     if (!written)
         return;
 
-    fs_tree->removeFile(path);
+    if (previous_info)
+        fs_tree->upsertFile(path, *previous_info);
+    else
+        fs_tree->removeFile(path);
 }
 
 MetadataStorageFromPlainObjectStorageUnlinkMetadataFileOperation::MetadataStorageFromPlainObjectStorageUnlinkMetadataFileOperation(

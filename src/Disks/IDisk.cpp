@@ -304,6 +304,18 @@ try
 }
 catch (Exception & e)
 {
+    /// Do not leave the check file behind: its name is deterministic (it contains the server
+    /// UUID), so on backends with deterministic object keys (e.g. `plain_rewritable`) a leftover
+    /// object shadows the next check and can turn a transient failure into a persistent one.
+    try
+    {
+        removeFileIfExists(path);
+    }
+    catch (...)
+    {
+        tryLogCurrentException(getLogger("IDisk"), fmt::format("Failed to remove access check file on disk {}", name));
+    }
+
     e.addMessage(fmt::format("While checking access for disk {}", name));
     throw;
 }
