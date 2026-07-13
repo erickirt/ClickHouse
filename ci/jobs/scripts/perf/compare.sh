@@ -94,14 +94,42 @@ function configure
     rm left/config/config.d/backups.xml ||:
     cp -rv right/config left ||:
 
+    # Start a temporary server to rename the tables
+    while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
+    echo all killed
+
+    set -m # Spawn temporary in its own process groups
+
+    local setup_left_server_opts=(
+        # server options
+        --config-file=left/config/config.xml
+        --
+        # server *config* directives overrides
+        --path db0
+        --user_files_path db0/user_files
+        --top_level_domains_path "$(left_or_right right top_level_domains)"
+        --keeper_server.storage_path coordination0
+        --tcp_port $LEFT_SERVER_PORT
+    )
+    left/clickhouse-server "${setup_left_server_opts[@]}" &> setup-server-log.log &
+    left_pid=$!
+    kill -0 $left_pid
+    disown $left_pid
+    set +m
+
+    wait_for_server $LEFT_SERVER_PORT $left_pid
+    echo "Server for setup started"
+
+    clickhouse-client --port $LEFT_SERVER_PORT --query "create database test" ||:
+    clickhouse-client --port $LEFT_SERVER_PORT --query "rename table datasets.hits_v1 to test.hits" ||:
+
     while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
     echo all killed
 
     # Make copies of the original db for both servers. Use hardlinks instead
-    # of copying to save space. The datasets are attached as-is here; each
-    # server re-inserts them into its final tables when it starts (see
-    # populate_data), so the on-disk parts are written by that server's own
-    # binary and settings instead of the frozen tarball format.
+    # of copying to save space. Before that, remove preprocessed configs and
+    # system tables, because sharing them between servers with hardlinks may
+    # lead to weird effects.
     rm -r left/db ||:
     rm -r right/db ||:
     rm -r db0/preprocessed_configs ||:
@@ -145,68 +173,6 @@ function match_reference_debug_info
     if [ "$(( ${right_lines:-0} * 4 ))" -lt "${left_lines:-0}" ]; then
         strip --strip-debug "$left"
     fi
-}
-
-# Re-insert one attached dataset so its parts are written by the running server
-# instead of using the frozen on-disk format shipped in the tarball. The insert
-# reads the source while it writes, so a second copy exists until it finishes,
-# then OPTIMIZE FINAL collapses the result back to a single part (matching the
-# tarball layout) so the part count is identical on both servers. INSERT is what
-# recomputes serialization from the data (sparse columns, statistics); a bare
-# OPTIMIZE would just inherit the source parts' serialization, so it cannot
-# replace the insert.
-#
-# For an in-place rebuild (source == destination) the fresh copy is built under a
-# temporary name and swapped in atomically with EXCHANGE TABLES, so the table the
-# tests read is never missing or half-written even if this step is interrupted.
-function rebuild_table # port, source, destination
-{
-    local port=$1 source=$2 destination=$3
-    local client=(clickhouse-client --port "$port"
-        --max_memory_usage 30G --max_memory_usage_for_user 30G
-        --max_estimated_execution_time 0 --max_execution_time 1800 --receive_timeout 1800)
-    local insert_settings="enable_filesystem_cache_on_write_operations=0, max_insert_threads=16"
-
-    if [ "$("${client[@]}" --query "EXISTS TABLE $source" 2>/dev/null)" != "1" ]; then
-        echo "rebuild_table: source $source not attached, skipping"
-        return
-    fi
-
-    local target=$destination
-    if [ "$source" = "$destination" ]; then
-        target="${destination}_rebuild"
-        "${client[@]}" --query "DROP TABLE IF EXISTS $target SYNC"
-    fi
-
-    "${client[@]}" --query "CREATE TABLE $target AS $source"
-    "${client[@]}" --query "INSERT INTO $target SELECT * FROM $source SETTINGS $insert_settings"
-    "${client[@]}" --query "OPTIMIZE TABLE $target FINAL"
-
-    if [ "$target" != "$destination" ]; then
-        "${client[@]}" --query "EXCHANGE TABLES $target AND $destination"
-        "${client[@]}" --query "DROP TABLE $target SYNC"
-    else
-        "${client[@]}" --query "DROP TABLE $source SYNC"
-    fi
-}
-
-# Rebuild the hits datasets on the given server. Left (reference) and right
-# (tested) servers are populated separately, so a PR that changes a write-time
-# default (sparse serialization, statistics, mark format, ...) is reflected in
-# the parts each side reads. test.hits is built last and used as the "done"
-# marker, because restart() is re-entrant (server-death recovery).
-function populate_data # port
-{
-    local port=$1
-    if [ "$(clickhouse-client --port "$port" --query "EXISTS TABLE test.hits" 2>/dev/null)" = "1" ]; then
-        echo "populate_data: server $port already populated, skipping"
-        return
-    fi
-
-    clickhouse-client --port "$port" --query "CREATE DATABASE IF NOT EXISTS test"
-    rebuild_table "$port" default.hits_10m_single  default.hits_10m_single
-    rebuild_table "$port" default.hits_100m_single default.hits_100m_single
-    rebuild_table "$port" datasets.hits_v1         test.hits
 }
 
 function restart
@@ -283,13 +249,6 @@ function restart
     # will connect to them instead.
     kill -0 $left_pid
     kill -0 $right_pid
-
-    # Re-insert the datasets on both servers in parallel (skipped if already
-    # populated).
-    local populate_pids=()
-    populate_data $LEFT_SERVER_PORT & populate_pids+=($!)
-    populate_data $RIGHT_SERVER_PORT & populate_pids+=($!)
-    for pid in "${populate_pids[@]}"; do wait "$pid"; done
 }
 
 function run_tests

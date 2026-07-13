@@ -8,6 +8,7 @@ import traceback
 import urllib.parse
 from datetime import datetime
 from pathlib import Path
+from threading import Thread
 
 from ci.jobs.scripts.cidb_cluster import CIDBCluster
 from ci.praktika.info import Info
@@ -767,7 +768,6 @@ class CHServer:
             serever_path = f"{temp_dir}/perf_wd/right"
             log_file = f"{serever_path}/server.log"
 
-        self.preconfig_start_cmd = f"{serever_path}/clickhouse-server --config-file={serever_path}/config/config.xml -- --path {db_path} --user_files_path {db_path}/user_files --top_level_domains_path {perf_wd}/top_level_domains --keeper_server.storage_path {temp_dir}/coordination0 --tcp_port {server_port}"
         self.log_fd = None
         self.log_file = log_file
         self.port = server_port
@@ -786,37 +786,6 @@ class CHServer:
             --keeper_server.storage_path {serever_path}/coordination --zookeeper.node.port {keeper_port} \
             --interserver_http_port {inter_server_port} \
             --jemalloc_profiler_sampling_rate {self.JEMALLOC_PROFILER_SAMPLING_RATE}"
-
-    def start_preconfig(self):
-        print("Starting ClickHouse server")
-        print("Command: ", self.preconfig_start_cmd)
-        self.log_fd = open(self.log_file, "w")
-        self.proc = subprocess.Popen(
-            self.preconfig_start_cmd,
-            stderr=subprocess.STDOUT,
-            stdout=self.log_fd,
-            shell=True,
-            start_new_session=True,
-        )
-        time.sleep(2)
-        retcode = self.proc.poll()
-        if retcode is not None:
-            stdout = self.proc.stdout.read().strip() if self.proc.stdout else ""
-            stderr = self.proc.stderr.read().strip() if self.proc.stderr else ""
-            Utils.print_formatted_error("Failed to start ClickHouse", stdout, stderr)
-            return False
-        print("ClickHouse server process started -> wait ready")
-        res = self.wait_ready()
-        if res:
-            print("ClickHouse server ready")
-        else:
-            print("ClickHouse server NOT ready")
-
-        Shell.check(
-            f"clickhouse-client --port {self.port} --query 'create database IF NOT EXISTS test' && clickhouse-client --port {self.port} --query 'rename table datasets.hits_v1 to test.hits'",
-            verbose=True,
-        )
-        return res
 
     def start(self):
         print(f"Starting [{self.name}] ClickHouse server")
@@ -969,6 +938,74 @@ def too_many_slow(message):
     return (
         int(match.group(2).strip()) > SLOWER_QUERIES_FAIL_THRESHOLD if match else False
     )
+
+
+def _perf_client(port):
+    return (
+        f"clickhouse-client --port {port} "
+        "--max_memory_usage 30G --max_memory_usage_for_user 30G "
+        "--max_estimated_execution_time 0 --max_execution_time 1800 --receive_timeout 1800"
+    )
+
+
+def rebuild_table(port, source, destination):
+    # Re-insert an attached dataset through the running server so its parts are
+    # written by that server's own binary and settings (sparse columns,
+    # statistics, mark format) instead of the frozen tarball format, then
+    # OPTIMIZE FINAL back to a single part matching the original layout. INSERT
+    # is what recomputes serialization from the data; a bare OPTIMIZE would
+    # inherit the source parts' serialization, so it cannot replace the insert.
+    # For an in-place rebuild the fresh copy is built under a temporary name and
+    # swapped in atomically with EXCHANGE TABLES.
+    client = _perf_client(port)
+    if Shell.get_output(f'{client} --query "EXISTS TABLE {source}"').strip() != "1":
+        print(f"rebuild_table: source {source} not attached, skipping")
+        return
+    insert_settings = "enable_filesystem_cache_on_write_operations=0, max_insert_threads=16"
+    target = destination
+    if source == destination:
+        target = f"{destination}_rebuild"
+        Shell.check(f'{client} --query "DROP TABLE IF EXISTS {target} SYNC"', strict=True, verbose=True)
+    Shell.check(f'{client} --query "CREATE TABLE {target} AS {source}"', strict=True, verbose=True)
+    Shell.check(f'{client} --query "INSERT INTO {target} SELECT * FROM {source} SETTINGS {insert_settings}"', strict=True, verbose=True)
+    Shell.check(f'{client} --query "OPTIMIZE TABLE {target} FINAL"', strict=True, verbose=True)
+    if target != destination:
+        Shell.check(f'{client} --query "EXCHANGE TABLES {target} AND {destination}"', strict=True, verbose=True)
+        Shell.check(f'{client} --query "DROP TABLE {target} SYNC"', strict=True, verbose=True)
+    else:
+        Shell.check(f'{client} --query "DROP TABLE {source} SYNC"', strict=True, verbose=True)
+
+
+def populate_data(port):
+    # Rebuild the hits datasets on one server. test.hits is built last and used
+    # as the "done" marker so a repeated call is a no-op.
+    if Shell.get_output(f'clickhouse-client --port {port} --query "EXISTS TABLE test.hits"').strip() == "1":
+        print(f"populate_data: server {port} already populated, skipping")
+        return
+    Shell.check(f'clickhouse-client --port {port} --query "CREATE DATABASE IF NOT EXISTS test"', strict=True, verbose=True)
+    rebuild_table(port, "default.hits_10m_single", "default.hits_10m_single")
+    rebuild_table(port, "default.hits_100m_single", "default.hits_100m_single")
+    rebuild_table(port, "datasets.hits_v1", "test.hits")
+
+
+def populate_data_both(left_port, right_port):
+    # Populate both servers in parallel. Each writes its own parts, so a PR that
+    # changes a write-time default is reflected only on the right (patched) side.
+    errors = []
+
+    def run(port):
+        try:
+            populate_data(port)
+        except Exception as e:  # noqa: BLE001
+            print(f"populate_data failed on port {port}: {e}")
+            errors.append(e)
+
+    threads = [Thread(target=run, args=(p,)) for p in (left_port, right_port)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return not errors
 
 
 def main():
@@ -1201,16 +1238,6 @@ def main():
     if res and JobStages.CONFIGURE in stages:
         print("Configure")
 
-        leftCH = CHServer(is_left=True)
-
-        def restart_ch():
-            res_ = leftCH.start_preconfig()
-            leftCH.terminate()
-            # wait for termination
-            time.sleep(5)
-            Shell.check("ps -ef | grep clickhouse", verbose=True)
-            return res_
-
         commands = [
             f'echo "ATTACH DATABASE default ENGINE=Ordinary" > {db_path}/metadata/default.sql',
             f'echo "ATTACH DATABASE datasets ENGINE=Ordinary" > {db_path}/metadata/datasets.sql',
@@ -1226,11 +1253,11 @@ def main():
             # SSH config tries to bind a port not overridden per-server and may be unsupported by the reference binary
             f"rm {perf_right_config}/config.d/ssh.xml ||:",
             f"cp -rv {perf_right_config} {perf_left}/",
-            restart_ch,
             # Make copies of the original db for both servers. Use hardlinks instead
-            # of copying to save space. Before that, remove preprocessed configs and
-            # system tables, because sharing them between servers with hardlinks may
-            # lead to weird effects
+            # of copying to save space. The datasets are attached as-is; each
+            # server re-inserts them into its final tables on startup (see
+            # populate_data), so the parts are written by that server's own
+            # binary and settings instead of the frozen tarball format.
             f"rm -rf {perf_left}/db {perf_right}/db",
             f"rm -rf {db_path}/preprocessed_configs {db_path}/data/system {db_path}/metadata/system {db_path}/status",
             f"cp -al {db_path} {perf_left}/db ||:",
@@ -1285,6 +1312,17 @@ def main():
             if Path(leftCH.log_file).is_file():
                 logs.append(leftCH.log_file)
             results[-1].set_files(logs)
+
+    if res and JobStages.RESTART in stages:
+        print("Populate datasets")
+
+        def populate():
+            return populate_data_both(
+                CHServer.LEFT_SERVER_PORT, CHServer.RIGHT_SERVER_PORT
+            )
+
+        results.append(Result.from_commands_run(name="Populate", command=[populate]))
+        res = results[-1].is_ok()
 
     if res and JobStages.TEST in stages:
         print("Tests")
