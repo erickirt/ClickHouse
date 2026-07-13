@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include <jemalloc/jemalloc.h>
 
 #if defined(OS_LINUX)
+#include <cerrno>
 #include <sched.h>
 #endif
 
@@ -36,8 +38,8 @@ namespace
 
 /// Written once by `initialize` before `initialized` is published; read-only afterwards.
 std::vector<unsigned> arena_indices;
-/// Maps an absolute CPU id (from `getCurrentCPU`) to a slot in `arena_indices`. Sized to
-/// `MAX_CPUS`. Built so every created arena is reachable regardless of the CPU-affinity mask.
+/// Maps an absolute CPU id (from `getCurrentCPU`) to a slot in `arena_indices`. Sized to the
+/// highest allowed CPU id. Built so every created arena is reachable regardless of the mask.
 std::vector<UInt32> slot_by_cpu;
 std::atomic<bool> initialized = false;
 
@@ -65,13 +67,31 @@ std::vector<UInt32> getAllowedCPUs()
 {
     std::vector<UInt32> cpus;
 #if defined(OS_LINUX)
-    cpu_set_t set;
-    CPU_ZERO(&set);
-    if (sched_getaffinity(0, sizeof(set), &set) == 0)
+    /// The fixed `cpu_set_t` holds only `__CPU_SETSIZE` (1024) CPUs, so `sched_getaffinity` fails
+    /// with EINVAL once the mask covers a CPU id >= 1024. Grow a dynamically-allocated set until it
+    /// fits, so pools on machines with many CPUs (or cpusets pinned to high ids) still map every
+    /// allowed CPU to a reachable arena. Runs once, at startup.
+    struct CpuSetDeleter
     {
-        for (UInt32 cpu = 0; cpu < PerCPU::MAX_CPUS; ++cpu)
-            if (CPU_ISSET(cpu, &set))
-                cpus.push_back(cpu);
+        void operator()(cpu_set_t * s) const noexcept { CPU_FREE(s); }
+    };
+    for (size_t num_cpus = 1024; num_cpus <= (size_t{1} << 20); num_cpus *= 2)
+    {
+        std::unique_ptr<cpu_set_t, CpuSetDeleter> set(CPU_ALLOC(num_cpus));
+        if (!set)
+            break;
+        const size_t set_size = CPU_ALLOC_SIZE(num_cpus);
+        if (sched_getaffinity(0, set_size, set.get()) == 0)
+        {
+            for (UInt32 cpu = 0; cpu < num_cpus; ++cpu)
+            {
+                if (CPU_ISSET_S(cpu, set_size, set.get()))
+                    cpus.push_back(cpu);
+            }
+            break;
+        }
+        if (errno != EINVAL) /// EINVAL means the set was too small; anything else is a real error.
+            break;
     }
 #endif
     if (cpus.empty())
@@ -110,13 +130,11 @@ void initialize(size_t num_arenas)
 
         if (!indices.empty())
         {
-            slot_by_cpu.assign(PerCPU::MAX_CPUS, 0);
+            /// Size the map to the highest allowed CPU id (ids are ascending), not a fixed cap, so
+            /// hosts with many CPUs / high-id cpusets still map every allowed CPU to a real slot.
+            slot_by_cpu.assign(static_cast<size_t>(allowed_cpus.back()) + 1, 0);
             for (size_t dense = 0; dense < allowed_cpus.size(); ++dense)
-            {
-                const UInt32 cpu = allowed_cpus[dense];
-                if (cpu < PerCPU::MAX_CPUS)
-                    slot_by_cpu[cpu] = static_cast<UInt32>(dense % indices.size());
-            }
+                slot_by_cpu[allowed_cpus[dense]] = static_cast<UInt32>(dense % indices.size());
         }
 
         arena_indices = std::move(indices);
