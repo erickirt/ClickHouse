@@ -339,12 +339,17 @@ namespace
             int signal = 0;
             bool is_cpu = false;
             UInt64 period_ns = 0;
-            UInt64 next_deadline_ns = 0;
-            UInt64 last_cpu_ns = 0;
+            UInt64 next_deadline_ns = 0; /// wall-clock: next fire (real) or next poll (cpu)
+            UInt64 last_cpu_ns = 0;      /// cpu time at the last poll (cpu only)
+            UInt64 cpu_budget_ns = 0;    /// cpu time remaining until the next fire (cpu only)
         };
 
         /// Cap frequency at 1000 signals/sec, matching the Linux Timer::set floor.
         static UInt64 clampPeriod(UInt64 period_ns) { return std::max<UInt64>(period_ns, 1'000'000); }
+
+        /// Floor for the CPU poll interval, so a thread parked just below its CPU threshold is not
+        /// polled unboundedly often. Well under the 1ms minimum period, so it does not coarsen sampling.
+        static constexpr UInt64 MIN_CPU_POLL_NS = 200'000;
 
         /// Randomized first-fire offset in [0, period], so queries shorter than the period still have a
         /// chance to be sampled (mirrors the randomized `it_value` in the Linux Timer::set).
@@ -353,23 +358,24 @@ namespace
             return std::uniform_int_distribution<UInt64>(0, period_ns)(thread_local_rng);
         }
 
-        /// (Re)arm a registration with a randomized first offset, mirroring the randomized initial
-        /// it_value of the Linux POSIX timers. The wall poll deadline and, for CPU timers, the first
-        /// CPU-time threshold are both randomized so a query shorter than the period can still be sampled.
+        /// (Re)arm a registration, mirroring the randomized initial `it_value` of the Linux POSIX timers
+        /// so a query shorter than the period can still be sampled.
         void arm(Registration & reg, UInt64 period_ns)
         {
             reg.period_ns = clampPeriod(period_ns);
-            reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
             if (reg.is_cpu)
             {
-                /// Pre-credit last_cpu_ns so the first sample needs only a random [0, period] of CPU
-                /// (not a full period). Guard against underflow for a thread that has used little CPU.
-                UInt64 cpu = threadCPUNs(reg.mach_thread);
-                UInt64 credit = randomizedOffset(reg.period_ns);
-                reg.last_cpu_ns = cpu > credit ? cpu - credit : 0;
+                /// Match the Linux CLOCK_THREAD_CPUTIME_ID timer: first fire after a random [0, period]
+                /// of CPU time, then every period. macOS has no CPU-time timer, so the sampler polls
+                /// thread_info; scheduling the first poll at `now + budget` (budget measured in CPU time,
+                /// which equals wall time for a fully busy thread) reproduces the Linux ~duration/period
+                /// short-query sampling probability, unlike a fixed wall cadence.
+                reg.cpu_budget_ns = randomizedOffset(reg.period_ns);
+                reg.last_cpu_ns = threadCPUNs(reg.mach_thread);
+                reg.next_deadline_ns = nowMonotonicNs() + std::max<UInt64>(reg.cpu_budget_ns, MIN_CPU_POLL_NS);
             }
             else
-                reg.last_cpu_ns = 0;
+                reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
         }
 
         void ensureThreadStarted()
@@ -407,21 +413,28 @@ namespace
                     bool fire = false;
                     if (reg.is_cpu)
                     {
-                        /// Approximate a per-thread CPU timer: fire once the thread has consumed
-                        /// another period's worth of CPU time since the last poll.
+                        /// Fire once the thread has consumed `cpu_budget_ns` more CPU time (see arm()).
                         UInt64 cpu = threadCPUNs(reg.mach_thread);
-                        if (cpu - reg.last_cpu_ns >= reg.period_ns)
+                        UInt64 consumed = cpu - reg.last_cpu_ns;
+                        reg.last_cpu_ns = cpu;
+                        if (consumed >= reg.cpu_budget_ns)
                         {
                             fire = true;
-                            reg.last_cpu_ns = cpu;
+                            reg.cpu_budget_ns = reg.period_ns; /// next fire after a full period of CPU
                         }
+                        else
+                            reg.cpu_budget_ns -= consumed;
+                        /// Schedule the next poll at the wall time the remaining budget would elapse under
+                        /// full CPU use (a lower bound on the real fire time, so we never overshoot it);
+                        /// a partly-idle thread simply re-estimates here on the next poll. The floor
+                        /// bounds polling of a thread stuck just below the threshold.
+                        reg.next_deadline_ns = now + std::max<UInt64>(reg.cpu_budget_ns, MIN_CPU_POLL_NS);
                     }
                     else
+                    {
                         fire = true;
-
-                    /// Real timers fire every period; CPU timers poll thread_info every period and fire
-                    /// only when enough CPU time was consumed.
-                    reg.next_deadline_ns = now + reg.period_ns;
+                        reg.next_deadline_ns = now + reg.period_ns; /// real timer fires every period
+                    }
 
                     /// pthread_kill returns ESRCH if the thread is already gone; the owning
                     /// QueryProfiler removes its registration before the thread exits, so this is benign.
