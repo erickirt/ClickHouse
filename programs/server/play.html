@@ -4848,9 +4848,10 @@ function compactFailureSnapshot(reply)
 /// background run never disturbs the foreground.
 /// When `history_query_text` is provided, it overrides `query` for browser history/URL storage,
 /// preserving the full textarea content when running a selected query in multi-query mode.
-async function postSingle(tab, posted_request_num, query, history_query_text, params_restore_pending, queryStart)
+/// `paramValuesSnapshot` is captured by the caller (`postOne`/`postAll`) BEFORE the lexer preflight
+/// await, so a tab switch during that await cannot rebind this run to another tab's parameters.
+async function postSingle(tab, posted_request_num, query, history_query_text, paramValuesSnapshot, queryStart)
 {
-    const paramValuesSnapshot = resolveRunParams(params_restore_pending);
     /// Per-run start time: tabs execute concurrently, so a shared global would be overwritten
     /// by whichever tab launched last and misreport the elapsed time of the others.
     const query_start = performance.now();
@@ -4966,9 +4967,9 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
 /// `parsed` is an array of { query, is_select } objects from splitAllQueries; `editorText` is the
 /// full editor content captured at launch (used as the tab's saved query — must NOT be re-read
 /// from the shared editor at completion, which by then may hold another tab's text).
-async function postMulti(tab, posted_request_num, parsed, params_restore_pending, editorText)
+/// `paramValuesSnapshot` is captured by the caller before the lexer preflight await (see `postSingle`).
+async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText)
 {
-    const paramValuesSnapshot = resolveRunParams(params_restore_pending);
     /// Per-run start time, as in `postSingle`: concurrent tabs must not share it.
     const query_start = performance.now();
     const active = () => tab.id === activeTabId;
@@ -6543,6 +6544,11 @@ async function postOne()
     const tab = getActiveTab();
     if (!tab) return;
     const params_restore_pending = params_restore_pending_token !== null;
+    /// Resolve this run's parameter values NOW, from the launching tab, before the lexer preflight
+    /// await below. Re-reading `param_*` / `getActiveTab` inside `postSingle`/`postMulti` after the
+    /// await would let a tab switch during it bind the run to another tab's parameters (a correctness
+    /// bug for parameterized queries); the snapshot is threaded through the whole background run.
+    const paramValuesSnapshot = resolveRunParams(params_restore_pending, tab);
     /// Bump `activation_num` so a concurrent, still-awaiting `activateTab` restore bails instead of
     /// overwriting the editor after this run starts; the run itself is no longer gated on it.
     ++activation_num;
@@ -6573,9 +6579,9 @@ async function postOne()
         }
 
         if (selected.length > 1) {
-            await postMulti(tab, my_run, selected, params_restore_pending, editor_text);
+            await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text);
         } else if (selected.length === 1) {
-            await postSingle(tab, my_run, selected[0].query, editor_text, params_restore_pending, selected[0].queryStart);
+            await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart);
         }
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
@@ -6589,7 +6595,7 @@ async function postOne()
         }
         /// In multi-query mode, preserve the full textarea content in history/URL
         /// even when running a single query under cursor (so refresh restores all queries).
-        await postSingle(tab, my_run, under.query, isMultiQuery ? editor_text : undefined, params_restore_pending, under.queryStart);
+        await postSingle(tab, my_run, under.query, isMultiQuery ? editor_text : undefined, paramValuesSnapshot, under.queryStart);
     }
 
     /// Reset the run/favicon state only if this run still owns its tab's in-flight state; a newer
@@ -6605,6 +6611,9 @@ async function postAll()
     /// See `postOne`: snapshot the editor before the lexer await, keep the launched run alive on a
     /// tab switch, and supersede only on a newer run/cancel in the same tab (`my_run`/`tab.reqNum`).
     const params_restore_pending = params_restore_pending_token !== null;
+    /// See `postOne`: resolve parameters from the launching tab before the await and thread the
+    /// snapshot through, so a tab switch during the await cannot rebind the run to other parameters.
+    const paramValuesSnapshot = resolveRunParams(params_restore_pending, tab);
     ++activation_num;
     const my_run = ++tab.reqNum;
     document.body.scrollTo(0, 0);
@@ -6617,7 +6626,7 @@ async function postAll()
     if (my_run !== tab.reqNum) return;
 
     if (parsed.length > 1) {
-        await postMulti(tab, my_run, parsed, params_restore_pending, editor_text);
+        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text);
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
@@ -6625,7 +6634,7 @@ async function postAll()
             if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
             focusEditorForRun();
         }
-        await postSingle(tab, my_run, under.query, undefined, params_restore_pending, under.queryStart);
+        await postSingle(tab, my_run, under.query, undefined, paramValuesSnapshot, under.queryStart);
     }
 
     if (my_run === tab.reqNum) endFlight(tab);
@@ -8510,27 +8519,30 @@ function setParamValues(values)
 }
 
 /// Resolve the parameter values a run must execute with, and keep the `param_*` inputs in sync.
+/// Called by `postOne`/`postAll` for the launching `tab` BEFORE the lexer preflight await, so the
+/// whole background run stays bound to one parameter snapshot (see the call sites): re-reading the
+/// shared `param_*` inputs / `getActiveTab` after the await would let a tab switch during the await
+/// rebind the run to another tab's parameter values (a correctness bug for parameterized queries).
 ///
 /// Normally the live DOM inputs are authoritative. But while a tab activation / Back-Forward
-/// restore has not committed yet, the destination tab's saved parameters
+/// restore has not committed yet, the launching tab's saved parameters
 /// have not been written to the inputs — that write happens only after `restoreEditor`'s
 /// tokenization await, which the `++activation_num` in `postOne`/`postAll` has just superseded — so the
 /// inputs still hold the previously active tab's values. Sourcing them would execute this tab's
 /// query against the wrong bindings (a correctness bug, not just a stale UI). Take the values
-/// from the destination tab's own saved `params` instead (parameters are tab-owned), and write
+/// from the launching tab's own saved `params` instead (parameters are tab-owned), and write
 /// them back so the inputs reflect what actually ran.
 ///
-/// The parameter NAMES must also come from the destination tab's snapshot, NOT from the global
+/// The parameter NAMES must also come from the launching tab's snapshot, NOT from the global
 /// `currentQueryParams`: that list is only rewritten by `updateQueryParams` after its own
 /// `await tokenize(...)`, which the still-pending restore has not reached, so it can still describe
 /// the PREVIOUS tab's query. Enumerating it here would send the wrong parameter set — e.g. for a
 /// switch from `SELECT {x}` to `SELECT {y}`, it would send `param_x` and drop `param_y`, running
-/// the destination query with blank/default bindings. The tab's saved `params` already lists this
+/// the launching query with blank/default bindings. The tab's saved `params` already lists this
 /// tab's own parameters (captured when it was last committed / restored), so use its keys.
-function resolveRunParams(params_restore_pending)
+function resolveRunParams(params_restore_pending, tab)
 {
     if (!params_restore_pending) return getParamValues();
-    const tab = getActiveTab();
     const saved = (tab && tab.params) || {};
     const values = {};
     for (const name of Object.keys(saved))
