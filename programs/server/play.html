@@ -4515,7 +4515,9 @@ const EXCEPTION_MARKER = '__exception__';
 /// `SELECT arrayJoin(['__exception__','0123456789abcdef','hello','5 0123456789abcdef','__exception__']) FORMAT TSV`
 /// is a fully-framed lookalike, but its tag will not match the header, so it is not treated as a failure.
 /// Callers that already know the query failed and have no header at hand (history/snapshot restore) omit
-/// the argument to extract the message without verifying.
+/// the argument to extract the message without verifying; a `null` value — the header was absent, e.g. a
+/// proxy or an older server sent the block but did not expose `X-ClickHouse-Exception-Tag`, so
+/// `Headers.get` returned `null` — is treated the same as omitting it.
 function parseExceptionMarker(text, expected_tag)
 {
     const lines = text.split('\n');
@@ -4526,8 +4528,11 @@ function parseExceptionMarker(text, expected_tag)
         const tag = (lines[i + 1] ?? '').replace(/\r$/, '');
         if (!tag) continue;
         /// A genuine marker reuses the per-response header tag; a mismatch means this is ordinary output
-        /// that merely looks like a marker, so keep scanning rather than reporting a false failure.
-        if (expected_tag !== undefined && tag !== expected_tag) continue;
+        /// that merely looks like a marker, so keep scanning rather than reporting a false failure. Both
+        /// `undefined` (restore callers omit the argument) and `null` (`Headers.get` when the header is
+        /// absent — a proxy or older server that wrote the block without exposing the tag) mean "no tag to
+        /// match": accept the block on its framing alone, otherwise a valid marker would be rejected here.
+        if (expected_tag !== undefined && expected_tag !== null && tag !== expected_tag) continue;
 
         /// The message ends at the trailer line `<length> <TAG>`; the length lets the server bound
         /// the message, but here the tag alone is enough to locate the boundary unambiguously.
@@ -4574,6 +4579,29 @@ function firstExceptionMarkerLine(text)
         offset += lines[i].length + 1;   /// + 1 for the '\n' that `split` removed
     }
     return -1;
+}
+
+/// Whether `text` actually began a transport marker for THIS response — a `__exception__` line whose
+/// immediately following line equals `expected_tag` (the server repeats the per-response
+/// `X-ClickHouse-Exception-Tag` right after the opening marker line, see
+/// `WriteBufferFromHTTPServerResponse::cancelWithException`). The live raw branch uses this to tell a
+/// genuine marker whose block the server truncated by breaking HTTP framing — the trailing
+/// `reader.read()` `TypeError` is then *expected* — apart from ordinary raw output that merely contains a
+/// `__exception__` lookalike line and then hit a real transport failure (that `TypeError` is a genuine
+/// error and must surface, not be reported as an unparsable marker). With no tag to check against
+/// (`expected_tag` null/undefined) a marker start cannot be ruled out, so assume it is one (best effort,
+/// same permissive stance `parseExceptionMarker` takes when it has no tag).
+function exceptionMarkerStarted(text, expected_tag)
+{
+    if (expected_tag === undefined || expected_tag === null) return true;
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; ++i)
+    {
+        if (lines[i].replace(/\r$/, '') === EXCEPTION_MARKER
+            && (lines[i + 1] ?? '').replace(/\r$/, '') === expected_tag)
+            return true;
+    }
+    return false;
 }
 
 /// Reverse the escaping `writeXMLStringForTextElement` applies to an `XML`-format text node: it only
@@ -4891,10 +4919,21 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 try {
                     ({ done, value } = await reader.read());
                 } catch (e) {
-                    /// After the `__exception__` block the server intentionally breaks the HTTP framing,
-                    /// so the reader may reject with a `TypeError`; that is expected once the marker was
-                    /// seen (the block is parsed below). Otherwise it is a genuine transport failure.
-                    if (marker_seen && e instanceof TypeError) { marker_framing_broken = true; break; }
+                    /// After a genuine `__exception__` block the server intentionally breaks the HTTP
+                    /// framing, so the reader may reject with a `TypeError`; that is expected and the block
+                    /// is parsed below. But `marker_seen` only means echoing stopped on a line that *looked*
+                    /// like the marker — ordinary raw output can contain such a line (`ok1\n__exception__\n
+                    /// ok2\n`) and then hit a real transport failure. Treat the error as the expected framing
+                    /// break only when the withheld tail actually began a marker for this response (its
+                    /// opening line carried the response tag); otherwise it is a genuine transport error, so
+                    /// flush the withheld output and let the outer handler report it, exactly as a mid-stream
+                    /// network drop with no marker candidate at all would be handled.
+                    if (marker_seen && e instanceof TypeError && exceptionMarkerStarted(held_back, exception_tag))
+                    {
+                        marker_framing_broken = true;
+                        break;
+                    }
+                    if (marker_seen && held_back.length) targetResultEl.updateRaw(held_back);
                     throw e;
                 }
                 if (done) break;
@@ -4939,9 +4978,11 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 /// marker — a raw format can emit `__exception__` (or the whole block shape) as data and
                 /// only then fail. So split on the validated block: flush the output that precedes it
                 /// (withheld from the live view until now) and hide only the block itself. If nothing
-                /// validates: a broken HTTP framing means a genuine but unparsable block (report a generic
-                /// failure, echo nothing); otherwise every candidate was ordinary output, so re-echo the
-                /// whole withheld tail and finish normally.
+                /// validates: `marker_framing_broken` is set only when the tail actually began a marker for
+                /// this response (the catch verified the tag before swallowing the framing-break
+                /// `TypeError`), so it means a genuine but unparsable/truncated block — report a generic
+                /// failure, echo nothing; otherwise every candidate was ordinary output that finished
+                /// cleanly, so re-echo the whole withheld tail and finish normally.
                 const marker = parseExceptionMarker(held_back, exception_tag);
                 if (marker !== null) {
                     if (marker.offset > 0) targetResultEl.updateRaw(held_back.slice(0, marker.offset));
