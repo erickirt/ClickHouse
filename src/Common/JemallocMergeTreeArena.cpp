@@ -71,13 +71,13 @@ std::vector<UInt32> getAllowedCPUs()
     /// with EINVAL once the mask covers a CPU id >= 1024. Grow a dynamically-allocated set until it
     /// fits, so pools on machines with many CPUs (or cpusets pinned to high ids) still map every
     /// allowed CPU to a reachable arena. Runs once, at startup.
-    struct CpuSetDeleter
+    struct CPUSetDeleter
     {
         void operator()(cpu_set_t * s) const noexcept { CPU_FREE(s); }
     };
     for (size_t num_cpus = 1024; num_cpus <= (size_t{1} << 20); num_cpus *= 2)
     {
-        std::unique_ptr<cpu_set_t, CpuSetDeleter> set(CPU_ALLOC(num_cpus));
+        std::unique_ptr<cpu_set_t, CPUSetDeleter> set(CPU_ALLOC(num_cpus));
         if (!set)
             break;
         const size_t set_size = CPU_ALLOC_SIZE(num_cpus);
