@@ -956,7 +956,8 @@ def rebuild_table(port, source, destination):
     # is what recomputes serialization from the data; a bare OPTIMIZE would
     # inherit the source parts' serialization, so it cannot replace the insert.
     # For an in-place rebuild the fresh copy is built under a temporary name and
-    # swapped in atomically with EXCHANGE TABLES.
+    # swapped in with RENAME (the datasets live in Ordinary databases, so
+    # EXCHANGE TABLES is not available).
     client = _perf_client(port)
     if Shell.get_output(f'{client} --query "EXISTS TABLE {source}"').strip() != "1":
         print(f"rebuild_table: source {source} not attached, skipping")
@@ -970,8 +971,10 @@ def rebuild_table(port, source, destination):
     Shell.check(f'{client} --query "INSERT INTO {target} SELECT * FROM {source} SETTINGS {insert_settings}"', strict=True, verbose=True)
     Shell.check(f'{client} --query "OPTIMIZE TABLE {target} FINAL"', strict=True, verbose=True)
     if target != destination:
-        Shell.check(f'{client} --query "EXCHANGE TABLES {target} AND {destination}"', strict=True, verbose=True)
-        Shell.check(f'{client} --query "DROP TABLE {target} SYNC"', strict=True, verbose=True)
+        old = f"{destination}_old"
+        Shell.check(f'{client} --query "DROP TABLE IF EXISTS {old} SYNC"', strict=True, verbose=True)
+        Shell.check(f'{client} --query "RENAME TABLE {destination} TO {old}, {target} TO {destination}"', strict=True, verbose=True)
+        Shell.check(f'{client} --query "DROP TABLE {old} SYNC"', strict=True, verbose=True)
     else:
         Shell.check(f'{client} --query "DROP TABLE {source} SYNC"', strict=True, verbose=True)
 
