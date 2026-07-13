@@ -6576,11 +6576,17 @@ async function postOne()
     const tab = getActiveTab();
     if (!tab) return;
     const params_restore_pending = params_restore_pending_token !== null;
-    /// Resolve this run's parameter values NOW, from the launching tab, before the lexer preflight
-    /// await below. Re-reading `param_*` / `getActiveTab` inside `postSingle`/`postMulti` after the
-    /// await would let a tab switch during it bind the run to another tab's parameters (a correctness
-    /// bug for parameterized queries); the snapshot is threaded through the whole background run.
-    const paramValuesSnapshot = resolveRunParams(params_restore_pending, tab);
+    /// Snapshot this run's parameter VALUES now, from the launching tab, before any await below:
+    /// re-reading `param_*` / `getActiveTab` after an await would let a tab switch during it bind
+    /// the run to another tab's parameters (a correctness bug for parameterized queries). The
+    /// parameter NAMES are bound later, to the run's own tokenization of the launched text (see
+    /// `extractRunParamNames`): the launch-time controls can still describe an OLDER edit while
+    /// the keystroke-driven `updateQueryParams` rebuild is in flight.
+    const param_values_at_launch = resolveRunParams(params_restore_pending, tab);
+    /// Every value known for the launching tab: the live inputs over the tab's own saved params
+    /// (the latter cover names whose inputs have not been (re)built yet, e.g. a placeholder that
+    /// reappeared in the editor moments before the run).
+    const param_sources = Object.assign({}, tab.params || {}, param_values_at_launch);
     /// Bump `activation_num` so a concurrent, still-awaiting `activateTab` restore bails instead of
     /// overwriting the editor after this run starts; the run itself is no longer gated on it.
     ++activation_num;
@@ -6598,6 +6604,18 @@ async function postOne()
     const sel_start = query_area.selectionStart;
     const sel_end = query_area.selectionEnd;
     const has_selection = sel_start !== sel_end;
+
+    /// Bind the parameter names to the RUN's text. `currentQueryParams` may still describe the
+    /// text as it was BEFORE the latest edit (its rebuild by `updateQueryParams` is async), so
+    /// freezing it at launch would, for a quick `SELECT {x}` -> `SELECT {y}` edit-and-run, send
+    /// `param_x` and lose `param_y`. Deriving the names from the launched text itself keeps the
+    /// executed request and its recorded params consistent with the query that actually ran; when
+    /// the list cannot be derived (no lexer / text too large) fall back to the launch snapshot.
+    const run_params = await extractRunParamNames(editor_text);
+    if (my_run !== tab.reqNum) return;
+    const paramValuesSnapshot = run_params === null
+        ? param_values_at_launch
+        : pickRunParams(run_params, param_sources);
 
     /// Entering flight (which drops the tab's previous result — see `beginFlight`) is deferred
     /// until the preflight has produced a statement to run: a no-op launch and a preflight
@@ -6653,9 +6671,11 @@ async function postAll()
     /// See `postOne`: snapshot the editor before the lexer await, keep the launched run alive on a
     /// tab switch, and supersede only on a newer run/cancel in the same tab (`my_run`/`tab.reqNum`).
     const params_restore_pending = params_restore_pending_token !== null;
-    /// See `postOne`: resolve parameters from the launching tab before the await and thread the
-    /// snapshot through, so a tab switch during the await cannot rebind the run to other parameters.
-    const paramValuesSnapshot = resolveRunParams(params_restore_pending, tab);
+    /// See `postOne`: parameter values are snapshotted from the launching tab before any await
+    /// (a tab switch during one must not rebind the run); the names are bound to the run's own
+    /// text below.
+    const param_values_at_launch = resolveRunParams(params_restore_pending, tab);
+    const param_sources = Object.assign({}, tab.params || {}, param_values_at_launch);
     ++activation_num;
     const my_run = ++tab.reqNum;
     const launch_interaction = editorInteractionGen;   /// see `postOne`
@@ -6664,6 +6684,14 @@ async function postAll()
     const editor_text = query_area.value;
     tab.launchQuery = editor_text;   /// see `postOne`: lets `saveHistory` detect a newer draft
     const sel_start = query_area.selectionStart;
+
+    /// See `postOne`: bind the parameter names to the run's own text.
+    const run_params = await extractRunParamNames(editor_text);
+    if (my_run !== tab.reqNum) return;
+    const paramValuesSnapshot = run_params === null
+        ? param_values_at_launch
+        : pickRunParams(run_params, param_sources);
+
     /// See `postOne`: flight is entered only once the preflight has produced a statement to run.
     const parsed = await splitAllQueries(editor_text);
     if (my_run !== tab.reqNum) return;
@@ -8563,11 +8591,11 @@ function setParamValues(values)
     }
 }
 
-/// Resolve the parameter values a run must execute with, and keep the `param_*` inputs in sync.
-/// Called by `postOne`/`postAll` for the launching `tab` BEFORE the lexer preflight await, so the
-/// whole background run stays bound to one parameter snapshot (see the call sites): re-reading the
-/// shared `param_*` inputs / `getActiveTab` after the await would let a tab switch during the await
-/// rebind the run to another tab's parameter values (a correctness bug for parameterized queries).
+/// Snapshot the parameter VALUES a run launches with, and keep the `param_*` inputs in sync.
+/// Called by `postOne`/`postAll` for the launching `tab` BEFORE any await, so the whole background
+/// run stays bound to one launch-time snapshot (see the call sites): re-reading the shared
+/// `param_*` inputs / `getActiveTab` after an await would let a tab switch during it rebind the
+/// run to another tab's parameter values (a correctness bug for parameterized queries).
 ///
 /// Normally the live DOM inputs are authoritative. But while a tab activation / Back-Forward
 /// restore has not committed yet, the launching tab's saved parameters
@@ -8578,13 +8606,14 @@ function setParamValues(values)
 /// from the launching tab's own saved `params` instead (parameters are tab-owned), and write
 /// them back so the inputs reflect what actually ran.
 ///
-/// The parameter NAMES must also come from the launching tab's snapshot, NOT from the global
-/// `currentQueryParams`: that list is only rewritten by `updateQueryParams` after its own
-/// `await tokenize(...)`, which the still-pending restore has not reached, so it can still describe
-/// the PREVIOUS tab's query. Enumerating it here would send the wrong parameter set — e.g. for a
-/// switch from `SELECT {x}` to `SELECT {y}`, it would send `param_x` and drop `param_y`, running
-/// the launching query with blank/default bindings. The tab's saved `params` already lists this
-/// tab's own parameters (captured when it was last committed / restored), so use its keys.
+/// The parameter NAMES this snapshot enumerates (via `currentQueryParams` / the tab's saved keys)
+/// can themselves lag the editor: both are rebuilt only after an asynchronous tokenization
+/// (`updateQueryParams` on edits, `restoreEditor` on activation), so right after a quick edit they
+/// may still describe the PREVIOUS text — e.g. for `SELECT {x}` -> `SELECT {y}` they would send
+/// `param_x` and drop `param_y`. `postOne`/`postAll` therefore re-derive the names from the RUN's
+/// own tokenization of the launched text (`extractRunParamNames`) and bind them to the values
+/// snapshotted here (`pickRunParams`); this function's result is used directly only as the
+/// fallback when that derivation is unavailable.
 function resolveRunParams(params_restore_pending, tab)
 {
     if (!params_restore_pending) return getParamValues();
@@ -8595,6 +8624,38 @@ function resolveRunParams(params_restore_pending, tab)
         values[name] = saved[name] !== undefined ? saved[name] : '';
     }
     setParamValues(values);
+    return values;
+}
+
+/// Extract the `{name:Type}` parameter placeholders from the RUN's own snapshot of the editor
+/// text, tokenizing it independently of the keystroke-driven `updateQueryParams` pipeline (whose
+/// `currentQueryParams` may still describe an older edit). Returns the extracted list, or null
+/// when it cannot be derived (no WASM lexer, or the text is too large to tokenize) — the caller
+/// then falls back to the launch-time snapshot.
+async function extractRunParamNames(text)
+{
+    if (typeof WebAssembly !== 'object' || typeof WebAssembly.instantiate !== 'function') return null;
+    try
+    {
+        return extractQueryParams(await tokenize(text));
+    }
+    catch (e)
+    {
+        return null;
+    }
+}
+
+/// Bind a run's own parameter list (`params`, extracted from the launched text) to the values
+/// known for the launching tab at launch (`sources`). A name with no known value is omitted —
+/// exactly like a parameter whose input never existed — so the server reports it as not set
+/// instead of the run silently executing with a stale or foreign binding.
+function pickRunParams(params, sources)
+{
+    const values = {};
+    for (const param of params)
+    {
+        if (sources[param.name] !== undefined) values[param.name] = sources[param.name];
+    }
     return values;
 }
 
