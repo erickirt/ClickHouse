@@ -6502,8 +6502,15 @@ function beginFlight(tab) {
     /// the NEW query text, and a rerun that is cancelled or reloaded before `saveHistory` records a
     /// fresh snapshot would reopen showing the previous result attached to the new query.
     /// `saveHistory` installs the new snapshot on completion; persist the cleared state now so a
-    /// reload mid-run does not resurrect the stale one.
+    /// reload mid-run does not resurrect the stale one. Clear the on-screen result at the same time:
+    /// `postSingle`/`postMulti` normally do it via `clearPanel`, but the lexer preflight between here
+    /// and them can be cancelled or superseded (an early `my_run !== tab.reqNum` return in `postOne`/
+    /// `postAll` before either is reached), which would leave the previous result DOM under a
+    /// now-null snapshot — shown until reload and never re-materialized (the tab is already marked
+    /// materialized). Clearing here keeps the panel and the snapshot consistent; a launch that does
+    /// reach `postSingle`/`postMulti` just clears an already-empty panel.
     tab.result = null;
+    clearPanel(tab);
     scheduleSave();
     updateTabIndicator(tab);
     refreshFavicon();
