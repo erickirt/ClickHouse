@@ -14,7 +14,7 @@ ENGINE = MergeTree
 ORDER BY id
 SETTINGS index_granularity = 64;
 
--- No empty strings anywhere in the data.
+-- No empty strings anywhere in the data; id is always < 8192.
 INSERT INTO tab
 SELECT
     number,
@@ -22,14 +22,25 @@ SELECT
     map(concat('k', toString(number)), concat('v', toString(number)))
 FROM numbers(8192);
 
-SET use_skip_indexes = 0;
-SELECT count() FROM tab WHERE has(arr, '');
-SELECT count() FROM tab WHERE mapContainsKey(mp, '');
-SELECT count() FROM tab WHERE mapContainsValue(mp, '');
 
+SELECT '-- empty needle, index lookup';
 SET use_skip_indexes = 1;
 SELECT count() FROM tab WHERE has(arr, '');
+SELECT count() FROM tab WHERE has(mp, '');
 SELECT count() FROM tab WHERE mapContainsKey(mp, '');
 SELECT count() FROM tab WHERE mapContainsValue(mp, '');
+SELECT count() FROM tab WHERE mapContainsKeyLike(mp, '');
+SELECT count() FROM tab WHERE mapContainsValueLike(mp, '');
+SET use_skip_indexes = default;
+
+SELECT '-- empty needle, no index';
+SET use_skip_indexes = 0;
+SELECT count() FROM tab WHERE has(arr, '');
+SELECT count() FROM tab WHERE has(mp, '');
+SELECT count() FROM tab WHERE mapContainsKey(mp, '');
+SELECT count() FROM tab WHERE mapContainsValue(mp, '');
+SELECT count() FROM tab WHERE mapContainsKeyLike(mp, '');
+SELECT count() FROM tab WHERE mapContainsValueLike(mp, '');
+SET use_skip_indexes = default;
 
 DROP TABLE tab;
