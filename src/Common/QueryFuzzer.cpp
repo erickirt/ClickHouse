@@ -2052,7 +2052,7 @@ void QueryFuzzer::fuzzIndexDeclaration(ASTIndexDeclaration & index)
                 if (fuzz_rand() % 5 == 0)
                     value_ast = make_intrusive<ASTLiteral>(UInt64(fuzz_rand() % 2048 + 1));
             }
-            else if (param_id->name() == "positions")
+            else if (param_id->name() == "support_phrase_search")
             {
                 if (fuzz_rand() % 5 == 0)
                     value_ast = make_intrusive<ASTLiteral>(UInt64(fuzz_rand() % 2));
