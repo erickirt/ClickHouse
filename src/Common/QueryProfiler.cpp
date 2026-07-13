@@ -296,9 +296,7 @@ namespace
             reg.mach_thread = pthread_mach_thread_np(thread);
             reg.signal = signal;
             reg.is_cpu = (clock_type == CLOCK_THREAD_CPUTIME_ID);
-            reg.period_ns = clampPeriod(period_ns);
-            reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
-            reg.last_cpu_ns = reg.is_cpu ? threadCPUNs(reg.mach_thread) : 0;
+            arm(reg, period_ns);
             ensureThreadStarted();
             cond.notify_all();
         }
@@ -309,14 +307,10 @@ namespace
             auto it = registrations.find({reinterpret_cast<uintptr_t>(thread), signal});
             if (it == registrations.end())
                 return;
-            auto & reg = it->second;
-            reg.period_ns = clampPeriod(period_ns);
             /// Re-arm from now with the new period (like the Linux Timer::set), so lowering the period
             /// takes effect immediately instead of waiting out the previous, possibly much larger,
             /// deadline (e.g. the 10s default global profiler before a query sets a smaller period).
-            reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
-            if (reg.is_cpu)
-                reg.last_cpu_ns = threadCPUNs(reg.mach_thread);
+            arm(it->second, period_ns);
             cond.notify_all();
         }
 
@@ -357,6 +351,25 @@ namespace
         static UInt64 randomizedOffset(UInt64 period_ns)
         {
             return std::uniform_int_distribution<UInt64>(0, period_ns)(thread_local_rng);
+        }
+
+        /// (Re)arm a registration with a randomized first offset, mirroring the randomized initial
+        /// it_value of the Linux POSIX timers. The wall poll deadline and, for CPU timers, the first
+        /// CPU-time threshold are both randomized so a query shorter than the period can still be sampled.
+        void arm(Registration & reg, UInt64 period_ns)
+        {
+            reg.period_ns = clampPeriod(period_ns);
+            reg.next_deadline_ns = nowMonotonicNs() + randomizedOffset(reg.period_ns);
+            if (reg.is_cpu)
+            {
+                /// Pre-credit last_cpu_ns so the first sample needs only a random [0, period] of CPU
+                /// (not a full period). Guard against underflow for a thread that has used little CPU.
+                UInt64 cpu = threadCPUNs(reg.mach_thread);
+                UInt64 credit = randomizedOffset(reg.period_ns);
+                reg.last_cpu_ns = cpu > credit ? cpu - credit : 0;
+            }
+            else
+                reg.last_cpu_ns = 0;
         }
 
         void ensureThreadStarted()
@@ -468,11 +481,14 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Failed to add signal to mask for query profiler");
 
 #if defined(OS_DARWIN)
-    /// The Real (SIGUSR1) and CPU (SIGUSR2) profilers share one thread-local stack-unwinding recovery
-    /// (the asynchronous_stack_unwinding flag + sigjmp_buf). Block the sibling profiler signal while a
-    /// handler runs so the two cannot nest and clobber that buffer - a corrupted siglongjmp jumps to a
-    /// garbage address and faults. (On Linux the per-thread POSIX timers don't require this.)
-    if (sigaddset(&sa.sa_mask, QueryProfilerReal::PAUSE_SIGNAL) || sigaddset(&sa.sa_mask, QueryProfilerCPU::PAUSE_SIGNAL))
+    /// On macOS the Real (SIGUSR1) and CPU (SIGUSR2) profilers and system.stack_trace (SIGVTALRM) all
+    /// share one thread-local stack-unwinding recovery (the asynchronous_stack_unwinding flag +
+    /// sigjmp_buf). Block all of them while a handler runs so they cannot nest and clobber that buffer -
+    /// a corrupted siglongjmp jumps to a garbage address and faults. (On Linux the per-thread POSIX
+    /// timers deliver only to the armed thread and stack_trace uses no shared recovery, so this is not
+    /// needed there.) SIGVTALRM is StorageSystemStackTrace's STACK_TRACE_SERVICE_SIGNAL on macOS.
+    if (sigaddset(&sa.sa_mask, QueryProfilerReal::PAUSE_SIGNAL) || sigaddset(&sa.sa_mask, QueryProfilerCPU::PAUSE_SIGNAL)
+        || sigaddset(&sa.sa_mask, SIGVTALRM))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Failed to add profiler signals to mask for query profiler");
 #endif
 #pragma clang diagnostic pop
