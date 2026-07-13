@@ -4428,11 +4428,16 @@ const default_format = 'JSONStringsEachRowWithProgress';
 /// if the message itself contains the marker text.
 const EXCEPTION_MARKER = '__exception__';
 
-/// Extract the error message from a `__exception__` marker block embedded anywhere in `text`
-/// (typically at the very end of a streamed response). Returns the message string, or null if no
-/// complete block is present. A complete block is a tag line, the message, a `<length> <TAG>` trailer
-/// line, and a closing `__exception__` line; the message is everything between the tag and the trailer,
-/// so it is recovered verbatim regardless of its own content.
+/// Extract a `__exception__` marker block embedded anywhere in `text` (typically at the very end of a
+/// streamed response). Returns `{ message, offset }` — the error message and the character offset in
+/// `text` of the opening `__exception__` line of the matched block — or null if no complete block is
+/// present. A complete block is a tag line, the message, a `<length> <TAG>` trailer line, and a closing
+/// `__exception__` line; the message is everything between the tag and the trailer, so it is recovered
+/// verbatim regardless of its own content. The `offset` lets a caller keep the raw output that arrived
+/// *before* the block while hiding the block itself: an earlier line may merely look like the marker (a
+/// raw format can emit `__exception__`, or the whole block shape, as data and then fail later), so the
+/// split point must be the validated block, not the first candidate line. A candidate line that does not
+/// lead to a complete block is skipped and scanning continues, so such lookalikes never abort the search.
 ///
 /// `expected_tag`, when supplied, is the value of the `X-ClickHouse-Exception-Tag` response header. The
 /// server picks a fresh random tag per response and repeats it inside the marker block (see
@@ -4471,10 +4476,17 @@ function parseExceptionMarker(text, expected_tag)
             /// without the closing check would be misread as the error "hello".
             if (/^\d+$/.test(stripped.slice(0, stripped.length - trailer.length)) && stripped.endsWith(trailer)
                 && (lines[j + 1] ?? '').replace(/\r$/, '') === EXCEPTION_MARKER)
-                return message_lines.join('\n');
+            {
+                /// Char offset of the opening `__exception__` line (`lines[i]`) within `text`, so callers
+                /// can split the raw output on the *validated* block rather than the first candidate line.
+                const offset = i === 0 ? 0 : lines.slice(0, i).join('\n').length + 1;
+                return { message: message_lines.join('\n'), offset };
+            }
             message_lines.push(lines[j]);
         }
-        return null;   /// Block started but its closing trailer + marker have not arrived yet.
+        /// This candidate's block never completed (a lookalike `__exception__` line, or a genuine block
+        /// truncated by an incomplete stream): keep scanning for a later, complete block rather than
+        /// giving up, otherwise a raw prefix that contains a lookalike line would mask the real marker.
     }
     return null;
 }
@@ -4735,7 +4747,8 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             /// full reply after the stream ended; the format-level `{"exception":...}` line is already
             /// captured in `stream_exception` above.
             if (marker_seen && stream_exception === null) {
-                stream_exception = parseExceptionMarker(reply, exception_tag)
+                const marker = parseExceptionMarker(reply, exception_tag);
+                stream_exception = (marker !== null ? marker.message : null)
                     ?? "The query failed after the response body had already started, but the error message could not be parsed.";
             }
 
@@ -4829,16 +4842,23 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
 
             if (marker_seen) {
                 /// A genuine transport marker is a fully-framed `__exception__ <TAG> ... <len> <TAG>
-                /// __exception__` block that `parseExceptionMarker` can extract; if it can, render the
-                /// error. If it cannot, the candidate line was ordinary output that merely equalled the
-                /// marker (the server did not break the framing) — re-echo the withheld output and finish
-                /// normally. The lone exception is a genuine but unparsable block, recognized by the
-                /// broken HTTP framing, for which we still report a generic failure rather than echo it.
-                stream_exception = parseExceptionMarker(reply, exception_tag);
-                if (stream_exception === null && marker_framing_broken)
+                /// __exception__` block that `parseExceptionMarker` can extract from the withheld tail;
+                /// echoing stopped at the *first* candidate line, but that line may merely look like the
+                /// marker — a raw format can emit `__exception__` (or the whole block shape) as data and
+                /// only then fail. So split on the validated block: flush the output that precedes it
+                /// (withheld from the live view until now) and hide only the block itself. If nothing
+                /// validates: a broken HTTP framing means a genuine but unparsable block (report a generic
+                /// failure, echo nothing); otherwise every candidate was ordinary output, so re-echo the
+                /// whole withheld tail and finish normally.
+                const marker = parseExceptionMarker(held_back, exception_tag);
+                if (marker !== null) {
+                    if (marker.offset > 0) targetResultEl.updateRaw(held_back.slice(0, marker.offset));
+                    stream_exception = marker.message;
+                } else if (marker_framing_broken) {
                     stream_exception = "The query failed after the response body had already started, but the error message could not be parsed.";
-                else if (stream_exception === null && held_back.length)
+                } else if (held_back.length) {
                     targetResultEl.updateRaw(held_back);
+                }
             } else {
                 /// Flush the final line (a stream need not end with a newline).
                 if (buffer.length) targetResultEl.updateRaw(buffer);
@@ -5181,26 +5201,22 @@ function renderFailedSnapshot(el, data, format) {
         } else {
             el.clear();
         }
+        const marker = marker_seen ? parseExceptionMarker(data) : null;
         const message = inband_exception
-            ?? (marker_seen ? parseExceptionMarker(data) : null)
+            ?? (marker !== null ? marker.message : null)
             ?? parseInbandException(data, format)
             ?? data;
         el.renderError(message);
         return;
     }
 
-    /// Transport-level `__exception__` marker: echo the raw prefix that arrived before the marker
-    /// block (the block itself stays hidden, as the live raw branch withholds it), then the error.
-    const marker_message = parseExceptionMarker(data);
-    if (marker_message !== null) {
-        const lines = data.split('\n');
-        let prefix = '';
-        for (let idx = 0; idx < lines.length; ++idx) {
-            if (lines[idx].replace(/\r$/, '') === EXCEPTION_MARKER) break;
-            prefix += lines[idx] + '\n';
-        }
-        if (prefix.length) el.updateRaw(prefix);
-        el.renderError(marker_message);
+    /// Transport-level `__exception__` marker: echo the raw prefix that arrived before the *validated*
+    /// block (an earlier line may merely look like the marker; the block itself stays hidden, as the live
+    /// raw branch withholds it), then the error.
+    const marker = parseExceptionMarker(data);
+    if (marker !== null) {
+        if (marker.offset > 0) el.updateRaw(data.slice(0, marker.offset));
+        el.renderError(marker.message);
         return;
     }
 
