@@ -4564,44 +4564,33 @@ function parseExceptionMarker(text, expected_tag)
     return null;
 }
 
-/// Char offset within `text` of the first whole line equal to `EXCEPTION_MARKER`, or -1 if there is none.
-/// This is where the live raw branch stops echoing output (the first *candidate* marker line, see
-/// `postImpl`). When a complete block validates, `parseExceptionMarker` refines the split to that block;
-/// but when a marker began and never validated (broken framing / truncation), this is the exact prefix
-/// the live path kept, so `renderFailedSnapshot` echoes up to here and shows the generic message.
-function firstExceptionMarkerLine(text)
+/// Char offset within `text` of the first line where a transport marker for THIS response *starts* —
+/// a `__exception__` line whose immediately following line equals `expected_tag` (the server repeats
+/// the per-response `X-ClickHouse-Exception-Tag` right after the opening marker line, see
+/// `WriteBufferFromHTTPServerResponse::cancelWithException`) — or -1 if there is none. The live raw
+/// branch uses this to tell a genuine marker whose block the server truncated by breaking HTTP
+/// framing — the trailing `reader.read()` `TypeError` is then *expected* — apart from ordinary raw
+/// output that merely contains a `__exception__` lookalike line and then hit a real transport failure
+/// (that `TypeError` is a genuine error and must surface, not be reported as an unparsable marker).
+/// The offset (not just a boolean) matters for the truncated-marker case: echoing stopped at the
+/// first *candidate* line, which may be an earlier lookalike in ordinary output, so the withheld
+/// output before the tag-compatible start streamed before the failure and must still be shown — this
+/// is the split point for it, in both the live path and `renderFailedSnapshot`. With no tag to check
+/// against (`expected_tag` null/undefined) a start cannot be ruled out, so the first candidate line
+/// counts (best effort, same permissive stance `parseExceptionMarker` takes when it has no tag).
+function exceptionMarkerStart(text, expected_tag)
 {
+    const match_any_tag = expected_tag === undefined || expected_tag === null;
     const lines = text.split('\n');
     let offset = 0;
     for (let i = 0; i < lines.length; ++i)
     {
-        if (lines[i].replace(/\r$/, '') === EXCEPTION_MARKER) return offset;
+        if (lines[i].replace(/\r$/, '') === EXCEPTION_MARKER
+            && (match_any_tag || (lines[i + 1] ?? '').replace(/\r$/, '') === expected_tag))
+            return offset;
         offset += lines[i].length + 1;   /// + 1 for the '\n' that `split` removed
     }
     return -1;
-}
-
-/// Whether `text` actually began a transport marker for THIS response — a `__exception__` line whose
-/// immediately following line equals `expected_tag` (the server repeats the per-response
-/// `X-ClickHouse-Exception-Tag` right after the opening marker line, see
-/// `WriteBufferFromHTTPServerResponse::cancelWithException`). The live raw branch uses this to tell a
-/// genuine marker whose block the server truncated by breaking HTTP framing — the trailing
-/// `reader.read()` `TypeError` is then *expected* — apart from ordinary raw output that merely contains a
-/// `__exception__` lookalike line and then hit a real transport failure (that `TypeError` is a genuine
-/// error and must surface, not be reported as an unparsable marker). With no tag to check against
-/// (`expected_tag` null/undefined) a marker start cannot be ruled out, so assume it is one (best effort,
-/// same permissive stance `parseExceptionMarker` takes when it has no tag).
-function exceptionMarkerStarted(text, expected_tag)
-{
-    if (expected_tag === undefined || expected_tag === null) return true;
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; ++i)
-    {
-        if (lines[i].replace(/\r$/, '') === EXCEPTION_MARKER
-            && (lines[i + 1] ?? '').replace(/\r$/, '') === expected_tag)
-            return true;
-    }
-    return false;
 }
 
 /// Reverse the escaping `writeXMLStringForTextElement` applies to an `XML`-format text node: it only
@@ -4928,7 +4917,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                     /// opening line carried the response tag); otherwise it is a genuine transport error, so
                     /// flush the withheld output and let the outer handler report it, exactly as a mid-stream
                     /// network drop with no marker candidate at all would be handled.
-                    if (marker_seen && e instanceof TypeError && exceptionMarkerStarted(held_back, exception_tag))
+                    if (marker_seen && e instanceof TypeError && exceptionMarkerStart(held_back, exception_tag) >= 0)
                     {
                         marker_framing_broken = true;
                         break;
@@ -4980,14 +4969,18 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 /// (withheld from the live view until now) and hide only the block itself. If nothing
                 /// validates: `marker_framing_broken` is set only when the tail actually began a marker for
                 /// this response (the catch verified the tag before swallowing the framing-break
-                /// `TypeError`), so it means a genuine but unparsable/truncated block — report a generic
-                /// failure, echo nothing; otherwise every candidate was ordinary output that finished
-                /// cleanly, so re-echo the whole withheld tail and finish normally.
+                /// `TypeError`), so it means a genuine but unparsable/truncated block — flush the withheld
+                /// output up to where that marker starts (an earlier lookalike line withheld with it is
+                /// ordinary output that streamed before the failure), hide the truncated block, and report
+                /// a generic failure; otherwise every candidate was ordinary output that finished cleanly,
+                /// so re-echo the whole withheld tail and finish normally.
                 const marker = parseExceptionMarker(held_back, exception_tag);
                 if (marker !== null) {
                     if (marker.offset > 0) targetResultEl.updateRaw(held_back.slice(0, marker.offset));
                     stream_exception = marker.message;
                 } else if (marker_framing_broken) {
+                    const start = exceptionMarkerStart(held_back, exception_tag);
+                    if (start > 0) targetResultEl.updateRaw(held_back.slice(0, start));
                     stream_exception = "The query failed after the response body had already started, but the error message could not be parsed.";
                 } else if (held_back.length) {
                     targetResultEl.updateRaw(held_back);
@@ -5373,7 +5366,7 @@ function renderFailedSnapshot(el, data, format, tag) {
     /// block at or after it. A failed raw snapshot that carries a marker line either validated a block
     /// (show its message) or never completed one (broken framing / truncation ⇒ generic message live);
     /// it can never fall through to the in-band / plain-string cases, which have no marker line.
-    const first_marker_line = firstExceptionMarkerLine(data);
+    const first_marker_line = exceptionMarkerStart(data, null);   /// tag-blind: any candidate line
     if (first_marker_line >= 0) {
         const marker = parseExceptionMarker(data, tag);
         if (marker !== null) {
@@ -5382,9 +5375,14 @@ function renderFailedSnapshot(el, data, format, tag) {
             if (marker.offset > 0) el.updateRaw(data.slice(0, marker.offset));
             el.renderError(marker.message);
         } else {
-            /// A marker began but never validated: live echoed only the output before the first candidate
-            /// line and showed the generic message (it withheld the rest and never re-echoed it). Same here.
-            if (first_marker_line > 0) el.updateRaw(data.slice(0, first_marker_line));
+            /// A marker began but never validated (broken framing / truncation): live echoed the output up
+            /// to the first *tag-compatible* marker start — an earlier lookalike line is ordinary output
+            /// that streamed before the failure — and showed the generic message. Split the same way; only
+            /// when no tag-compatible start exists (the tag line itself was truncated away, or a foreign /
+            /// pre-tag snapshot) fall back conservatively to the first candidate line.
+            const start = exceptionMarkerStart(data, tag);
+            const split = start >= 0 ? start : first_marker_line;
+            if (split > 0) el.updateRaw(data.slice(0, split));
             el.renderError(MARKER_UNPARSED);
         }
         return;
