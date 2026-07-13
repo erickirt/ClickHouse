@@ -6333,6 +6333,13 @@ function saveHistory(stateData, titleForDoc, tab) {
     /// produced the result is still recorded in `result.query` below either way.
     const query_unchanged = tab.launchQuery === undefined || tab.query === tab.launchQuery;
     if (query_unchanged) tab.query = stateData.query;
+    /// The same "draft still matches the launched run" predicate for the PARAMETERS: editing a
+    /// `param_*` input while the run was in flight updates `tab.params`, and the history entry /
+    /// URL below is written from `tab.params` — stamping `run=1` on it would let a reload or a
+    /// shared link rerun different bindings than the result currently shown. `stateData.params`
+    /// is the launch-time snapshot the run actually executed with (same comparison as
+    /// `tabReflectsRun` uses against `result.params`).
+    const params_unchanged = JSON.stringify(tab.params || {}) === JSON.stringify(stateData.params || {});
     tab.result = {
         ran: true,   /// marks a genuine run; the tab bar's visibility keys off this
         /// The single statement that produced this result (in multi-query mode it differs
@@ -6354,9 +6361,10 @@ function saveHistory(stateData, titleForDoc, tab) {
     if (tab.id === activeTabId) {
         /// This entry was produced by an actual run, so it may carry `run=1` (a reload/shared link
         /// re-runs it). Editor-only writers (`syncHistory`/`refreshCurrentHistoryEntry`) never do.
-        /// When the draft diverged from the launch text, the entry carries the UNRUN draft, which
-        /// must never be auto-runnable (see `writeHistoryEntry` on the `run=1` invariant).
-        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged);
+        /// When the draft diverged from the launch text OR its parameters diverged from the ones
+        /// the run executed with, the entry carries an UNRUN draft, which must never be
+        /// auto-runnable (see `writeHistoryEntry` on the `run=1` invariant).
+        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged && params_unchanged);
     } else {
         /// Background run finished: reflect its new result in the tab bar and persist it, without
         /// disturbing the active tab's URL/history entry.
