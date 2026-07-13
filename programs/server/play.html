@@ -6480,8 +6480,15 @@ function refreshFavicon() { setFavicon(anyInFlight() ? favicon_running : favicon
 
 /// Mark a tab's query as started. The favicon and the tab-title spinner reflect it immediately;
 /// the Run/Stop button and autocompletion only when the tab is active (background runs are shown
-/// solely on their tab title).
-function beginFlight(tab) {
+/// solely on their tab title). Called by `postOne`/`postAll` only AFTER their lexer preflight has
+/// produced a runnable statement: entering flight is destructive (it drops the tab's previous
+/// result below), so a launch that turns out to be a no-op (a whitespace-only selection) or dies
+/// in the preflight (a tokenizer failure on a huge query) must never get here — the tab then keeps
+/// its result and never shows a stuck "running" state. `launchInteractionGen` is the editor
+/// interaction generation snapshotted when the run was LAUNCHED (before the preflight await), so
+/// an edit made while the preflight ran already disarms the late server-error highlight whose
+/// offsets describe the launch-time text.
+function beginFlight(tab, launchInteractionGen) {
     tab.inFlight = true;
     tab.completed = false;
     tab.progressPhase = 'running';
@@ -6502,13 +6509,11 @@ function beginFlight(tab) {
     /// the NEW query text, and a rerun that is cancelled or reloaded before `saveHistory` records a
     /// fresh snapshot would reopen showing the previous result attached to the new query.
     /// `saveHistory` installs the new snapshot on completion; persist the cleared state now so a
-    /// reload mid-run does not resurrect the stale one. Clear the on-screen result at the same time:
-    /// `postSingle`/`postMulti` normally do it via `clearPanel`, but the lexer preflight between here
-    /// and them can be cancelled or superseded (an early `my_run !== tab.reqNum` return in `postOne`/
-    /// `postAll` before either is reached), which would leave the previous result DOM under a
-    /// now-null snapshot — shown until reload and never re-materialized (the tab is already marked
-    /// materialized). Clearing here keeps the panel and the snapshot consistent; a launch that does
-    /// reach `postSingle`/`postMulti` just clears an already-empty panel.
+    /// reload mid-run does not resurrect the stale one. Clear the on-screen result at the same time
+    /// so the panel and the snapshot can never disagree: there is no await between here and the
+    /// `clearPanel` in `postSingle`/`postMulti` (the preflight ran BEFORE flight was entered), so
+    /// they just re-clear an already-empty panel, and a cancel from this point on leaves the
+    /// consistent "cancelled before the first row" state.
     tab.result = null;
     clearPanel(tab);
     scheduleSave();
@@ -6529,11 +6534,12 @@ function beginFlight(tab) {
         /// New run: no statement has claimed the error marker yet. With this reset in place, the
         /// arbitration in `highlightQueryError` is scoped to one run (see `queryErrorOwnerStart`).
         queryErrorOwnerStart = -1;
-        /// Snapshot the editor-interaction generation. A late error response is only allowed to paint
-        /// a highlight if the user has not returned to the editor since this run started. The keystroke
-        /// or click that triggered the run has already bumped the generation (the textarea's own
-        /// handlers run before the document-level run trigger), so it is included in this snapshot.
-        runEditorInteraction = editorInteractionGen;
+        /// Install the launch-time editor-interaction snapshot. A late error response is only allowed
+        /// to paint a highlight if the user has not returned to the editor since this run was launched.
+        /// The keystroke or click that triggered the run has already bumped the generation (the
+        /// textarea's own handlers run before the document-level run trigger), so it is included in
+        /// the snapshot; an edit made during the preflight await bumps past it and disarms the paint.
+        runEditorInteraction = launchInteractionGen;
     }
 }
 
@@ -6579,8 +6585,10 @@ async function postOne()
     /// overwriting the editor after this run starts; the run itself is no longer gated on it.
     ++activation_num;
     const my_run = ++tab.reqNum;
+    /// Snapshot the editor-interaction generation at launch: `beginFlight` (deferred until the
+    /// preflight below has found something to run) installs it into `runEditorInteraction`.
+    const launch_interaction = editorInteractionGen;
     document.body.scrollTo(0, 0);
-    beginFlight(tab);
 
     /// Snapshot the shared editor before any await (see above). The launch text is also recorded
     /// on the tab so `saveHistory` can tell, at completion, whether the tab's draft has since
@@ -6591,6 +6599,9 @@ async function postOne()
     const sel_end = query_area.selectionEnd;
     const has_selection = sel_start !== sel_end;
 
+    /// Entering flight (which drops the tab's previous result — see `beginFlight`) is deferred
+    /// until the preflight has produced a statement to run: a no-op launch and a preflight
+    /// failure (a tokenizer exception on a huge query) leave the tab and its result untouched.
     if (has_selection && isMultiQuery) {
         /// Find all queries that intersect the selection and run them.
         const parsed = await splitAllQueries(editor_text);
@@ -6604,14 +6615,19 @@ async function postOne()
             }
         }
 
+        /// A whitespace/comment-only selection intersects nothing runnable: the launch is a no-op.
+        if (selected.length === 0) return;
+
+        beginFlight(tab, launch_interaction);
         if (selected.length > 1) {
             await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text);
-        } else if (selected.length === 1) {
+        } else {
             await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart);
         }
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
+        beginFlight(tab, launch_interaction);
         /// Highlight and focus the chosen query only when this tab is still active: a background
         /// run (the user switched away during the preflight) must not move the foreground editor's
         /// selection or steal focus.
@@ -6642,20 +6658,23 @@ async function postAll()
     const paramValuesSnapshot = resolveRunParams(params_restore_pending, tab);
     ++activation_num;
     const my_run = ++tab.reqNum;
+    const launch_interaction = editorInteractionGen;   /// see `postOne`
     document.body.scrollTo(0, 0);
-    beginFlight(tab);
 
     const editor_text = query_area.value;
     tab.launchQuery = editor_text;   /// see `postOne`: lets `saveHistory` detect a newer draft
     const sel_start = query_area.selectionStart;
+    /// See `postOne`: flight is entered only once the preflight has produced a statement to run.
     const parsed = await splitAllQueries(editor_text);
     if (my_run !== tab.reqNum) return;
 
     if (parsed.length > 1) {
+        beginFlight(tab, launch_interaction);
         await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text);
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
+        beginFlight(tab, launch_interaction);
         if (tab.id === activeTabId) {
             if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
             focusEditorForRun();
