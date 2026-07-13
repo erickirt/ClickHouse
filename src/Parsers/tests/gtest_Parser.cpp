@@ -537,6 +537,14 @@ INSTANTIATE_TEST_SUITE_P(ParserRenameQuery, ParserTest,
         {
             "RENAME TABLE eligible_test TO eligible_test2",
             "RENAME TABLE eligible_test TO eligible_test2"
+        },
+        {
+            "RENAME DATABASE db1 TO db2",
+            "RENAME DATABASE db1 TO db2"
+        },
+        {
+            "RENAME DATABASE IF EXISTS db1 TO db2",
+            "RENAME DATABASE IF EXISTS db1 TO db2"
         }
 })));
 
