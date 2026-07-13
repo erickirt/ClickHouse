@@ -3,6 +3,8 @@
 
 #include <Core/Settings.h>
 #include <Core/UUID.h>
+#include <Common/Jemalloc.h>
+#include <Common/JemallocMergeTreeArena.h>
 #include <IO/HashingWriteBuffer.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/MergeTreeTransaction.h>
@@ -277,6 +279,18 @@ MergedBlockOutputStream::Finalizer MergedBlockOutputStream::finalizePartAsync(
 
     if (default_codec != nullptr)
         new_part->default_codec = default_codec;
+
+    /// `checksums` and the index granularity are built during the write (in the default arenas) and
+    /// assigned above; re-home them into the dedicated MergeTree arena so a freshly written part's
+    /// long-lived metadata lives there, like a reloaded part's. The in-memory primary index is
+    /// already built in the arena by the writer. Runs for insert / merge / mutation, and for
+    /// projections via each projection part's own finalize.
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        { auto checksums_copy = new_part->checksums; new_part->checksums = std::move(checksums_copy); }
+        if (new_part->index_granularity)
+            new_part->index_granularity = new_part->index_granularity->clone();
+    }
 
     auto finalizer = std::make_unique<Finalizer::Impl>(*writer, new_part, files_to_remove_after_sync, sync);
     finalizer->written_files = std::move(written_files);
