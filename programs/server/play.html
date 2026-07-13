@@ -4491,6 +4491,23 @@ function parseExceptionMarker(text, expected_tag)
     return null;
 }
 
+/// Char offset within `text` of the first whole line equal to `EXCEPTION_MARKER`, or -1 if there is none.
+/// This is where the live raw branch stops echoing output (the first *candidate* marker line, see
+/// `postImpl`). When a complete block validates, `parseExceptionMarker` refines the split to that block;
+/// but when a marker began and never validated (broken framing / truncation), this is the exact prefix
+/// the live path kept, so `renderFailedSnapshot` echoes up to here and shows the generic message.
+function firstExceptionMarkerLine(text)
+{
+    const lines = text.split('\n');
+    let offset = 0;
+    for (let i = 0; i < lines.length; ++i)
+    {
+        if (lines[i].replace(/\r$/, '') === EXCEPTION_MARKER) return offset;
+        offset += lines[i].length + 1;   /// + 1 for the '\n' that `split` removed
+    }
+    return -1;
+}
+
 /// Reverse the escaping `writeXMLStringForTextElement` applies to an `XML`-format text node: it only
 /// ever produces `&lt;` (for `<`) and `&amp;` (for `&`). Unescape `&amp;` last so a literal `&lt;`
 /// in the message (written as `&amp;lt;`) is not turned into `<`.
@@ -4627,7 +4644,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
     let is_image = false;
     let is_error = false;
 
-    let response, reply, format;
+    let response, reply, format, exception_tag;
     reply = '';
     try {
         response = await fetch(url, { method: "POST", body: query, signal: abortController.signal,
@@ -4640,7 +4657,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         /// The random per-response tag the server repeats inside a transport `__exception__` marker
         /// block; passing it to `parseExceptionMarker` tells a genuine marker apart from successful
         /// output that merely mimics the marker shape (the client cannot know this random tag).
-        const exception_tag = response.headers.get('X-ClickHouse-Exception-Tag');
+        exception_tag = response.headers.get('X-ClickHouse-Exception-Tag');
 
         if (!response.ok) {
             is_error = true;
@@ -4659,7 +4676,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 targetResultEl.renderError(reply);
             }
 
-            return { format, reply, response_ok: false, is_table, is_raw, is_chart, is_image, is_error };
+            return { format, exception_tag, reply, response_ok: false, is_table, is_raw, is_chart, is_image, is_error };
         } else if (content_type.startsWith('image/')) {
             is_image = true;
             const blob = await response.blob();
@@ -4765,7 +4782,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                     targetResultEl.clear();
                 }
                 targetResultEl.renderError(stream_exception);
-                return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
+                return { format, exception_tag, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
             }
         } else if (format == 'JSONCompactColumns') {
             is_chart = true;
@@ -4868,7 +4885,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
 
             if (stream_exception !== null) {
                 targetResultEl.renderError(stream_exception);
-                return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
+                return { format, exception_tag, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
             }
         }
 
@@ -4903,7 +4920,7 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
             reply = e.toString();
         }
         targetResultEl.renderError(reply);
-        return { format, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
+        return { format, exception_tag, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
     }
 }
 
@@ -4943,6 +4960,10 @@ async function postSingle(posted_request_num, query, history_query_text, params_
                 query: history_query_text || query,
                 resultQuery: query,
                 format: result.format,
+                /// The per-response `X-ClickHouse-Exception-Tag`: `renderFailedSnapshot` needs it to split
+                /// a transport `__exception__` marker on the same validated block the live path did (see
+                /// `renderFailedSnapshot`), so restore matches live instead of re-parsing the body tag-blind.
+                exception_tag: result.exception_tag,
                 ok: result.response_ok,
                 data: result.reply.length > 100000 ? null : result.reply,
                 elapsed_ns: 1e6 * (performance.now() - last_query_start),
@@ -5138,6 +5159,8 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
     let multi = collected.map((r, i) => ({
         query: parsed[i].query,
         format: r ? r.format : null,
+        /// See the single-query save: the tag lets restore reproduce the live marker split per statement.
+        exception_tag: r ? r.exception_tag : undefined,
         ok: r ? !!r.response_ok : false,
         data: (r && !r.is_image) ? r.reply : null,
     }));
@@ -5169,7 +5192,23 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
 /// first tab switch or reload. `data` with no parseable failure signal is a plain error string that
 /// `postImpl`'s catch saved (network error, early abort, incomplete chunked encoding, so `format`
 /// may even be missing); render it as the error alone, with no raw echo.
-function renderFailedSnapshot(el, data, format) {
+///
+/// `tag` is the `X-ClickHouse-Exception-Tag` the producing response carried (persisted in the snapshot —
+/// see `saveHistory`). The live path uses it as the discriminator that tells a genuine transport
+/// `__exception__` block from successful output that merely mimics the marker shape, and it drives the
+/// generic "could not be parsed" message when a marker started but no complete block arrived. Restore
+/// MUST use the same discriminator rather than re-parsing the body tag-blind, otherwise a reload / tab
+/// switch diverges from what the live UI showed: a marker-shaped lookalike in the output would be
+/// misread as the failure (wrong split + wrong message), and an unparsable-marker failure would render
+/// its raw bytes as the error text instead of the generic message. `tag` is `undefined` for legacy
+/// snapshots and for failures with no transport marker (the header is only set when the marker is
+/// written); then matching is skipped, exactly as `parseExceptionMarker` does live.
+function renderFailedSnapshot(el, data, format, tag) {
+    /// The message the live path shows when a transport marker began but no complete, tag-validated
+    /// block could be recovered (broken framing / a truncated stream). Kept byte-identical to `postImpl`
+    /// so restore reproduces it instead of dumping the raw reply (which holds the truncated marker bytes).
+    const MARKER_UNPARSED = "The query failed after the response body had already started, but the error message could not be parsed.";
+
     if (format === default_format) {
         /// Table branch — mirror `postImpl` (rows are `{"row":...}` / `{"meta":...}` / `{"totals":...}`
         /// / `{"progress":...}` lines): replay them until the failure signal, keep the partial rows,
@@ -5201,22 +5240,37 @@ function renderFailedSnapshot(el, data, format) {
         } else {
             el.clear();
         }
-        const marker = marker_seen ? parseExceptionMarker(data) : null;
+        /// Validate the marker against the persisted tag, exactly as the live table branch did. When a
+        /// marker line was present but no complete block validates, live showed the generic message —
+        /// reproduce it here rather than rendering the raw reply (with the truncated marker bytes).
+        const marker = marker_seen ? parseExceptionMarker(data, tag) : null;
         const message = inband_exception
             ?? (marker !== null ? marker.message : null)
             ?? parseInbandException(data, format)
-            ?? data;
+            ?? (marker_seen ? MARKER_UNPARSED : data);
         el.renderError(message);
         return;
     }
 
-    /// Transport-level `__exception__` marker: echo the raw prefix that arrived before the *validated*
-    /// block (an earlier line may merely look like the marker; the block itself stays hidden, as the live
-    /// raw branch withholds it), then the error.
-    const marker = parseExceptionMarker(data);
-    if (marker !== null) {
-        if (marker.offset > 0) el.updateRaw(data.slice(0, marker.offset));
-        el.renderError(marker.message);
+    /// Raw branch. Mirror the live raw path (`postImpl`): echoing stops at the FIRST line equal to the
+    /// marker, but that line may merely look like the marker, so the real split is the first tag-validated
+    /// block at or after it. A failed raw snapshot that carries a marker line either validated a block
+    /// (show its message) or never completed one (broken framing / truncation ⇒ generic message live);
+    /// it can never fall through to the in-band / plain-string cases, which have no marker line.
+    const first_marker_line = firstExceptionMarkerLine(data);
+    if (first_marker_line >= 0) {
+        const marker = parseExceptionMarker(data, tag);
+        if (marker !== null) {
+            /// A complete, tag-validated block: echo the raw output preceding it (any lookalike lines
+            /// included, as the live path did), keep the block hidden, then show its message.
+            if (marker.offset > 0) el.updateRaw(data.slice(0, marker.offset));
+            el.renderError(marker.message);
+        } else {
+            /// A marker began but never validated: live echoed only the output before the first candidate
+            /// line and showed the generic message (it withheld the rest and never re-echoed it). Same here.
+            if (first_marker_line > 0) el.updateRaw(data.slice(0, first_marker_line));
+            el.renderError(MARKER_UNPARSED);
+        }
         return;
     }
 
@@ -5244,7 +5298,7 @@ async function renderSnapshotIntoElement(el, snap, token) {
     const format = snap.format;
 
     if (!snap.ok) {
-        renderFailedSnapshot(el, snap.data, format);
+        renderFailedSnapshot(el, snap.data, format, snap.exception_tag);
         return;
     }
 
@@ -5460,7 +5514,7 @@ async function restoreFromHistory(state, token) {
         /// original run.
         logoEl.style.display = 'none';
 
-        renderFailedSnapshot(resultEl, result.data, format);
+        renderFailedSnapshot(resultEl, result.data, format, result.exception_tag);
 
         progressEl.clear();
         return;
@@ -6135,6 +6189,11 @@ function saveHistory(stateData, titleForDoc) {
         query: stateData.resultQuery ?? stateData.query,
         params: stateData.params,    /// the params that produced this result
         format: stateData.format,
+        /// The `X-ClickHouse-Exception-Tag` of a failed run, so restoring the snapshot (tab switch,
+        /// reload, Back/Forward) can split a transport `__exception__` marker on the validated block —
+        /// see `renderFailedSnapshot`. Undefined for successful runs and legacy entries; then matching
+        /// is skipped, as before.
+        exception_tag: stateData.exception_tag,
         ok: stateData.ok,
         data: stateData.data,
         /// Per-statement snapshots for a multi-query ("Run all") result; null for single-query
