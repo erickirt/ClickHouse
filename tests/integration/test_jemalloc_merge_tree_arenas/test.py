@@ -76,10 +76,10 @@ def test_arena_count_matches_setting(started_cluster):
     assert arena_count(node_single) == 1
     # Capped at the number of CPU cores the container sees.
     assert arena_count(node_pool) == min(4, num_cpus(node_pool))
-    # A value far above the core count collapses to the core count (<= MAX_CPUS), proving the cap.
+    # A value far above the core count collapses to the number of CPUs the container may run on,
+    # proving the cap.
     capped = arena_count(node_capped)
-    assert 1 <= capped <= 1024
-    assert capped < 1000000
+    assert capped == min(1000000, num_cpus(node_capped))
 
 
 def test_disabled_does_not_route_to_a_dedicated_arena(started_cluster):
