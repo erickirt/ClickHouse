@@ -273,6 +273,7 @@ void * __libc_pvalloc(size_t size) __attribute__((alias("pvalloc"))); // NOLINT(
 #include <malloc/malloc.h>
 #include <jemalloc/jemalloc.h>
 
+#include <base/getPageSize.h>
 #include <Common/CurrentMemoryTracker.h>
 #include <Common/memory.h>
 
@@ -370,8 +371,10 @@ static void * trackedZoneValloc(malloc_zone_t * zone, size_t size)
     if (!guard.engaged) [[unlikely]]
         return saved_zone.valloc(zone, size);
 
+    /// valloc returns page-aligned memory (jemalloc's zone_valloc uses posix_memalign with PAGE),
+    /// so charge the page-aligned size class to stay balanced with je_sallocx on free.
     AllocationTrace trace;
-    size_t actual_size = Memory::trackMemoryFromC(size, trace);
+    size_t actual_size = Memory::trackMemoryFromC(size, trace, static_cast<std::align_val_t>(getPageSize()));
     void * ptr = saved_zone.valloc(zone, size);
     if (ptr == nullptr) [[unlikely]]
     {
@@ -414,6 +417,13 @@ static void * trackedZoneRealloc(malloc_zone_t * zone, void * ptr, size_t size)
     if (res == nullptr) [[unlikely]]
     {
         [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
+        /// With jemalloc opt.zero_realloc:free (the default), realloc(ptr, 0) frees ptr and
+        /// returns nullptr. That is not a failure - untrack the old allocation.
+        if (size == 0 && ptr != nullptr)
+        {
+            AllocationTrace free_trace = CurrentMemoryTracker::free(old_actual_size);
+            free_trace.onFree(ptr, old_actual_size);
+        }
         return nullptr;
     }
 
