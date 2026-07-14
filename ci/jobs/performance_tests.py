@@ -980,15 +980,36 @@ def rebuild_table(port, source, destination):
 
 
 def populate_data(port):
-    # Rebuild the hits datasets on one server. test.hits is built last and used
-    # as the "done" marker so a repeated call is a no-op.
+    # Rebuild the hits datasets on one server. All three tables are rebuilt in
+    # parallel: hits_100m_single dominates (~13min), so the two small tables
+    # (~20s each) finish within its window instead of adding on top. test.hits
+    # existence is the "done" marker for the re-entrant restart() skip.
     if Shell.get_output(f'clickhouse-client --port {port} --query "EXISTS TABLE test.hits"').strip() == "1":
         print(f"populate_data: server {port} already populated, skipping")
         return
     Shell.check(f'clickhouse-client --port {port} --query "CREATE DATABASE IF NOT EXISTS test"', strict=True, verbose=True)
-    rebuild_table(port, "default.hits_10m_single", "default.hits_10m_single")
-    rebuild_table(port, "default.hits_100m_single", "default.hits_100m_single")
-    rebuild_table(port, "datasets.hits_v1", "test.hits")
+    # (source, destination); hits_100m_single is by far the longest, list first.
+    tables = [
+        ("default.hits_100m_single", "default.hits_100m_single"),
+        ("default.hits_10m_single", "default.hits_10m_single"),
+        ("datasets.hits_v1", "test.hits"),
+    ]
+    errors = []
+
+    def run(source, destination):
+        try:
+            rebuild_table(port, source, destination)
+        except Exception as e:  # noqa: BLE001
+            print(f"rebuild_table {source} failed on port {port}: {e}")
+            errors.append(e)
+
+    threads = [Thread(target=run, args=(s, d)) for s, d in tables]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    if errors:
+        raise errors[0]
 
 
 def populate_data_both(left_port, right_port):
