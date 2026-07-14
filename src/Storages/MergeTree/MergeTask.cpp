@@ -1210,13 +1210,11 @@ void MergeTask::ExecuteAndFinalizeHorizontalPart::prepareProjectionsToMergeAndRe
             continue;
         }
 
-        /// The projection's column set is re-derived from its query at every table load, so an existing
-        /// projection part may lack a column the current metadata expects (e.g. an ALIAS column selected
-        /// by the projection was re-pointed by ALTER, changing the materialized source column or the
-        /// aggregate-state column name). Merging such a part directly would bake default values for the
-        /// missing column into the merged projection part; rebuild from the parent data instead. The only
-        /// legitimate absence is a parent TABLE column the parent part lacks too: it was added after the
-        /// part was written, and the default fill is then correct on either path.
+        /// An existing projection part may lack a column the current metadata expects (e.g. an ALIAS
+        /// selected by the projection was re-pointed by ALTER; see projectionPartHasRequiredColumns).
+        /// Merging it directly would bake default values into the merged part, so rebuild from the parent
+        /// instead. A parent TABLE column the parent part also lacks is a legitimate late-add and does
+        /// not count.
         const auto projection_columns = projection.metadata->getColumns().getAllPhysical();
         const auto & parent_table_columns = global_ctx->metadata_snapshot->getColumns();
         bool projection_part_misses_column = false;
