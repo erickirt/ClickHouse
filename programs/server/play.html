@@ -4622,13 +4622,22 @@ const SINGLE_DOCUMENT_JSON_FORMATS = new Set([
 ///   - `XML`: the top-level `<exception>` trailer (a one-tab direct child of `<result>`; a row field
 ///     named `exception` is far more deeply indented, so it cannot be mistaken for the trailer).
 ///
-/// It deliberately does NOT probe the bare each-row formats: `JSONEachRow` / `JSONStringsEachRow` /
-/// `JSONLines` write the failure as a `{"exception":...}` object line — identical to a successful row
-/// that happens to have an `exception` column — and `JSONCompactEachRow` / `JSONCompactStringsEachRow`
-/// write it as `["..."]`, identical to a single-column row. Their in-band failure line is byte-for-byte
-/// a valid row, so flagging it could mark a successful query as failed. Non-JSON row formats (`TSV`,
-/// `CSV`, `Pretty`, ...) do not write exceptions in-band at all — they signal a mid-stream failure with
-/// the transport-level `__exception__` marker instead.
+/// It deliberately does NOT probe the each-row JSON family, because their in-band failure line is
+/// byte-for-byte a valid row, so flagging it could mark a successful query as failed:
+///   - the bare formats `JSONEachRow` / `JSONStringsEachRow` / `JSONLines` write the failure as a
+///     `{"exception":...}` object line, identical to a successful row with an `exception` column;
+///   - `JSONCompactEachRow` / `JSONCompactStringsEachRow` write it as `["..."]`, identical to a
+///     single-column row;
+///   - the pretty-printed aliases `PrettyJSONEachRow` / `PrettyJSONLines` / `PrettyNDJSON` are backed by
+///     the same `JSONEachRowRowOutputFormat` (its `writeSuffix` appends the very same in-band
+///     `{"exception":...}` object, only indented), so they are equally ambiguous.
+/// Non-JSON row formats (`TSV`, `CSV`, `Pretty`, ...) do not write exceptions in-band at all — they
+/// signal a mid-stream failure with the transport-level `__exception__` marker instead. So the one case
+/// the raw branch cannot flag is a mid-stream failure of an each-row JSON format with
+/// `http_write_exception_in_output_format=1` (the default): the server writes an in-band line that is
+/// indistinguishable from a valid row and no marker, so such a query can still finish in the success
+/// state. This is UNSUPPORTED by design — the "all streamed formats" recovery does not cover the
+/// ambiguous each-row JSON encodings — not an oversight; do not widen it to guess on those.
 function parseInbandException(text, format)
 {
     /// The format may be missing: an error snapshot saved when `fetch` failed before the response
@@ -4650,7 +4659,13 @@ function parseInbandException(text, format)
         return m ? unescapeXMLText(m[1]) : null;
     }
 
-    if (!format.startsWith('JSON') && format != 'GeoJSON') return null;
+    /// Only the two unambiguous JSON encodings are probed: a `*WithProgress` row stream (a terminal
+    /// top-level `{"exception":...}` line) or a single-document body (`SINGLE_DOCUMENT_JSON_FORMATS`).
+    /// Everything else — the whole ambiguous each-row JSON family, both the bare formats and the
+    /// pretty-printed `Pretty*` aliases noted above — is deliberately unsupported, so bail out. This is
+    /// an explicit whitelist rather than a `startsWith('JSON')` test, which would falsely imply the
+    /// each-row family is handled (and would not even match the `Pretty*` aliases).
+    if (!format.includes('WithProgress') && !SINGLE_DOCUMENT_JSON_FORMATS.has(format)) return null;
     if (!text.includes('"exception"')) return null;   /// cheap guard before parsing/scanning the body
 
     /// `*WithProgress` formats wrap every row, so a standalone top-level `{"exception":...}` line —
@@ -5021,15 +5036,23 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
         if (posted_request_num != request_num) { return { cancelled: true }; }
 
         console.log(e);
+        /// A transport failure (`Network error` / `Query was cancelled` / any other thrown error) can
+        /// strike mid-stream, after the table/raw branch already flushed partial output into
+        /// `targetResultEl` — and into `reply`, which still holds the streamed body so far. Keep that
+        /// body as the snapshot payload and carry the synthetic display message in a SEPARATE
+        /// `display_error` field, so a reload / tab switch replays `partial result + error` exactly as
+        /// shown live instead of collapsing to `error only` (see `renderFailedSnapshot`). Overwriting
+        /// `reply` here (as before) dropped the already-rendered prefix from the persisted snapshot.
+        let display_error;
         if (e instanceof TypeError) {
-            reply = "Network error";
+            display_error = "Network error";
         } else if (e.name === 'AbortError') {
-            reply = "Query was cancelled";
+            display_error = "Query was cancelled";
         } else {
-            reply = e.toString();
+            display_error = e.toString();
         }
-        targetResultEl.renderError(reply);
-        return { format, exception_tag, reply, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
+        targetResultEl.renderError(display_error);
+        return { format, exception_tag, reply, display_error, response_ok: false, is_table: false, is_raw: false, is_chart: false, is_image: false, is_error: true };
     }
 }
 
@@ -5073,6 +5096,11 @@ async function postSingle(posted_request_num, query, history_query_text, params_
                 /// a transport `__exception__` marker on the same validated block the live path did (see
                 /// `renderFailedSnapshot`), so restore matches live instead of re-parsing the body tag-blind.
                 exception_tag: result.exception_tag,
+                /// Set only for a transport failure caught after partial output already streamed: the
+                /// synthetic message (`Network error` / `Query was cancelled` / ...) to render beneath
+                /// the replayed prefix, since `data` is the partial body and carries no in-band / marker
+                /// failure signal in that case. See `postImpl`'s catch and `renderFailedSnapshot`.
+                display_error: result.display_error,
                 ok: result.response_ok,
                 data: result.reply.length > 100000 ? null : result.reply,
                 elapsed_ns: 1e6 * (performance.now() - last_query_start),
@@ -5270,6 +5298,9 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
         format: r ? r.format : null,
         /// See the single-query save: the tag lets restore reproduce the live marker split per statement.
         exception_tag: r ? r.exception_tag : undefined,
+        /// See the single-query save: the synthetic display message for a transport failure caught after
+        /// partial output streamed, rendered beneath the replayed prefix on restore.
+        display_error: r ? r.display_error : undefined,
         ok: r ? !!r.response_ok : false,
         data: (r && !r.is_image) ? r.reply : null,
     }));
@@ -5312,11 +5343,44 @@ async function postMulti(posted_request_num, parsed, params_restore_pending)
 /// its raw bytes as the error text instead of the generic message. `tag` is `undefined` for legacy
 /// snapshots and for failures with no transport marker (the header is only set when the marker is
 /// written); then matching is skipped, exactly as `parseExceptionMarker` does live.
-function renderFailedSnapshot(el, data, format, tag) {
+function renderFailedSnapshot(el, data, format, tag, display_error) {
     /// The message the live path shows when a transport marker began but no complete, tag-validated
     /// block could be recovered (broken framing / a truncated stream). Kept byte-identical to `postImpl`
     /// so restore reproduces it instead of dumping the raw reply (which holds the truncated marker bytes).
     const MARKER_UNPARSED = "The query failed after the response body had already started, but the error message could not be parsed.";
+
+    /// A transport failure caught in `postImpl`'s outer catch (`Network error` / cancellation / a thrown
+    /// error) after partial output had already streamed: `data` is that already-rendered prefix (table
+    /// rows or raw bytes) and carries NO in-band / marker failure signal — the error text lives in the
+    /// separate persisted `display_error`. Replay the prefix exactly as the live path left it and render
+    /// the error beneath it (mirroring the outer catch's `renderError`). Without this the restore would
+    /// have only the synthetic message and would collapse `partial result + error` to `error only`.
+    /// `data` may be empty (failure before any body) or null (body over the snapshot size cap) — then
+    /// just the error shows, matching a live run that produced no prefix.
+    ///
+    /// Unlike the inner marker / in-band failure branches below, the live outer catch does NOT finalize
+    /// the table (no `renderTotals` / `applyColumnColors` / `transposeIfNeeded`, and no `clear` of an
+    /// empty table): it simply throws after the streamed rows were flushed. Match that exactly — replay
+    /// the rows and stop — so a reload looks identical to the interrupted live run.
+    if (typeof display_error === 'string') {
+        if (format === default_format) {
+            let fragment = document.createDocumentFragment();
+            if (data) {
+                for (const line of data.split('\n')) {
+                    if (line.trim().length === 0) continue;
+                    let parsed;
+                    /// A truncated/garbled tail must not throw out of the whole restore: stop replaying.
+                    try { parsed = JSON.parse(line); } catch (e) { break; }
+                    if (!el.update(parsed, fragment)) break;
+                }
+            }
+            el.flushFragment(fragment);
+        } else if (data) {
+            el.updateRaw(data);
+        }
+        el.renderError(display_error);
+        return;
+    }
 
     if (format === default_format) {
         /// Table branch — mirror `postImpl` (rows are `{"row":...}` / `{"meta":...}` / `{"totals":...}`
@@ -5408,11 +5472,13 @@ function renderFailedSnapshot(el, data, format, tag) {
 /// rather than throwing out of the whole restore.
 async function renderSnapshotIntoElement(el, snap, token) {
     el.queryText = snap.query;
-    if (!snap.data) return;
+    /// A transport-failure snapshot (`display_error` set) still renders even with no body — its error
+    /// text lives outside `data` (see `renderFailedSnapshot`), so the empty-data early-out must not fire.
+    if (!snap.data && typeof snap.display_error !== 'string') return;
     const format = snap.format;
 
     if (!snap.ok) {
-        renderFailedSnapshot(el, snap.data, format, snap.exception_tag);
+        renderFailedSnapshot(el, snap.data, format, snap.exception_tag, snap.display_error);
         return;
     }
 
@@ -5610,7 +5676,9 @@ async function restoreFromHistory(state, token) {
         return;
     }
 
-    if (!result.data) return;
+    /// A transport-failure snapshot (`display_error` set) still renders even with no body — its error
+    /// text lives outside `data` (see `renderFailedSnapshot`), so the empty-data early-out must not fire.
+    if (!result.data && typeof result.display_error !== 'string') return;
 
     let is_table = false;
     let is_raw = false;
@@ -5628,7 +5696,7 @@ async function restoreFromHistory(state, token) {
         /// original run.
         logoEl.style.display = 'none';
 
-        renderFailedSnapshot(resultEl, result.data, format, result.exception_tag);
+        renderFailedSnapshot(resultEl, result.data, format, result.exception_tag, result.display_error);
 
         progressEl.clear();
         return;
@@ -6308,6 +6376,11 @@ function saveHistory(stateData, titleForDoc) {
         /// see `renderFailedSnapshot`. Undefined for successful runs and legacy entries; then matching
         /// is skipped, as before.
         exception_tag: stateData.exception_tag,
+        /// The synthetic display message of a transport failure caught after partial output already
+        /// streamed (see `postImpl`'s catch): rendered beneath the replayed prefix by
+        /// `renderFailedSnapshot`. Round-trips through browser history / `IndexedDB` with the snapshot.
+        /// Undefined for in-band / marker failures (their message lives in `data`) and successful runs.
+        display_error: stateData.display_error,
         ok: stateData.ok,
         data: stateData.data,
         /// Per-statement snapshots for a multi-query ("Run all") result; null for single-query
