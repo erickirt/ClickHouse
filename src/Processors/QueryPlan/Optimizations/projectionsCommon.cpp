@@ -313,6 +313,21 @@ size_t filterPartsByProjection(
     return filtered_parts;
 }
 
+/// The projection's column set is re-derived from its query at every table load, so it can drift
+/// from what an existing projection part stores (e.g. an ALIAS column selected by the projection
+/// was re-pointed by ALTER, changing the materialized source column or the aggregate-state column
+/// name). Reading a column the projection part lacks would fill defaults and return wrong data.
+/// For each required column there are four cases:
+///   (1) the projection part stores the column:
+///       usable, keep checking.
+///   (2) the column is virtual:
+///       usable, it is synthesized by the reading step and never stored.
+///   (3) the projection part lacks it, and either the parent part still stores it or it is not a
+///       parent TABLE column at all (a drifted alias-derived or aggregate-state column):
+///       drift, read from the parent instead.
+///   (4) the projection part lacks it, the parent part lacks it too, and it is a parent TABLE column:
+///       legitimate, the column was added after the part was written, so the default fill is correct
+///       and identical on either read path (see 04412).
 static bool projectionPartHasRequiredColumns(
     const IMergeTreeDataPart & projection_part,
     const IMergeTreeDataPart & parent_part,
@@ -320,27 +335,25 @@ static bool projectionPartHasRequiredColumns(
     const StorageMetadataPtr & parent_metadata,
     const Names & required_column_names)
 {
-    /// The projection's column set is re-derived from its query at every table load, so it can drift
-    /// from what an existing projection part stores (e.g. an ALIAS column selected by the projection
-    /// was re-pointed by ALTER, changing the materialized source column or the aggregate-state column
-    /// name). Reading a column the projection part lacks would fill defaults and return wrong data,
-    /// so such parts must be read from the parent instead. The only legitimate absence is a parent
-    /// TABLE column the parent part lacks too: it was added after the part was written, and the
-    /// default fill is then correct and identical on either read path (see 04412).
     const auto & parent_table_columns = parent_metadata->getColumns();
 
     for (const auto & name : required_column_names)
     {
+        /// (1) Stored by the projection part.
         if (projection_part.tryGetColumn(name))
             continue;
 
-        /// Virtual columns are provided by the reading step, never stored in the part.
+        /// (2) Virtual column, provided by the reading step.
         if (projection.metadata->virtuals.has(name))
             continue;
 
+        /// (3) Drift: the parent part still stores the column, or it is not a stored table column,
+        /// so the projection part is stale for it and must not be read.
         if (parent_part.tryGetColumn(name)
             || !parent_table_columns.hasColumnOrSubcolumn(GetColumnsOptions::AllPhysical, name))
             return false;
+
+        /// (4) Legitimate late-added table column, missing from both parts; the default fill matches.
     }
 
     return true;
