@@ -40,6 +40,9 @@ SELECT JSON_QUERY('{"a": 1, "b": 2}'::Dynamic, tuple('$.a', toLowCardinality('$.
 SELECT JSON_VALUE('{"a": 1, "b": 2}'::Dynamic, tuple('$.a', toLowCardinality('$.b')));
 SELECT JSON_EXISTS('{"a": 1, "b": 2}'::Dynamic, tuple('$.a', toLowCardinality('$.b')));
 
+-- Single-element LowCardinality tuple path (issue #110345)
+SELECT JSON_EXISTS(CAST('{"a":1}', 'Dynamic'), tuple(toLowCardinality('$.a')));
+
 SELECT '-- Multi-path arg arriving via a scalar subquery, i.e. Nullable(Tuple)/Nullable(Array) (issue: LOGICAL_ERROR, STID 4811-66fc)';
 SELECT toTypeName(JSON_EXISTS('{"a": 1, "b": 2}'::Dynamic, (SELECT tuple('$.a', '$.b'))));
 SELECT toTypeName(JSON_VALUE('{"a": 1, "b": 2}'::Dynamic, (SELECT tuple('$.a', '$.b'))));
