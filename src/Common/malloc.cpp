@@ -435,9 +435,10 @@ static void * trackedZoneRealloc(malloc_zone_t * zone, void * ptr, size_t size)
     size_t old_actual_size = ptr ? saved_zone.size(zone, ptr) : 0;
     void * res = saved_zone.realloc(zone, ptr, size);
 
-    /// Untrack the old block only if jemalloc owned it. This also covers realloc(ptr, 0), which
-    /// under jemalloc's zero_realloc:free frees ptr and returns nullptr.
-    if (old_actual_size != 0)
+    /// realloc consumes ptr only on success, or when size == 0 (jemalloc's zero_realloc:free frees
+    /// ptr and returns nullptr). A nullptr result for a non-zero size is a failure: ptr is still
+    /// live and owned by the caller, so it must stay tracked - a later free will untrack it.
+    if (old_actual_size != 0 && (res != nullptr || size == 0))
     {
         AllocationTrace free_trace = CurrentMemoryTracker::free(old_actual_size);
         free_trace.onFree(ptr, old_actual_size);
