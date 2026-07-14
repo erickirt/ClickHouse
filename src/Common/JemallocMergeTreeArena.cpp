@@ -71,15 +71,16 @@ std::vector<UInt32> getAllowedCPUs()
     /// fits, so pools on machines with many CPUs (or cpusets pinned to high ids) still map every
     /// allowed CPU to a reachable arena. Runs once, at startup.
     ///
-    /// The mask is a plain `unsigned long` array (the type `cpu_set_t` is made of) rather than
-    /// `CPU_ALLOC`, because `CPU_ALLOC`/`CPU_FREE` resolve to `__sched_cpualloc`/`__sched_cpufree`
-    /// which are only available since GLIBC_2.7 and would break the release-binary compatibility
-    /// check (max allowed GLIBC 2.4). `CPU_ALLOC_SIZE` and `CPU_ISSET_S` are macros with no such
-    /// dependency. `unsigned long` gives the alignment `cpu_set_t` needs.
+    /// The mask is a plain 64-bit-word array (`cpu_set_t` is an array of `unsigned long`, which is
+    /// 64-bit on the supported Linux platforms) rather than `CPU_ALLOC`, because `CPU_ALLOC` /
+    /// `CPU_FREE` resolve to `__sched_cpualloc` / `__sched_cpufree` which are only available since
+    /// GLIBC_2.7 and would break the release-binary compatibility check (max allowed GLIBC 2.4).
+    /// `CPU_ALLOC_SIZE` and `CPU_ISSET_S` are macros with no such dependency. `UInt64` gives the
+    /// alignment `cpu_set_t` needs.
     for (size_t num_cpus = 1024; num_cpus <= (size_t{1} << 20); num_cpus *= 2)
     {
         const size_t set_size = CPU_ALLOC_SIZE(num_cpus);
-        std::vector<unsigned long> mask((set_size + sizeof(unsigned long) - 1) / sizeof(unsigned long));
+        std::vector<UInt64> mask((set_size + sizeof(UInt64) - 1) / sizeof(UInt64));
         auto * set = reinterpret_cast<cpu_set_t *>(mask.data());
         if (sched_getaffinity(0, set_size, set) == 0)
         {
