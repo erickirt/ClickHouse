@@ -886,8 +886,10 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
     {
         if (params.external_transaction)
             params.external_transaction->createHardLink(getRelativeDataPath(), dest_storage->getRelativeDataPath());
-        else
+        else if (params.copy_instead_of_hardlink)
             disk->copyFile(getRelativeDataPath(), *disk, dest_storage->getRelativeDataPath(), read_settings);
+        else
+            disk->createHardLink(getRelativeDataPath(), dest_storage->getRelativeDataPath());
     }
 
     std::vector<std::string> all_files;
