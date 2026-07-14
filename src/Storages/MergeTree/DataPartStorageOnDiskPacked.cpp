@@ -197,7 +197,7 @@ Poco::Timestamp DataPartStorageOnDiskPacked::getFileLastModified(const String & 
     return disk->getLastModified(getRelativeDataPath());
 }
 
-bool DataPartStorageOnDiskPacked::existsFile(const std::string & file_name) const
+bool DataPartStorageOnDiskPacked::existsFileImpl(const std::string & file_name) const
 {
     /// Packed skip-index substreams live inside the per-part skp_idx.packed archive (which is
     /// itself a virtual file inside data.packed). The outer data.packed reader's index only
@@ -219,9 +219,9 @@ bool DataPartStorageOnDiskPacked::existsFile(const std::string & file_name) cons
     return disk->existsFile(getRelativeDataPath()) && reader->exists(file_name);
 }
 
-size_t DataPartStorageOnDiskPacked::getFileSize(const String & file_name) const
+size_t DataPartStorageOnDiskPacked::getFileSizeImpl(const String & file_name) const
 {
-    /// See existsFile() for why we consult the skip-indices overlay first.
+    /// See existsFileImpl() for why we consult the skip-indices overlay first.
     if (looksLikePackedSkipIndexFile(file_name))
     {
         if (auto skip_reader = getSkipIndicesPackedReader(); skip_reader && skip_reader->exists(file_name))
@@ -267,6 +267,16 @@ PackedFilesIO::FileOffset DataPartStorageOnDiskPacked::getFileOffsetAndSize(cons
     return reader->getFileOffsetAndSize(file_name);
 }
 
+std::optional<UInt64> DataPartStorageOnDiskPacked::getPackedFileUncompressedSize(const std::string & file_name) const
+{
+    /// Consults only the skip-indices overlay index (seeded at write time or loaded lazily), so it
+    /// stays usable while the part is being written, when the outer reader is not initialized yet.
+    if (looksLikePackedSkipIndexFile(file_name))
+        if (auto skip_reader = getSkipIndicesPackedReader(); skip_reader && skip_reader->exists(file_name))
+            return skip_reader->getFileUncompressedSize(file_name);
+    return {};
+}
+
 UInt32 DataPartStorageOnDiskPacked::getRefCount(const String & file_name) const
 {
     if (isWrittenSeparately(file_name))
@@ -302,13 +312,13 @@ String DataPartStorageOnDiskPacked::getUniqueId() const
     return disk->getUniqueId(fs::path(getRelativePath()) / DATA_FILE_NAME);
 }
 
-void DataPartStorageOnDiskPacked::prepareRead(
+void DataPartStorageOnDiskPacked::prepareReadImpl(
     const std::string & name,
     const ReadSettings & settings,
     std::optional<size_t> read_hint,
     ReadPipeline & pipeline) const
 {
-    /// See existsFile() for why we consult the skip-indices overlay first. The overlay's offsets
+    /// See existsFileImpl() for why we consult the skip-indices overlay first. The overlay's offsets
     /// are relative to skp_idx.packed, which is itself a virtual file inside data.packed rather
     /// than a standalone file on disk. So compose: get the virtual file's offset+size from the
     /// inner overlay, then sub-view the outer reader's bytes for skp_idx.packed (read through the
@@ -354,6 +364,23 @@ void DataPartStorageOnDiskPacked::prepareRead(
         },
         StoredObjects{StoredObject(name, "", reader->getFileSize(name))},
         settings);
+}
+
+std::unique_ptr<ReadBufferFromFileBase> DataPartStorageOnDiskPacked::readFileIfExistsImpl(
+    const std::string & name,
+    const ReadSettings & settings,
+    std::optional<size_t> read_hint) const
+{
+    /// The base file-read overlay is disabled for packed storage (getArchiveReaderForFile returns
+    /// nullptr), so this hook serves both the packed index substreams and the native part files.
+    /// prepareReadImpl already routes skip-index substreams through the inner-archive composition,
+    /// so build the read through it, matching the default readFileIfExists (existsFile + readFile).
+    if (!existsFileImpl(name))
+        return {};
+
+    ReadPipeline pipeline;
+    prepareReadImpl(name, settings, read_hint, pipeline);
+    return pipeline.build();
 }
 
 void DataPartStorageOnDiskPacked::rename(
@@ -708,7 +735,7 @@ void DataPartStorageOnDiskPacked::finalizeWriter()
 
     };
 
-    auto new_index = writer->finalize(std::move(out_buffer_getter), preferred_file_order);
+    auto new_index = writer->finalize(std::move(out_buffer_getter), preferred_file_order, PackedFilesIO::VERSION_WITHOUT_UNCOMPRESSED_SIZE);
     reader.emplace(new_index);
     writer.reset();
 }
@@ -1014,7 +1041,7 @@ void DataPartStorageOnDiskPacked::serializeAuxiliaryInfo(WriteBuffer & out) cons
             "Cannot serialize part header because reader is not initialized");
 
     out << "part header: \n";
-    PackedFilesWriter::writePackedIndex(out, reader->getIndex());
+    PackedFilesWriter::writePackedIndex(out, reader->getIndex(), PackedFilesIO::VERSION_WITHOUT_UNCOMPRESSED_SIZE);
     out << "\n";
 }
 

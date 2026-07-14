@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Tags: zookeeper, no-replicated-database, no-shared-merge-tree
+# Tags: zookeeper, no-replicated-database, no-shared-merge-tree, no-darwin
 # no-replicated-database because it adds extra replicas
 # no-shared-merge-tree do something with parts on local fs
+# no-darwin: replace_long_file_name_to_hash=0 is not honored on APFS (case-insensitive), so checksums differ
 # add_minmax_index_for_numeric_columns=0: Adds extra files, which changes the hashes
 # min_bytes_for_full_part_storage=0: the test deletes the part dir on local fs; packed storage would
 # pack it into a single data.packed archive, so the part check then fails to open it

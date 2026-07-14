@@ -165,7 +165,8 @@ void createPacked(const DiskPtr & disk_in, const String & input_dir, const DiskP
             if (need_sync)
                 buf->sync();
         },
-        file_order_hint);
+        file_order_hint,
+        PackedFilesIO::VERSION_WITHOUT_UNCOMPRESSED_SIZE);
 }
 
 void createPackedRecursive(const DiskPtr & disk_in, const String & input_dir, const DiskPtr & disk_out, const String & output_dir, Strings file_order_hint)

@@ -33,6 +33,8 @@ public:
     /// Common read operations which return data from index.
     bool exists(const std::string & file_name) const;
     size_t getFileSize(const String & file_name) const;
+    /// Recorded uncompressed size, or nullopt if not recorded (v0). Throws if file is absent.
+    std::optional<UInt64> getFileUncompressedSize(const String & file_name) const;
     PackedFilesIO::FileOffset getFileOffsetAndSize(const String & file_name) const;
     Names getFileNames() const;
 

@@ -37,23 +37,16 @@ public:
     DataPartStoragePtr getProjection(const std::string & name) const override;
 
     bool exists() const override;
-    bool existsFile(const std::string & file_name) const override;
     bool existsDirectory(const std::string & file_name) const override;
 
     DataPartStorageIteratorPtr iterate() const override;
     Poco::Timestamp getFileLastModified(const String &) const override;
-    size_t getFileSize(const std::string & file_name) const override;
     PackedFilesIO::FileOffset getFileOffsetAndSize(const std::string & file_name) const;
+    std::optional<UInt64> getPackedFileUncompressedSize(const std::string & file_name) const override;
     String getActualFileNameOnDisk(const String & file_name) const;
     UInt32 getRefCount(const std::string & file_name) const override;
     std::vector<std::string> getRemotePaths(const std::string & file_name) const override;
     String getUniqueId() const override;
-
-    void prepareRead(
-        const std::string & name,
-        const ReadSettings & settings,
-        std::optional<size_t> read_hint,
-        ReadPipeline & pipeline) const override;
 
     void rename(
         std::string new_root_path,
@@ -132,10 +125,33 @@ private:
     String getRelativeDataPath() const;
     bool isWrittenSeparately(const String & file_name) const;
 
+    /// Native file access hooks for the base storage. On packed-part storage skp_idx.packed is a
+    /// virtual file inside data.packed, so the base file-read overlay (which reads a standalone
+    /// skp_idx.packed) is disabled here via getArchiveReaderForFile below; these hooks serve both the
+    /// packed index substreams (through the inner-archive composition) and the native part files.
+    bool existsFileImpl(const std::string & name) const override;
+    size_t getFileSizeImpl(const std::string & file_name) const override;
+    void prepareReadImpl(
+        const std::string & name,
+        const ReadSettings & settings,
+        std::optional<size_t> read_hint,
+        ReadPipeline & pipeline) const override;
+    std::unique_ptr<ReadBufferFromFileBase> readFileIfExistsImpl(
+        const std::string & name,
+        const ReadSettings & settings,
+        std::optional<size_t> read_hint) const override;
+
     /// Override the base-class disk probe: on packed-part storage skp_idx.packed is a virtual
     /// file inside data.packed and can't be opened via disk->readFile against its part-relative
-    /// path. We route the inner-archive header read through the outer reader instead.
+    /// path. We route the inner-archive header read through the outer reader instead. The archive
+    /// helpers (copy/filter/seedFrom/hasSkipIndicesPackedArchive) rely on this returning the inner
+    /// reader for packed source parts.
     std::shared_ptr<const PackedFilesReader> getSkipIndicesPackedReader() const override;
+
+    /// Disable the base file-read overlay for packed storage: its standalone-archive read
+    /// composition can't reach a skp_idx.packed that lives inside data.packed. The *Impl hooks above
+    /// serve the index substreams instead (via the inner-archive composition).
+    std::shared_ptr<const PackedFilesReader> getArchiveReaderForFile(const std::string &) const override { return nullptr; }
 
     void resetReader(const ReadSettings & read_settings);
     void resetWriterFromTransaction();
