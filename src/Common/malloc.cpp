@@ -300,6 +300,17 @@ malloc_zone_t saved_zone;
 /// stack overflows. We detect the reentry with a pthread key, whose thread-specific slot lives in a
 /// preallocated array and never itself calls malloc, and pass such allocations straight through
 /// untracked. This is macOS-specific: on Linux TLS is set up at thread creation, not lazily.
+///
+/// Known limitation: the pass-through allocation (the thread's ~40 KiB dyld TLV block) is charged
+/// to no tracker, but its eventual free runs the normal tracked path and subtracts it. Charging it
+/// is impossible - MemoryTracker::allocImpl itself reads thread-locals, so it would re-enter the
+/// same lazy TLV init. The effect is one ~40 KiB block per thread: a static under-count while the
+/// thread lives, and a ~40 KiB downward drift of the *global* tracker per completed thread
+/// create->destroy cycle. It does not affect per-query max_memory_usage (TLV frees happen at thread
+/// teardown, charged to the global tracker, not a query's). Measured on a server that spun up ~865
+/// threads: ~35 MiB total, and no drift was realized under 1000-connection churn because pooled
+/// threads persist. Accepted as a bounded, macOS-only, dev-platform limitation rather than paying a
+/// per-free pointer-set lookup on the allocation hot path.
 pthread_key_t reentrancy_key;
 
 struct ReentrancyGuard
@@ -422,29 +433,25 @@ static void * trackedZoneRealloc(malloc_zone_t * zone, void * ptr, size_t size)
 
     /// Ownership-aware size; 0 if ptr is not jemalloc-owned (je_sallocx would be UB on it).
     size_t old_actual_size = ptr ? saved_zone.size(zone, ptr) : 0;
-
-    AllocationTrace trace;
-    size_t actual_size = Memory::trackMemoryFromC(size, trace);
     void * res = saved_zone.realloc(zone, ptr, size);
-    if (res == nullptr) [[unlikely]]
-    {
-        [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
-        /// With jemalloc opt.zero_realloc:free (the default), realloc(ptr, 0) frees ptr and
-        /// returns nullptr. That is not a failure - untrack the old allocation.
-        if (size == 0 && ptr != nullptr)
-        {
-            AllocationTrace free_trace = CurrentMemoryTracker::free(old_actual_size);
-            free_trace.onFree(ptr, old_actual_size);
-        }
-        return nullptr;
-    }
 
-    if (ptr != nullptr)
+    /// Untrack the old block only if jemalloc owned it. This also covers realloc(ptr, 0), which
+    /// under jemalloc's zero_realloc:free frees ptr and returns nullptr.
+    if (old_actual_size != 0)
     {
         AllocationTrace free_trace = CurrentMemoryTracker::free(old_actual_size);
         free_trace.onFree(ptr, old_actual_size);
     }
-    trace.onAlloc(res, actual_size);
+
+    /// Charge the new block only if jemalloc owns it. A foreign pointer reallocs through the
+    /// system allocator into another foreign block (size 0 here), which must not be charged or the
+    /// bytes would never be credited back by trackedZoneFree. Mirrors the plain-alloc wrappers.
+    if (res != nullptr && saved_zone.size(zone, res) != 0)
+    {
+        AllocationTrace alloc_trace;
+        size_t new_actual_size = Memory::trackMemoryFromC(size, alloc_trace);
+        alloc_trace.onAlloc(res, new_actual_size);
+    }
     return res;
 }
 
