@@ -1922,7 +1922,9 @@ int64_t KeeperStateMachine::getLastProcessedZxid() const
 
 KeeperStorageStats KeeperStateMachine::getStorageStats() const
 {
-    KEEPER_STORAGE_LOCK_EXCLUSIVE(lock);
+    /// (Unprofiled because we don't care how long the monitoring threads wait for locks.)
+    std::shared_lock storage_lock(state_machine_storage_mutex);
+    std::lock_guard response_lock(process_and_responses_lock);
     return storage->getStorageStats();
 }
 

@@ -173,8 +173,8 @@ public:
 
     KeeperDigest getNodesDigest(bool committed, bool lock_transaction_mutex) const;
 
-    /// Introspection function mostly used in 4-letter commands.
-    /// Not thread safe, caller should make sure no other methods run in parallel with this.
+    /// Introspection function used for 4-letter commands and asynchronous metrics.
+    /// Shoudn't be called in parallel with processRequest or processLocalRequests.
     KeeperStorageStats getStorageStats() const;
 
     uint64_t getTotalWatchesCount() const;
