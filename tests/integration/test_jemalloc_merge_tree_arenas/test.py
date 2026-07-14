@@ -117,19 +117,23 @@ def test_pool_arena_accumulates(started_cluster):
     assert active_bytes > 0
 
 
-def manual_arena_active_bytes(node):
-    # Per-arena live ("active") bytes for the manually-created arenas from malloc_stats_print. Those
-    # are the dedicated MergeTree pool plus the cache/JIT arenas; the auto (per-CPU) arenas used for
-    # transient allocations are excluded.
+def manual_arena_nmalloc(node):
+    # Cumulative allocation count ("nmalloc") per manually-created arena from malloc_stats_print.
+    # Those are the dedicated MergeTree pool plus the cache/JIT arenas; the auto (per-CPU) arenas
+    # used for transient allocations are excluded. nmalloc only ever grows, so a per-arena delta
+    # reliably shows which dedicated arenas received allocations, independent of how much is retained
+    # or freed by background purge (unlike live "active" bytes, which the transient churn no longer
+    # inflates now that only long-lived metadata stays in these arenas).
     text = node.query("SELECT stats FROM system.jemalloc_stats FORMAT TSVRaw")
     result = {}
     for block in re.split(r"\narenas\[", text)[1:]:
         index_match = re.match(r"(\d+)\]", block)
         if not index_match or not re.search(r'name:\s*"manual', block):
             continue
-        active_match = re.search(r"\nactive:\s+(\d+)", block)
-        if active_match:
-            result[int(index_match.group(1))] = int(active_match.group(1))
+        # total row columns: allocated  nmalloc  (#/sec)  ndalloc  ...
+        total_match = re.search(r"\ntotal:\s+\d+\s+(\d+)", block)
+        if total_match:
+            result[int(index_match.group(1))] = int(total_match.group(1))
     return result
 
 
@@ -147,7 +151,7 @@ def test_pool_shards_across_arenas(started_cluster):
         "SETTINGS min_bytes_for_wide_part = 0, min_rows_for_wide_part = 0"
     )
 
-    before = manual_arena_active_bytes(node_pool)
+    before = manual_arena_nmalloc(node_pool)
 
     # Many small wide parts produce many concurrent background merges, which run on the merge thread
     # pool spread across CPUs, so per-part metadata is allocated from several pool arenas rather than
@@ -161,10 +165,11 @@ def test_pool_shards_across_arenas(started_cluster):
     for _ in range(5):
         node_pool.query("OPTIMIZE TABLE t_shard FINAL", ignore_error=True)
 
-    after = manual_arena_active_bytes(node_pool)
+    after = manual_arena_nmalloc(node_pool)
     node_pool.query("DROP TABLE t_shard SYNC")
 
-    # Dedicated arenas that gained a non-trivial amount of live metadata. If routing were broken
-    # (every allocation to arena 0) at most one would grow beyond the small cache-arena churn.
-    grew = sorted(idx for idx, after_bytes in after.items() if after_bytes > before.get(idx, 0) + 1024 * 1024)
+    # Dedicated arenas that received a non-trivial number of metadata allocations. If routing were
+    # broken (every allocation to arena 0) at most one would grow; a working per-CPU pool spreads the
+    # per-part metadata across several. The idle cache/JIT arenas stay at zero for this workload.
+    grew = sorted(idx for idx, n in after.items() if n > before.get(idx, 0) + 500)
     assert len(grew) >= 2, f"metadata landed in only {len(grew)} dedicated arena(s): {grew}"
