@@ -6,15 +6,6 @@
 
 # ─────────────────────────── macOS platform gaps (keep skipped) ───────────────────────────
 
-# Streaming distributed exchange: the DistributedQuery/stateless-worker layer is eventfd-based and
-# Linux-only ("Stateless worker client is not enabled" / "Only Persisted exchange is supported").
-03394_distributed_shuffle_join_with_aggregation
-03394_distributed_shuffle_join_with_filter
-03394_distributed_shuffle_join_with_in
-03394_distributed_shuffle_join_with_prewhere
-03394_distributed_sort
-04105_distributed_final_replacing
-
 # Transactions are not supported on this build (experimental, NOT_IMPLEMENTED).
 03803_transaction_mutation_race
 03916_attach_as_replicated_implicit_transaction
@@ -26,11 +17,6 @@
 # Memory limit not hit as expected on macOS (the query that should exceed MEMORY_LIMIT_EXCEEDED
 # succeeds), likely a memory-accounting difference.
 01961_roaring_memory_tracking
-
-# Investigate
-04051_negative_limit_with_ties_distributed
-04052_negative_limit_with_ties_distributed_large
-04054_negative_limit_with_ties_distributed_large_boundary
 
 # ─────── NOT a macOS platform gap: env/harness/portability - verify on CI or fix ───────
 
