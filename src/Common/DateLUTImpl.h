@@ -490,8 +490,9 @@ public:
     bool hasFixedOffset() const { return offset_is_fixed; }
 
     /// Whether both t and t shifted by `days` days stay inside the LUT, so that in a fixed-offset
-    /// time zone addDays(t, days) equals t + days * 86400 (outside the LUT addDays clamps the day
-    /// index to the boundaries instead). t is given in units of 1/scale_multiplier of a second,
+    /// time zone addDays(t, days) equals t + days * 86400 (outside the LUT addDays takes the cctz
+    /// escape path, which saturates to the representable calendar [0000, 9999] and truncates the
+    /// sub-second division towards zero). t is given in units of 1/scale_multiplier of a second,
     /// like a raw DateTime64 value. May return a false negative within one second of the LUT
     /// boundaries, which merely sends such values to the exact calendar path.
     bool dayShiftStaysWithinLUT(Int64 t, Int64 days, Int64 scale_multiplier = 1) const

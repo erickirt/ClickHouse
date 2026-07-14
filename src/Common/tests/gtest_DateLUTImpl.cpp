@@ -101,14 +101,14 @@ TEST(DateLUTTest, dayShiftStaysWithinLUT)
 {
     const DateLUTImpl & lut = DateLUT::instance("UTC");
     const time_t lut_min = -2208988800; /// 1900-01-01 00:00:00 UTC, the first second of the LUT
-    const time_t lut_max = 10413792000 - 1; /// 2300-01-01 23:59:59 UTC, the last second of the LUT
+    const time_t lut_max = 10413792000 - 1; /// 2299-12-31 23:59:59 UTC, the last second of the LUT
 
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT(0, 1));
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT(0, -1));
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 0));
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 1));
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_max, -1));
-    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 146096)); /// 1900-01-01 -> 2300-01-01, the last LUT day
+    EXPECT_TRUE(lut.dayShiftStaysWithinLUT(lut_min, 146096)); /// 1900-01-01 -> 2299-12-31, the last LUT day
 
     /// Input outside the LUT.
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT(lut_min - 1, 0));
@@ -130,7 +130,7 @@ TEST(DateLUTTest, dayShiftStaysWithinLUT)
     EXPECT_TRUE(lut.dayShiftStaysWithinLUT((lut_max + 1) * 1000 - 1, -1, 1000));
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT((lut_max + 1) * 1000, 0, 1000));
     /// Negative sub-second values shifted to the upper LUT edge: the calendar path truncates the
-    /// division towards zero and clamps the day index, so the fast path must decline.
+    /// division towards zero, so the fast path must decline to keep the results identical.
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT(-1, 120530, 1000));
     EXPECT_FALSE(lut.dayShiftStaysWithinLUT(-259200001, 17219 * 7, 1000));
     /// For scale 9 the end of the LUT exceeds Int64, so only the lower bound and Int64 overflow apply.

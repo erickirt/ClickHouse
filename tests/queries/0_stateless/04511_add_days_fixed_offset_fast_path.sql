@@ -36,9 +36,9 @@ SELECT addDays(materialize(toDateTime('2020-02-28 23:30:00', 'UTC')), 1);
 SELECT addWeeks(materialize(toDateTime64('2020-02-28 23:30:00.25', 2, 'UTC')), number) FROM numbers(3);
 
 SELECT 'Boundaries keep the calendar-path behavior in fixed-offset time zones';
--- When the input or the result leaves the range of the date LUT, the calendar path clamps to the
--- LUT boundaries and the fast path must fall back to it. Text output saturates out-of-range
--- DateTime64 for display, so also pin the raw values.
+-- When the input or the result leaves the range of the date LUT, the calendar path recomputes the
+-- value with cctz and saturates it to the representable calendar [0000, 9999]; the fast path must
+-- fall back to it. Text output does not distinguish every result, so also pin the raw values.
 SELECT subtractDays(toDateTime64('1900-01-01 00:00:00', 0, 'UTC'), 1) AS x, reinterpretAsInt64(x);
 SELECT subtractDays(materialize(toDateTime64('1900-01-01 00:00:00', 0, 'UTC')), 1) AS x, reinterpretAsInt64(x);
 SELECT subtractDays(toDateTime64('1900-01-01 12:00:00.5', 1, 'UTC'), 2) AS x, reinterpretAsInt64(x);
@@ -47,7 +47,7 @@ SELECT subtractDays(toDateTime64('1900-01-01 00:00:00', 0, 'Etc/GMT-5'), 1) AS x
 SELECT addDays(toDateTime64('2299-12-31 23:59:59.999', 3, 'UTC'), 2) AS x, reinterpretAsInt64(x);
 SELECT addWeeks(toDateTime64('2299-12-31 00:00:00', 0, 'Etc/GMT+5'), 52) AS x, reinterpretAsInt64(x);
 -- Negative sub-second values shifted to the upper LUT edge: the calendar path truncates the division
--- towards zero and clamps the day index; the fast path must match it.
+-- towards zero, so the fast path must decline near the edge to keep the results identical.
 SELECT addDays(toDateTime64('1969-12-31 23:59:59.999', 3, 'UTC'), 120530) AS x, reinterpretAsInt64(x);
 SELECT addDays(materialize(toDateTime64('1969-12-31 23:59:59.999', 3, 'UTC')), 120530) AS x, reinterpretAsInt64(x);
 SELECT addWeeks(toDateTime64('1969-12-28 23:59:59.999', 3, 'UTC'), 17219) AS x, reinterpretAsInt64(x);
