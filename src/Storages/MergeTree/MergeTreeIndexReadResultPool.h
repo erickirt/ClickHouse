@@ -35,7 +35,6 @@ public:
         MarkCachePtr mark_cache_,
         UncompressedCachePtr uncompressed_cache_,
         VectorSimilarityIndexCachePtr vector_similarity_index_cache_,
-        ContextPtr context_,
         MergeTreeReaderSettings reader_settings_,
         LoggerPtr log_);
 
@@ -50,8 +49,6 @@ private:
     MarkCachePtr mark_cache;
     UncompressedCachePtr uncompressed_cache;
     VectorSimilarityIndexCachePtr vector_similarity_index_cache;
-    /// Keeps the query settings alive for the reads at the query execution time.
-    ContextPtr context;
     MergeTreeReaderSettings reader_settings;
     LoggerPtr log;
 

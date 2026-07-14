@@ -4018,7 +4018,6 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
                 context->getIndexMarkCache(),
                 context->getIndexUncompressedCache(),
                 context->getVectorSimilarityIndexCache(),
-                context,
                 reader_settings,
                 getLogger("MergeTreeSkipIndexReader"));
         }

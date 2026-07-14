@@ -1158,7 +1158,6 @@ RangesInDataParts MergeTreeDataSelectExecutor::filterPartsByPrimaryKeyAndSkipInd
                             ranges.data_part,
                             ranges.ranges,
                             ranges.read_hints,
-                            settings,
                             reader_settings,
                             mark_cache.get(),
                             uncompressed_cache.get(),
@@ -2315,7 +2314,6 @@ std::pair<MarkRanges, RangesInDataPartReadHints> MergeTreeDataSelectExecutor::fi
     MergeTreeData::DataPartPtr part,
     const MarkRanges & ranges,
     const RangesInDataPartReadHints & in_read_hints,
-    const Settings & settings,
     const MergeTreeReaderSettings & reader_settings,
     MarkCache * mark_cache,
     UncompressedCache * uncompressed_cache,
@@ -2407,25 +2405,26 @@ std::pair<MarkRanges, RangesInDataPartReadHints> MergeTreeDataSelectExecutor::fi
         reader.read(0, condition.get(), granule, all_match ? nullptr : &ranges);
         auto & granule_text = assert_cast<MergeTreeIndexGranuleText &>(*granule);
 
-        const bool need_partial_disjunction_results = use_skip_indexes_for_disjunctions && key_condition_rpn_template;
+        auto may_be_true_on_range = [&](size_t mark_begin, size_t mark_end, auto && disjunction_result_fn) -> bool
+        {
+            size_t row_begin = part->index_granularity->getMarkStartingRow(mark_begin);
+            size_t row_end = part->index_granularity->getMarkStartingRow(mark_end);
 
-        if (need_partial_disjunction_results)
+            if (row_begin == row_end)
+                return false;
+
+            granule_text.setCurrentRange(RowsRange(row_begin, row_end - 1));
+            return condition->mayBeTrueOnGranule(granule, disjunction_result_fn);
+        };
+
+        if (use_skip_indexes_for_disjunctions && key_condition_rpn_template)
         {
             /// The disjunction analysis needs partial results for every mark, so check all marks one by one.
             for (const auto & range : ranges)
             {
                 for (size_t mark = range.begin; mark < range.end; ++mark)
                 {
-                    size_t row_begin = part->index_granularity->getMarkStartingRow(mark);
-                    size_t row_end = part->index_granularity->getMarkStartingRow(mark + 1);
-
-                    if (row_begin == row_end)
-                        continue;
-
-                    granule_text.setCurrentRange(RowsRange(row_begin, row_end - 1));
-                    bool may_be_true = condition->mayBeTrueOnGranule(granule, create_update_partial_disjunction_result_fn(mark));
-
-                    if (may_be_true)
+                    if (may_be_true_on_range(mark, mark + 1, create_update_partial_disjunction_result_fn(mark)))
                     {
                         if (res.empty() || mark - res.back().end > min_marks_for_seek)
                             res.push_back(MarkRange(mark, mark + 1));
@@ -2442,32 +2441,23 @@ std::pair<MarkRanges, RangesInDataPartReadHints> MergeTreeDataSelectExecutor::fi
             /// So run an exclusion search like for the primary key: it drops a whole range as soon
             /// as the check proves that the range has no matches and descends into subranges otherwise.
 
-            if (settings[Setting::merge_tree_coarse_index_granularity] <= 1)
+            if (reader_settings.merge_tree_coarse_index_granularity <= 1)
                 throw Exception(ErrorCodes::ARGUMENT_OUT_OF_BOUND, "Setting merge_tree_coarse_index_granularity should be greater than 1");
-
-            auto check_in_range = [&](const MarkRange & mark_range)
-            {
-                size_t row_begin = part->index_granularity->getMarkStartingRow(mark_range.begin);
-                size_t row_end = part->index_granularity->getMarkStartingRow(mark_range.end);
-
-                /// Empty marks (e.g. the final mark).
-                if (row_begin == row_end)
-                    return BoolMask(false, true);
-
-                granule_text.setCurrentRange(RowsRange(row_begin, row_end - 1));
-                return BoolMask(condition->mayBeTrueOnGranule(granule, nullptr), true);
-            };
 
             GenericExclusionSearchSettings search_settings
             {
-                .coarse_index_granularity = settings[Setting::merge_tree_coarse_index_granularity],
-                .max_steps = settings[Setting::merge_tree_generic_exclusion_search_max_steps],
+                .coarse_index_granularity = reader_settings.merge_tree_coarse_index_granularity,
+                .max_steps = reader_settings.merge_tree_generic_exclusion_search_max_steps,
                 .min_marks_for_seek = min_marks_for_seek,
+            };
+
+            auto check_in_range = [&](const MarkRange & mark_range)
+            {
+                return BoolMask(may_be_true_on_range(mark_range.begin, mark_range.end, nullptr), true);
             };
 
             auto search_result = genericExclusionSearch(ranges, check_in_range, search_settings, /*collect_exact_ranges=*/ false);
             res = std::move(search_result.ranges);
-
             LOG_TRACE(log, "Used generic exclusion search over text index for part {} with {} steps", part->name, search_result.num_steps);
         }
 

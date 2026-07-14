@@ -409,7 +409,7 @@ bool queryMayBeTrueInRange(
     return true;
 }
 
-bool hasAnyQueryTokensInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
+bool hasAnyTokensInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
 {
     if (query.getTokens().empty())
         return false;
@@ -417,7 +417,7 @@ bool hasAnyQueryTokensInRange(const TextSearchQuery & query, const TextIndexAnal
     return queryMayBeTrueInRange(query, query_builder, current_range, TextSearchMode::Any);
 }
 
-bool hasAnyQueryPatternsInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
+bool hasAnyPatternsInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
 {
     if (query.getPatterns().empty())
         return false;
@@ -425,7 +425,7 @@ bool hasAnyQueryPatternsInRange(const TextSearchQuery & query, const TextIndexAn
     return queryMayBeTrueInRange(query, query_builder, current_range, TextSearchMode::Any);
 }
 
-bool hasAllQueryTokensOrEmptyInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
+bool hasAllTokensOrEmptyInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
 {
     if (query.getTokens().empty())
         return true;
@@ -433,7 +433,7 @@ bool hasAllQueryTokensOrEmptyInRange(const TextSearchQuery & query, const TextIn
     return queryMayBeTrueInRange(query, query_builder, current_range, TextSearchMode::All);
 }
 
-bool hasAllQueryTokensInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
+bool hasAllTokensInRange(const TextSearchQuery & query, const TextIndexAnalyzer::QueryBuilder & query_builder, const std::optional<RowsRange> & current_range)
 {
     if (query.getTokens().empty())
         return false;
@@ -466,7 +466,7 @@ bool MergeTreeIndexConditionText::mayBeTrueOnGranule(MergeTreeIndexGranulePtr id
             chassert(element.text_search_queries.size() == 1);
             const auto & text_search_query = element.text_search_queries.front();
             const auto & query_builder = analyzer.getQueryBuilder(*text_search_query);
-            bool exists_in_granule = hasAnyQueryPatternsInRange(*text_search_query, query_builder, current_range);
+            bool exists_in_granule = hasAnyPatternsInRange(*text_search_query, query_builder, current_range);
             rpn_stack.emplace_back(exists_in_granule, true);
 
         }
@@ -475,7 +475,7 @@ bool MergeTreeIndexConditionText::mayBeTrueOnGranule(MergeTreeIndexGranulePtr id
             chassert(element.text_search_queries.size() == 1);
             const auto & text_search_query = element.text_search_queries.front();
             const auto & query_builder = analyzer.getQueryBuilder(*text_search_query);
-            bool exists_in_granule = hasAnyQueryTokensInRange(*text_search_query, query_builder, current_range);
+            bool exists_in_granule = hasAnyTokensInRange(*text_search_query, query_builder, current_range);
             rpn_stack.emplace_back(exists_in_granule, true);
         }
         else if (element.function == RPNElement::FUNCTION_HAS_ALL_TOKENS)
@@ -483,7 +483,7 @@ bool MergeTreeIndexConditionText::mayBeTrueOnGranule(MergeTreeIndexGranulePtr id
             chassert(element.text_search_queries.size() == 1);
             const auto & text_search_query = element.text_search_queries.front();
             const auto & query_builder = analyzer.getQueryBuilder(*text_search_query);
-            bool exists_in_granule = hasAllQueryTokensInRange(*text_search_query, query_builder, current_range);
+            bool exists_in_granule = hasAllTokensInRange(*text_search_query, query_builder, current_range);
             rpn_stack.emplace_back(exists_in_granule, true);
         }
         else if (element.function == RPNElement::FUNCTION_HAS_PHRASE)
@@ -493,7 +493,7 @@ bool MergeTreeIndexConditionText::mayBeTrueOnGranule(MergeTreeIndexGranulePtr id
             chassert(element.text_search_queries.size() == 1);
             const auto & text_search_query = element.text_search_queries.front();
             const auto & query_builder = analyzer.getQueryBuilder(*text_search_query);
-            bool exists_in_granule = hasAllQueryTokensInRange(*text_search_query, query_builder, current_range);
+            bool exists_in_granule = hasAllTokensInRange(*text_search_query, query_builder, current_range);
             rpn_stack.emplace_back(exists_in_granule, true);
         }
         else if (element.function == RPNElement::FUNCTION_EQUALS)
@@ -501,7 +501,7 @@ bool MergeTreeIndexConditionText::mayBeTrueOnGranule(MergeTreeIndexGranulePtr id
             chassert(element.text_search_queries.size() == 1);
             const auto & text_search_query = element.text_search_queries.front();
             const auto & query_builder = analyzer.getQueryBuilder(*text_search_query);
-            bool exists_in_granule = hasAllQueryTokensOrEmptyInRange(*text_search_query, query_builder, current_range);
+            bool exists_in_granule = hasAllTokensOrEmptyInRange(*text_search_query, query_builder, current_range);
             rpn_stack.emplace_back(exists_in_granule, true);
         }
         else if (element.function == RPNElement::FUNCTION_HAS_ANY_ELEMENTS)
@@ -513,7 +513,7 @@ bool MergeTreeIndexConditionText::mayBeTrueOnGranule(MergeTreeIndexGranulePtr id
             {
                 const auto & query_builder = analyzer.getQueryBuilder(*text_search_query);
 
-                if (hasAllQueryTokensOrEmptyInRange(*text_search_query, query_builder, current_range))
+                if (hasAllTokensOrEmptyInRange(*text_search_query, query_builder, current_range))
                 {
                     exists_in_granule = true;
                     break;

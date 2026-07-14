@@ -3,7 +3,6 @@
 #include <Storages/MergeTree/MergeTreeReadPoolProjectionIndex.h>
 #include <Storages/MergeTree/MergeTreeSelectProcessor.h>
 #include <Storages/MergeTree/ConditionTemplate.h>
-#include <Interpreters/Context.h>
 
 #include <Common/logger_useful.h>
 
@@ -34,7 +33,6 @@ MergeTreeSkipIndexReader::MergeTreeSkipIndexReader(
     MarkCachePtr mark_cache_,
     UncompressedCachePtr uncompressed_cache_,
     VectorSimilarityIndexCachePtr vector_similarity_index_cache_,
-    ContextPtr context_,
     MergeTreeReaderSettings reader_settings_,
     LoggerPtr log_)
     : skip_indexes(std::move(skip_indexes_))
@@ -43,7 +41,6 @@ MergeTreeSkipIndexReader::MergeTreeSkipIndexReader(
     , mark_cache(std::move(mark_cache_))
     , uncompressed_cache(std::move(uncompressed_cache_))
     , vector_similarity_index_cache(std::move(vector_similarity_index_cache_))
-    , context(std::move(context_))
     , reader_settings(std::move(reader_settings_))
     , log(std::move(log_))
 {
@@ -84,7 +81,6 @@ SkipIndexReadResultPtr MergeTreeSkipIndexReader::read(const RangesInDataPart & p
             part.data_part,
             ranges,
             part.read_hints,
-            context->getSettingsRef(),
             reader_settings,
             mark_cache.get(),
             uncompressed_cache.get(),
