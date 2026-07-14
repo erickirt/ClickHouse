@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <memory>
 #include <optional>
 #include <vector>
 
@@ -68,24 +67,25 @@ std::vector<UInt32> getAllowedCPUs()
     std::vector<UInt32> cpus;
 #if defined(OS_LINUX)
     /// The fixed `cpu_set_t` holds only `__CPU_SETSIZE` (1024) CPUs, so `sched_getaffinity` fails
-    /// with EINVAL once the mask covers a CPU id >= 1024. Grow a dynamically-allocated set until it
+    /// with EINVAL once the mask covers a CPU id >= 1024. Grow a dynamically-allocated mask until it
     /// fits, so pools on machines with many CPUs (or cpusets pinned to high ids) still map every
     /// allowed CPU to a reachable arena. Runs once, at startup.
-    struct CPUSetDeleter
-    {
-        void operator()(cpu_set_t * s) const noexcept { CPU_FREE(s); }
-    };
+    ///
+    /// The mask is a plain `unsigned long` array (the type `cpu_set_t` is made of) rather than
+    /// `CPU_ALLOC`, because `CPU_ALLOC`/`CPU_FREE` resolve to `__sched_cpualloc`/`__sched_cpufree`
+    /// which are only available since GLIBC_2.7 and would break the release-binary compatibility
+    /// check (max allowed GLIBC 2.4). `CPU_ALLOC_SIZE` and `CPU_ISSET_S` are macros with no such
+    /// dependency. `unsigned long` gives the alignment `cpu_set_t` needs.
     for (size_t num_cpus = 1024; num_cpus <= (size_t{1} << 20); num_cpus *= 2)
     {
-        std::unique_ptr<cpu_set_t, CPUSetDeleter> set(CPU_ALLOC(num_cpus));
-        if (!set)
-            break;
         const size_t set_size = CPU_ALLOC_SIZE(num_cpus);
-        if (sched_getaffinity(0, set_size, set.get()) == 0)
+        std::vector<unsigned long> mask((set_size + sizeof(unsigned long) - 1) / sizeof(unsigned long));
+        auto * set = reinterpret_cast<cpu_set_t *>(mask.data());
+        if (sched_getaffinity(0, set_size, set) == 0)
         {
             for (UInt32 cpu = 0; cpu < num_cpus; ++cpu)
             {
-                if (CPU_ISSET_S(cpu, set_size, set.get()))
+                if (CPU_ISSET_S(cpu, set_size, set))
                     cpus.push_back(cpu);
             }
             break;
