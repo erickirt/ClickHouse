@@ -158,24 +158,12 @@ echo '-- empty input field into Nullable(Tuple(Int32)): NULL, "(5)" parses'
 printf '\n"(5)"\n' | ${CLICKHOUSE_LOCAL} --query "SELECT c0 FROM file('/dev/stdin', CSV, 'c0 Nullable(Tuple(a Int32))')
 SETTINGS allow_experimental_nullable_tuple_type = 1"
 
-# Backward compatibility on input (issue #107342): older versions wrote a non-null Nullable(Tuple)
-# value as separate columns. With input_format_csv_deserialize_separate_columns_into_tuple = 1
-# (the default) the reader must still accept that legacy encoding as well as the new single quoted
-# field. Try the single-field encoding first, then fall back to the separate-columns encoding.
-echo '-- backward-compat input: legacy separate-columns encoding (1,"a") reads into Nullable(Tuple)'
-printf '1,"a"\n' | ${CLICKHOUSE_LOCAL} --query "SELECT c1 FROM file('/dev/stdin', CSV, 'c1 Nullable(Tuple(ID UInt64, Name String))')
-SETTINGS allow_experimental_nullable_tuple_type = 1"
-echo '-- backward-compat input: new single-field encoding still reads (with NULL rows)'
+# Nullable(Tuple) is written as a single CSV field and is read back only from a single field,
+# never from separate columns, regardless of input_format_csv_deserialize_separate_columns_into_tuple
+# (separate-columns parsing is unsupported for Nullable(Tuple) because a leading \N is ambiguous).
+echo '-- input: new single-field encoding reads (with NULL rows), setting = 1 (default)'
 printf '"(1,\x27a\x27)"\n\\N\n"(2,\x27b\x27)"\n' | ${CLICKHOUSE_LOCAL} --query "SELECT c1 FROM file('/dev/stdin', CSV, 'c1 Nullable(Tuple(ID UInt64, Name String))')
 SETTINGS allow_experimental_nullable_tuple_type = 1"
-echo '-- backward-compat input: legacy separate-columns followed by a trailing plain column (\N NULL row too)'
-printf '1,"a",5\n\\N,7\n' | ${CLICKHOUSE_LOCAL} --query "SELECT * FROM file('/dev/stdin', CSV, 'u Nullable(Tuple(ID UInt64, Name String)), x UInt8')
-SETTINGS allow_experimental_nullable_tuple_type = 1"
-echo '-- backward-compat input: CSVWithNames, legacy flattened header + separate-columns data, use_header = 0'
-# Legacy output wrote a NULL Nullable(Tuple) as a single \N field and a non-null value as separate
-# columns, so the two rows below have different field counts (exactly the width mismatch of #107342).
-printf 'User.ID,User.Name\n1,"a"\n\\N\n' | ${CLICKHOUSE_LOCAL} --query "SELECT c1 FROM file('/dev/stdin', CSVWithNames, 'c1 Nullable(Tuple(ID UInt64, Name String))')
-SETTINGS allow_experimental_nullable_tuple_type = 1, input_format_with_names_use_header = 0"
-echo '-- backward-compat input off: with the setting = 0 only the single-field encoding is accepted'
-printf '"(3,\x27c\x27)"\n' | ${CLICKHOUSE_LOCAL} --query "SELECT c1 FROM file('/dev/stdin', CSV, 'c1 Nullable(Tuple(ID UInt64, Name String))')
+echo '-- input: single-field encoding reads the same with the separate-columns setting = 0'
+printf '"(3,\x27c\x27)"\n\\N\n' | ${CLICKHOUSE_LOCAL} --query "SELECT c1 FROM file('/dev/stdin', CSV, 'c1 Nullable(Tuple(ID UInt64, Name String))')
 SETTINGS allow_experimental_nullable_tuple_type = 1, input_format_csv_deserialize_separate_columns_into_tuple = 0"
