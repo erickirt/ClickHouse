@@ -3702,15 +3702,19 @@ let dbReady = null;      /// Promise<IDBDatabase|null>; null result means persis
 /// but the saved workspace is only read from IndexedDB asynchronously in `reconcileStartup`.
 /// If the user types/pastes a query, creates a tab, or starts a run during that window, the
 /// live in-memory state is NEWER than the saved one, and the restore must NOT clobber it.
-/// `bootstrap_dirty` records such interaction; `bootstrap_settled` is set once reconciliation
-/// takes over, after which these signals are irrelevant (and reconciliation's own synthetic
-/// edits/runs must not set the flag).
+/// `bootstrap_dirty` records such interaction; `bootstrap_settled` is set only once reconciliation
+/// has FULLY finished (not merely started), after which these signals are irrelevant. The whole
+/// reconciliation still contains awaits (`activateTab`, `updateQueryParams`, the deferred
+/// auto-run), so keeping the flag live until the very end is what lets a real edit made during
+/// those awaits gate the URL-driven parameter restore and the auto-run. Reconciliation's OWN
+/// programmatic edits do not set the flag: the synthetic input events it dispatches carry
+/// `isTrusted === false` and are filtered below.
 let bootstrap_dirty = false;
 let bootstrap_settled = false;
 function markBootstrapDirty(e) {
-    /// Only genuine user actions count. The page programmatically dispatches input events and
-    /// calls run helpers during bootstrap/reconciliation; those carry `isTrusted === false`
-    /// (or arrive after `bootstrap_settled`) and must be ignored.
+    /// Only genuine user actions count. The page programmatically dispatches input events during
+    /// bootstrap/reconciliation; those carry `isTrusted === false` and must be ignored. Once
+    /// reconciliation has fully finished, `bootstrap_dirty` is no longer read, so short-circuit.
     if (bootstrap_settled) return;
     if (e && e.isTrusted === false) return;
     bootstrap_dirty = true;
@@ -8895,10 +8899,11 @@ const defer_run_for_reconcile = run_immediately && has_url_query;
 /// Reconcile the freshly loaded URL (query + tab name) against tabs saved in IndexedDB.
 async function reconcileStartup() {
     const loaded = await loadFromDb();
-    /// From here on reconciliation owns the workspace; any programmatic edits/runs it triggers
-    /// below (activateTab's synthetic input, a deferred auto-run) must no longer set the flag.
-    /// The value captured during the `await` above (real user interaction) is what we act on.
-    bootstrap_settled = true;
+    /// `bootstrap_settled` is deliberately NOT set here: reconciliation still awaits `activateTab`
+    /// and `updateQueryParams` below (and may fire a deferred auto-run), and a genuine user edit
+    /// during any of those awaits must still mark the workspace dirty so it is neither overwritten
+    /// by the URL-driven restore nor auto-run. Reconciliation's own synthetic input events carry
+    /// `isTrusted === false`, so they never set the flag. The flag is closed at each terminal path.
     let activated = false;
     /// Set when the matched tab's saved query/params are newer than the URL (a stale reload
     /// of an edited-but-not-resynced tab). In that case the URL is NOT authoritative, so we
@@ -8979,6 +8984,7 @@ async function reconcileStartup() {
             }
             renderTabBar();
             scheduleSave();
+            bootstrap_settled = true;   /// reconciliation is done for this path (no further awaits)
             return;   /// skip URL param reconciliation and auto-run: the user is already editing
         }
 
@@ -9101,7 +9107,11 @@ async function reconcileStartup() {
     /// must not be replaced by the URL's.
     if (url_query && !preserve_local_query && !bootstrap_dirty) {
         const params_ok = await updateQueryParams();
-        if (params_ok) {
+        /// The tokenization above is another await: a real edit during it makes the live params
+        /// newer than the URL's, so re-check the flag and yield to the user rather than overwriting.
+        if (bootstrap_dirty) {
+            /// user is editing; leave their live params in place
+        } else if (params_ok) {
             const urlParamValues = {};
             for (const param of currentQueryParams) {
                 const value = current_url.searchParams.get('param_' + param.name);
@@ -9130,6 +9140,10 @@ async function reconcileStartup() {
         syncHistory();   /// reflect the restored active tab in the URL (replaceState)
     }
     scheduleSave();
+    /// Reconciliation has fully finished: any later edit is ordinary post-bootstrap interaction,
+    /// so stop recording it as bootstrap-dirty. (`postAll` above is fire-and-forget and never
+    /// marks the flag itself, so closing it here does not affect the deferred auto-run.)
+    bootstrap_settled = true;
 }
 
 /// Render the syntax highlighting and parameter inputs for the URL query on page load.
