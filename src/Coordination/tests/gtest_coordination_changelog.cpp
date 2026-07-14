@@ -427,6 +427,8 @@ TEST_P(CoordinationTestWithCompression, ChangelogTestBatchOperationsEmpty)
     EXPECT_EQ(changelog_new.start_index(), 5);
     EXPECT_EQ(changelog_new.next_slot(), 11);
 
+    waitDurableLogs(changelog_new);
+
     DB::KeeperLogStore changelog_reader(
         DB::LogFileSettings{.force_sync = true, .compress_logs = this->enable_compression, .rotate_interval = 100},
         DB::FlushSettings(),
