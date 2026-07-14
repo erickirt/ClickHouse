@@ -18,3 +18,9 @@ clickhouse.com
 clickhouse.com
 --- test 10: ClickStack still pre-gzipped ---
 Content-Encoding: gzip
+--- test 11: Vary: Accept-Encoding advertised on negotiated response ---
+Vary: Accept-Encoding
+--- test 12: Vary: Accept-Encoding advertised even without Accept-Encoding ---
+Vary: Accept-Encoding
+--- test 13: pre-encoded response does not advertise Vary: Accept-Encoding ---
+no Vary (expected)

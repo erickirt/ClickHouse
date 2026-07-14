@@ -39,3 +39,12 @@ ${CLICKHOUSE_CURL} -sS -H "Accept-Encoding: gzip" "${BASE_URL}/play" | gzip -d |
 
 echo "--- test 10: ClickStack still pre-gzipped ---"
 ${CLICKHOUSE_CURL} -sS -I "${BASE_URL}/clickstack" | grep -oF 'Content-Encoding: gzip'
+
+echo "--- test 11: Vary: Accept-Encoding advertised on negotiated response ---"
+${CLICKHOUSE_CURL} -sS -I -H "Accept-Encoding: zstd" "${BASE_URL}/play" | grep -oF 'Vary: Accept-Encoding'
+
+echo "--- test 12: Vary: Accept-Encoding advertised even without Accept-Encoding ---"
+${CLICKHOUSE_CURL} -sS -I "${BASE_URL}/play" | grep -oF 'Vary: Accept-Encoding'
+
+echo "--- test 13: pre-encoded response does not advertise Vary: Accept-Encoding ---"
+${CLICKHOUSE_CURL} -sS -I "${BASE_URL}/clickstack" | grep -oF 'Vary: Accept-Encoding' || echo "no Vary (expected)"

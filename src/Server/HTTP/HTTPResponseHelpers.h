@@ -5,6 +5,8 @@
 #include <Server/HTTP/WriteBufferFromHTTPServerResponse.h>
 #include <base/defines.h>
 
+#include <Poco/String.h>
+
 #include <memory>
 
 
@@ -39,6 +41,29 @@ struct ResponseOutput
     }
 };
 
+/// Advertise that the response varies by the given request header field, merging with
+/// any `Vary` value that may already be present (e.g. from configured response headers).
+inline void addVaryField(HTTPServerResponse & response, const String & field)
+{
+    if (!response.has("Vary"))
+    {
+        response.set("Vary", field);
+        return;
+    }
+
+    String existing = response.get("Vary");
+
+    /// "*" already means the response varies on everything, so there is nothing to add.
+    if (existing == "*")
+        return;
+
+    /// Do not add the field twice (header field names are case-insensitive).
+    if (Poco::toLower(existing).find(Poco::toLower(field)) != String::npos)
+        return;
+
+    response.set("Vary", existing + ", " + field);
+}
+
 /// Create a write buffer for an HTTP response, optionally wrapped with
 /// compression negotiated from the request's Accept-Encoding header.
 ///
@@ -53,6 +78,12 @@ inline ResponseOutput responseWriteBuffer(const HTTPServerRequest & request, HTT
     // In case response already has encoding set, then return response raw.
     if (response.has("Content-Encoding"))
         return result;
+
+    /// The representation is content-negotiated on Accept-Encoding, so a shared cache in front of
+    /// the server must key on that header to avoid serving one client's variant to another. Emit
+    /// this even when we end up not compressing, because the uncompressed variant is still selected
+    /// based on Accept-Encoding.
+    addVaryField(response, "Accept-Encoding");
 
     String accept_encoding = request.get("Accept-Encoding", "");
     if (accept_encoding.empty())
