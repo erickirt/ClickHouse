@@ -1256,18 +1256,24 @@ Estimates IMergeTreeDataPart::getEstimates() const
     if (estimates.has_value())
         return *estimates;
 
-    Estimates new_estimates;
+    /// The raw statistics are transient, so load them in the default arena; only the cached
+    /// estimates map is long-lived (kept on the part until reload), so build it in the dedicated
+    /// arena, like the rest of the part's metadata.
     auto statistics = loadStatistics();
 
-    for (const auto & [column_name, stats] : statistics)
-        new_estimates.emplace(column_name, stats->getEstimate());
-
-    estimates = std::move(new_estimates);
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        Estimates new_estimates;
+        for (const auto & [column_name, stats] : statistics)
+            new_estimates.emplace(column_name, stats->getEstimate());
+        estimates = std::move(new_estimates);
+    }
     return *estimates;
 }
 
 void IMergeTreeDataPart::setEstimates(const Estimates & new_estimates)
 {
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     std::lock_guard lock(estimates_mutex);
     estimates = new_estimates;
 }
@@ -1393,6 +1399,10 @@ void IMergeTreeDataPart::addProjectionPart(
     if (projection_name != projection_part->name)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "The name of projection part ({}) is inconsistent with the name of projection ({})", projection_part->name, projection_name);
 
+    /// The parent keeps this map node (and the copied projection name key) for its whole lifetime,
+    /// so build it in the dedicated arena. Scoping here covers every caller (insert, merge,
+    /// projection merge, load); the `loadProjections` scope nests harmlessly.
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     projection_parts[projection_name] = std::move(projection_part);
 }
 
