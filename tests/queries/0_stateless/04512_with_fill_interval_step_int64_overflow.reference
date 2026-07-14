@@ -1,20 +1,32 @@
 -- { echo }
--- Each query drives FillingRow::doLongJump (reached only via the STALENESS shift path) to a
--- jumps_count large enough that step * jumps_count overflows Int64. The step is picked so the
--- per-jump delta is 2^31 in the UInt32 DateTime domain: odd jumps advance, even jumps land on the
--- same value, so doLongJump keeps doubling step_len until the multiply overflows. Must terminate
--- with no UB (the multiply wraps by construction) and no hang. SECOND/MINUTE/HOUR use plain modular
--- arithmetic on the DateTime domain, which is what reaches the overflowing multiply; calendar kinds
--- (DAY/WEEK/MONTH) converge via DateLUT and cannot drive jumps_count that high, so are not covered.
+-- Regression for signed Int64 overflow in the WITH FILL interval-step multiply (step * jumps_count)
+-- routed through FillingRow::doLongJump. The multiply now wraps by construction via mulStepWrapping,
+-- which doLongJump relies on to detect the overflowed jump. Each query below must terminate with no
+-- UB and no hang.
+--
+-- The overflowing multiply is only reachable via the STALENESS shift path (FillingRow::shift ->
+-- doLongJump), where step_len is doubled repeatedly. It is reached only for the plain-modular DateTime
+-- (UInt32) kinds SECOND/MINUTE/HOUR: their Add*Impl truncates to UInt32, so a large per-jump delta
+-- wraps back into range and lets doLongJump keep doubling step_len until step * jumps_count overflows
+-- Int64. The steps here are picked so the per-jump delta is 2^31 in the UInt32 domain: odd jumps
+-- advance, even jumps land on the same value, so step_len keeps doubling to the overflow point.
+--
+-- DateTime64/Decimal64 and the calendar kinds (DAY/WEEK/MONTH) cannot be driven to that overflow in a
+-- terminating query: DateTime64 execute() works in the full Int64 tick domain (no small-domain wrap,
+-- so a large delta immediately overshoots the target or overflows Int64 and doLongJump stops
+-- doubling), and calendar kinds converge via DateLUT. The DateTime64 case below is therefore a
+-- correctness smoke test of the same code path (the Decimal64 branch uses the identical
+-- mulStepWrapping via the same FOR_EACH_INTERVAL_KIND macro, so it is protected by construction), not
+-- an overflow trigger.
 SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 1970-01-01 00:00:00
 2106-02-07 06:28:15
-SELECT toDateTime64(arrayJoin([toDateTime64('1970-01-01 00:00:00', 0), toDateTime64('2262-01-01 00:00:00', 0)]), 0) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
-1970-01-01 00:00:00
-2262-01-01 00:00:00
 SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY d WITH FILL STEP INTERVAL 536870912 MINUTE STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 1970-01-01 00:00:00
 2106-02-07 06:28:15
 SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY d WITH FILL STEP INTERVAL 134217728 HOUR STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 1970-01-01 00:00:00
 2106-02-07 06:28:15
+SELECT toDateTime64(arrayJoin([toDateTime64('1970-01-01 00:00:00', 0), toDateTime64('2262-01-01 00:00:00', 0)]), 0) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
+1970-01-01 00:00:00
+2262-01-01 00:00:00
