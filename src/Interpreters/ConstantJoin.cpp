@@ -66,31 +66,15 @@ ConstantJoin::ConstantJoin(std::shared_ptr<TableJoin> table_join_, SharedHeader 
 
     bool is_no_clause_join = is_no_key_join && !table_join->hasOn() && !table_join->hasUsing();
 
-    if (is_cross_or_comma || is_no_clause_join)
-        predicate_kind = PredicateKind::True;
-    else if (is_join_with_constant && table_join->oneDisjunct())
-        predicate_kind = PredicateKind::CompareConstantKeys;
+    if (auto join_expression_value = table_join->getJoinExpressionValue())
+        constant_predicate_value = *join_expression_value;
     else
-        predicate_kind = PredicateKind::False;
+        constant_predicate_value = is_cross_or_comma || is_no_clause_join;
 
     Block right_sample_block = *right_sample_block_;
     JoinCommon::createMissedColumns(right_sample_block);
 
-    if (predicate_kind == PredicateKind::CompareConstantKeys)
-    {
-        const auto & clause = table_join->getOnlyClause();
-        if (clause.key_names_left.size() != 1 || clause.key_names_right.size() != 1)
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "ConstantJoin expects one constant key on each join side");
-
-        left_constant_key_name = clause.key_names_left.front();
-        right_constant_key_name = clause.key_names_right.front();
-
-        Block right_constant_key;
-        JoinCommon::splitAdditionalColumns(clause.key_names_right, right_sample_block, right_constant_key, sample_block_with_columns_to_add);
-    }
-    else
-        sample_block_with_columns_to_add = materializeBlock(right_sample_block);
-
+    sample_block_with_columns_to_add = materializeBlock(right_sample_block);
     JoinCommon::createMissedColumns(sample_block_with_columns_to_add);
     saved_block_sample = sample_block_with_columns_to_add.cloneEmpty();
 
@@ -104,9 +88,6 @@ bool ConstantJoin::addBlockToJoin(const Block & source_block, bool check_limits)
 
 bool ConstantJoin::addBlockToJoin(const Block & source_block, size_t num_rows, bool check_limits)
 {
-    if (num_rows && predicate_kind == PredicateKind::CompareConstantKeys && !right_constant_key_value)
-        right_constant_key_value = source_block.getByName(right_constant_key_name).column->operator[](0);
-
     auto materialized = JoinCommon::materializeColumnsFromRightBlock(source_block, saved_block_sample);
 
     size_t rows = materialized.rows();
@@ -281,32 +262,6 @@ void ConstantJoin::shrinkStoredBlocksToFit(size_t & total_bytes_in_join)
     total_bytes_in_join = new_total_bytes_in_join;
 }
 
-bool ConstantJoin::constantPredicateMatches(const Block & left_block)
-{
-    switch (predicate_kind)
-    {
-        case PredicateKind::True:
-            return true;
-        case PredicateKind::False:
-            return false;
-        case PredicateKind::CompareConstantKeys:
-            break;
-    }
-
-    if (!right_constant_key_value || left_block.rows() == 0)
-        return false;
-
-    Int32 cached_match = constant_predicate_match.load(std::memory_order_acquire);
-    if (cached_match != -1)
-        return cached_match == 1;
-
-    /// The left key is a dummy constant column produced by the join ActionsDAG, so after the first non-empty
-    /// left block its value is fixed for the whole join.
-    bool matches = left_block.getByName(left_constant_key_name).column->operator[](0) == *right_constant_key_value;
-    constant_predicate_match.store(matches ? 1 : 0, std::memory_order_release);
-    return matches;
-}
-
 namespace
 {
 
@@ -464,23 +419,7 @@ bool ConstantJoin::alwaysReturnsEmptySet() const
             && !can_output(/* has_match */ false, /* has_seen_matching_rows_ */ true);
     };
 
-    switch (predicate_kind)
-    {
-        case PredicateKind::True:
-            return predicate_always_returns_empty_set(true);
-        case PredicateKind::False:
-            return predicate_always_returns_empty_set(false);
-        case PredicateKind::CompareConstantKeys:
-        {
-            const auto cached_match = constant_predicate_match.load(std::memory_order_acquire);
-            if (cached_match == -1)
-                return false;
-
-            return predicate_always_returns_empty_set(cached_match == 1);
-        }
-    }
-
-    UNREACHABLE();
+    return predicate_always_returns_empty_set(constant_predicate_value);
 }
 
 class ConstantJoinResult final : public IJoinResult
@@ -499,10 +438,6 @@ public:
         for (size_t i = 0; i != block.columns(); ++i)
         {
             const auto & left_column = block.getByPosition(i);
-            if (join.predicate_kind == ConstantJoin::PredicateKind::CompareConstantKeys
-                && left_column.name == join.left_constant_key_name)
-                continue;
-
             result_sample.insert(left_column);
             src_left_columns.push_back(left_column.column.get());
         }
@@ -805,7 +740,7 @@ private:
 JoinResultPtr ConstantJoin::joinBlock(Block block)
 {
     /// A constant predicate cannot match rows of an empty right side; `alwaysReturnsEmptySet` applies the same rule.
-    bool has_match = constantPredicateMatches(block) && total_rows_to_join != 0;
+    bool has_match = constant_predicate_value && total_rows_to_join != 0;
     if (has_match && block.rows())
     {
         if (usesOnlyFirstLeftRow(makeMatchingRowsOutput(table_join->kind(), table_join->strictness(), /* has_match */ true)))

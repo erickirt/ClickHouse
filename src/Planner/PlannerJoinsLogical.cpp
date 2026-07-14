@@ -6,7 +6,6 @@
 #include <IO/Operators.h>
 #include <IO/WriteBufferFromString.h>
 
-#include <Columns/ColumnConst.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypesNumber.h>
 
@@ -52,8 +51,6 @@
 #include <Core/Settings.h>
 #include <Core/ServerSettings.h>
 #include <Interpreters/JoinOperator.h>
-#include <DataTypes/DataTypeNothing.h>
-#include <DataTypes/DataTypeNullable.h>
 #include <Interpreters/DirectJoinMergeTreeEntity.h>
 #include <Processors/QueryPlan/ReadFromTableStep.h>
 
@@ -541,16 +538,7 @@ std::unique_ptr<JoinStepLogical> buildJoinStepLogical(
     }
     else if (join_expression_constant.has_value())
     {
-        bool join_expression_value = join_expression_constant.value();
-        if (!join_expression_value)
-        {
-            auto actions_dag = build_context.expression_actions.getActionsDAG();
-            auto nothing_type = std::make_shared<DataTypeNullable>(std::make_shared<DataTypeNothing>());
-            auto null_column = nothing_type->createColumnConstWithDefaultValue(0);
-            JoinActionRef null_action(&actions_dag->addColumn(std::move(null_column), nothing_type, "NULL"), build_context.expression_actions);
-            null_action.setSourceRelations(BitSet());
-            build_context.join_operator.expression.push_back(null_action);
-        }
+        build_context.join_operator.constant_expression_value = join_expression_constant;
     }
 
     const auto & query_context = planner_context->getQueryContext();

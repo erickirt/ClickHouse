@@ -10,6 +10,7 @@ INSERT INTO constant_join_algorithm_t1 VALUES (1), (2);
 INSERT INTO constant_join_algorithm_t2 VALUES (2), (3);
 
 -- Constant joins use ConstantJoin independently of join_algorithm.
+-- { echo on }
 SELECT * FROM constant_join_algorithm_t1 AS t1 JOIN constant_join_algorithm_t2 AS t2 ON 1 = 1 SETTINGS join_algorithm = 'full_sorting_merge';
 SELECT * FROM constant_join_algorithm_t1 AS t1 JOIN constant_join_algorithm_t2 AS t2 ON 1 = 1 SETTINGS join_algorithm = 'partial_merge';
 SELECT * FROM constant_join_algorithm_t1 AS t1 JOIN constant_join_algorithm_t2 AS t2 ON 1 = 1 SETTINGS join_algorithm = 'auto';

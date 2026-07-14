@@ -1479,6 +1479,7 @@ void optimizeJoinLogicalImpl(JoinStepLogical * join_step, QueryPlan::Node & node
         || (strictness != JoinStrictness::All && !isSwapOnlyJoinStrictness(strictness))
         || locality != JoinLocality::Unspecified
         || kind == JoinKind::Paste
+        || join_operator.constant_expression_value
         || !join_operator.residual_filter.empty()
     )
     {

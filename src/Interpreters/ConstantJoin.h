@@ -6,7 +6,6 @@
 #include <optional>
 
 #include <Core/Block.h>
-#include <Core/Field.h>
 #include <Interpreters/IJoin.h>
 #include <Interpreters/RowRefs.h>
 #include <Interpreters/TemporaryDataOnDisk.h>
@@ -79,20 +78,9 @@ private:
 
     using StoredBlocks = std::list<StoredBlock>;
 
-    enum class PredicateKind
-    {
-        /// A predicate that always matches: explicit `CROSS`/comma join or a join without `ON`/`USING`.
-        True,
-        /// The old analyzer can encode constant-false `JOIN ON` as no keys with an `ON` expression.
-        /// The new analyzer normally uses `CompareConstantKeys` with dummy constant keys for this case.
-        False,
-        /// A constant `JOIN ON` represented as one equality between left and right dummy constant keys.
-        CompareConstantKeys,
-    };
-
     std::shared_ptr<TableJoin> table_join;
 
-    /// Header of the right columns appended to every output row (excludes the dummy constant key).
+    /// Header of the right columns appended to every output row.
     Block sample_block_with_columns_to_add;
     /// Empty block with the structure the stored right blocks are normalized to.
     Block saved_block_sample;
@@ -115,14 +103,7 @@ private:
     /// The single right row joined by the selected-right-row modes (first or last, see `useLastRightRow`).
     std::optional<ColumnsInfo> selected_right_columns_info;
 
-    PredicateKind predicate_kind = PredicateKind::True;
-    /// The dummy constant key names; set only for `PredicateKind::CompareConstantKeys`.
-    String left_constant_key_name;
-    String right_constant_key_name;
-    /// Value of the right dummy key, captured from the first right block.
-    std::optional<Field> right_constant_key_value;
-    /// Lazily cached result of `CompareConstantKeys`: -1 unknown, 0 no match, 1 match.
-    std::atomic<Int32> constant_predicate_match = -1;
+    bool constant_predicate_value;
     /// Whether any probe rows have matched; gates the non-joined right rows and the first-left-row cut in `joinBlock`.
     std::atomic_bool has_seen_matching_rows = false;
     /// The `join_any_take_last_row` setting (see `useLastRightRow`).
@@ -139,7 +120,6 @@ private:
 
     LoggerPtr log;
 
-    bool constantPredicateMatches(const Block & left_block);
     void shrinkStoredBlocksToFit(size_t & total_bytes_in_join);
     void doDebugAsserts() const;
 };

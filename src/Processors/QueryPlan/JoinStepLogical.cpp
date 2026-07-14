@@ -303,7 +303,10 @@ std::vector<std::pair<String, String>> JoinStepLogical::describeJoinProperties()
     description.emplace_back("Type", toString(join_operator.kind));
     description.emplace_back("Strictness", toString(join_operator.strictness));
     description.emplace_back("Locality", toString(join_operator.locality));
-    description.emplace_back("Expression", formatJoinCondition(join_operator.expression));
+    if (join_operator.constant_expression_value)
+        description.emplace_back("Expression", *join_operator.constant_expression_value ? "true" : "false");
+    else
+        description.emplace_back("Expression", formatJoinCondition(join_operator.expression));
 
     return description;
 }
@@ -1099,31 +1102,22 @@ static QueryPlanNode buildPhysicalJoinImpl(
     auto & join_expression = join_operator.expression;
 
     bool is_join_without_expression = isCrossOrComma(join_operator.kind) || isPaste(join_operator.kind);
-    /// When we do JOIN ON NULL or JOIN ON 1 we create dummy columns and in fact joining on 1 = 0 or 1 = 1.
-    /// For INNER JOIN we could just do CROSS, but for OUTER result depends on whether any table is empty or not.
-    if ((!is_join_without_expression && join_expression.empty()) ||
-        (join_expression.size() == 1
-            && join_expression[0].getType()->onlyNull()
-            && std::get<0>(join_expression[0].asBinaryPredicate()) == JoinConditionOperator::Unknown))
+    /// For `JOIN ON NULL` or `JOIN ON 1` the predicate value is stored in `TableJoin`.
+    /// For `INNER JOIN` we could just do `CROSS`, but for `OUTER` result depends on whether any table is empty or not.
+    if (join_operator.constant_expression_value)
     {
-        UInt8 rhs_value = join_expression.empty() ? 1 : 0;
         join_expression.clear();
-
-        auto actions_dag = expression_actions.getActionsDAG();
-
-        auto dt = std::make_shared<DataTypeUInt8>();
-
-        auto lhs_column = dt->createColumnConst(0, 1);
-        JoinActionRef lhs(&actions_dag->addColumn(std::move(lhs_column), dt, "__lhs_const"), expression_actions);
-        lhs.setSourceRelations(BitSet().set(0));
-
-        auto rhs_column = dt->createColumnConst(0, rhs_value);
-        JoinActionRef rhs(&actions_dag->addColumn(std::move(rhs_column), dt, "__rhs_const"), expression_actions);
-        rhs.setSourceRelations(BitSet().set(1));
-
-        join_expression.push_back(JoinActionRef::transform({lhs, rhs}, JoinActionRef::AddFunction(JoinConditionOperator::Equals)));
-
-        table_join->setIsJoinWithConstant(true);
+        table_join->setJoinExpressionValue(*join_operator.constant_expression_value);
+    }
+    else if (join_operator.strictness != JoinStrictness::Asof
+        && ((!is_join_without_expression && join_expression.empty())
+            || (join_expression.size() == 1
+                && join_expression[0].getType()->onlyNull()
+                && std::get<0>(join_expression[0].asBinaryPredicate()) == JoinConditionOperator::Unknown)))
+    {
+        bool join_expression_value = join_expression.empty();
+        join_expression.clear();
+        table_join->setJoinExpressionValue(join_expression_value);
     }
 
     std::vector<JoinActionRef> used_expressions;
@@ -1139,7 +1133,7 @@ static QueryPlanNode buildPhysicalJoinImpl(
 
     bool is_disjunctive_condition = false;
     auto & table_join_clauses = table_join->getClauses();
-    if (!is_join_without_expression)
+    if (!is_join_without_expression && !table_join->isJoinWithConstant())
     {
         bool has_keys = addJoinPredicatesToTableJoin(join_expression, table_join_clauses.emplace_back(), used_expressions, join_settings, planning_context);
 
@@ -1600,6 +1594,12 @@ void JoinStepLogical::serializeSettings(QueryPlanSerializationSettings & setting
     sorting_settings.updatePlanSettings(settings);
 }
 
+enum class JoinStepLogicalSerializationFlags : UInt8
+{
+    HasConstantExpressionValue = 1 << 0,
+    ConstantExpressionValue = 1 << 1,
+};
+
 static void serializeNodeList(
     WriteBuffer & out,
     const std::unordered_map<const ActionsDAG::Node *, size_t> & node_to_id,
@@ -1618,6 +1618,12 @@ static void serializeNodeList(
 void JoinStepLogical::serialize(Serialization & ctx) const
 {
     UInt8 flags = 0;
+    if (join_operator.constant_expression_value)
+    {
+        flags |= static_cast<UInt8>(JoinStepLogicalSerializationFlags::HasConstantExpressionValue);
+        if (*join_operator.constant_expression_value)
+            flags |= static_cast<UInt8>(JoinStepLogicalSerializationFlags::ConstantExpressionValue);
+    }
     writeIntBinary(flags, ctx.out);
 
     writeVarUInt(1, ctx.out);
@@ -1655,6 +1661,11 @@ QueryPlanStepPtr JoinStepLogical::deserialize(Deserialization & ctx)
 
     UInt8 flags = 0;
     readIntBinary(flags, ctx.in);
+    static constexpr UInt8 known_flags =
+        static_cast<UInt8>(JoinStepLogicalSerializationFlags::HasConstantExpressionValue)
+        | static_cast<UInt8>(JoinStepLogicalSerializationFlags::ConstantExpressionValue);
+    if (flags & ~known_flags)
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Unknown JoinStepLogical flags: {}", static_cast<UInt16>(flags));
 
     ActionsDAG actions_dag;
     {
@@ -1673,6 +1684,8 @@ QueryPlanStepPtr JoinStepLogical::deserialize(Deserialization & ctx)
     JoinExpressionActions expression_actions(*left_header, *right_header, std::move(actions_dag));
 
     auto join_operator = JoinOperator::deserialize(ctx.in, expression_actions);
+    if (flags & static_cast<UInt8>(JoinStepLogicalSerializationFlags::HasConstantExpressionValue))
+        join_operator.constant_expression_value = (flags & static_cast<UInt8>(JoinStepLogicalSerializationFlags::ConstantExpressionValue)) != 0;
     auto actions_after_join = deserializeNodeList(ctx.in, id_to_node);
 
     SortingStep::Settings sort_settings(ctx.settings);
@@ -1724,6 +1737,14 @@ QueryPlanStepPtr JoinStepLogical::clone() const
 
 void JoinStepLogical::addConditions(ActionsDAG actions_dag)
 {
+    if (join_operator.constant_expression_value)
+    {
+        if (!*join_operator.constant_expression_value)
+            return;
+
+        join_operator.constant_expression_value.reset();
+    }
+
     ActionsDAG::NodeRawConstPtrs conditions;
     expression_actions.getActionsDAG()->mergeNodes(std::move(actions_dag), &conditions);
     for (const auto * node : conditions)
