@@ -6065,7 +6065,19 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         tabName: tab.title,
     };
     const title = "ClickHouse Query: " + (titleForDoc || tab.query);
-    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, tab.result && tab.result.color_modes, tab.result && tab.result.pinned_columns);
+    /// The pinned columns / color modes on screen for the ACTIVE tab live in the display-state
+    /// globals (`pinned_columns` / `column_color_modes`); `activateTab` loads them from the tab's
+    /// result snapshot and a toggle keeps both in sync (`persistPinnedColumns` / `persistColorModes`
+    /// already serialize the URL from these globals). Serialize the active tab from the globals
+    /// rather than from its snapshot, so a result-less active tab still carries a shared link's
+    /// reasserted pins/colors in the URL (there is no snapshot for them to travel in until a run),
+    /// and so an authoritative link that cleared them (the empty state, encoded by omitting the
+    /// param) is honored instead of the stale snapshot winning. Every caller writes the active tab
+    /// today; a non-active tab (not reached) falls back to its own snapshot.
+    const active_display = tab.id === activeTabId;
+    const url_color_modes_out = active_display ? column_color_modes : (tab.result && tab.result.color_modes);
+    const url_pinned_columns_out = active_display ? pinned_columns : (tab.result && tab.result.pinned_columns);
+    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, url_color_modes_out, url_pinned_columns_out);
     let history_url = window.location.pathname;
     if (history_params.length > 0) history_url += '?' + history_params.join('&');
     history_url += '#' + toBase64(tab.query);
@@ -8473,33 +8485,37 @@ async function reconcileStartup() {
     /// shared display state (`pinned_columns` and `column_color_modes`) with the matched saved
     /// tab's snapshot (or cleared it for a result-less tab). When the URL is authoritative (a
     /// fresh/shared link, not a stale reload or a live bootstrap edit — the same gate as the
-    /// parameter reconciliation above), reassert the values the link carried, so the shared
-    /// appearance is honored and the trailing `syncHistory`/auto-run re-stamps the URL with the
-    /// link's set rather than the saved tab's. Done symmetrically for pinned columns and color
-    /// modes: the feature persists them the same way, so both must survive a shared link.
+    /// parameter reconciliation above), make the link's set win over the saved tab's: reassert the
+    /// values the link carried and clear the ones it omitted, so the shared appearance is honored
+    /// exactly and the trailing `syncHistory`/auto-run re-stamps the URL with the link's set rather
+    /// than the saved tab's. Done symmetrically for pinned columns and color modes: the feature
+    /// persists them the same way, so both must survive a shared link.
     if (activated && url_query && !preserve_local_query && !bootstrap_dirty) {
-        let reassert_display_state = false;
-        if (url_pinned_columns) { pinned_columns = url_pinned_columns; reassert_display_state = true; }
-        if (url_color_modes) { column_color_modes = url_color_modes; reassert_display_state = true; }
-        if (reassert_display_state) {
-            /// Re-lay-out every rendered result table so its columns match the reasserted state.
-            /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
-            /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
-            for (const el of document.querySelectorAll('query-result')) { el.applyColumnColors(); }
-            /// Reasserting the globals fixes the on-screen layout, but the history writers serialize
-            /// the display state from the active tab's result SNAPSHOT (`tab.result.pinned_columns` /
-            /// `tab.result.color_modes`), not the globals. So the trailing `syncHistory` below (the
-            /// non-rerun path) would otherwise re-stamp the URL from the stale saved snapshot and drop
-            /// the link's pinned columns / color modes. Mirror the reasserted values onto the snapshot
-            /// to restore the active-tab invariant that the globals and the snapshot agree — the same
-            /// pairing `saveHistory` establishes when a run produces a result. A result-less tab has no
-            /// snapshot to carry them (matching how color modes already behave), and the reasserted
-            /// globals still feed the eventual run's `saveHistory`, so only update when a result exists.
-            const active = getActiveTab();
-            if (active && active.result) {
-                if (url_pinned_columns) active.result.pinned_columns = url_pinned_columns;
-                if (url_color_modes) active.result.color_modes = url_color_modes;
-            }
+        /// The URL is authoritative for the shared display state, so it wins over the matched saved
+        /// tab's snapshot BOTH ways: a param present sets the globals to the link's set, and a param
+        /// ABSENT clears them to the empty set. `buildHistoryParams` serializes the empty state by
+        /// omitting the param, so a shared link with no `pinned_columns` / `color_modes` means "no
+        /// pins / no colors" and must override the saved tab's persisted set rather than inherit it —
+        /// otherwise the saved values would survive and the trailing `syncHistory` would re-stamp
+        /// them back into the URL. Kept symmetric for pinned columns and color modes, since the
+        /// feature persists both the same way.
+        pinned_columns = url_pinned_columns || {};
+        column_color_modes = url_color_modes || {};
+        /// Re-lay-out every rendered result table so its columns match the reasserted state.
+        /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
+        /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
+        for (const el of document.querySelectorAll('query-result')) { el.applyColumnColors(); }
+        /// Mirror the authoritative state onto the active tab's result SNAPSHOT too, so the globals
+        /// and the snapshot agree — the same invariant `saveHistory` establishes on a run and the
+        /// state `activateTab` reads back when the tab is revisited (a stale snapshot would otherwise
+        /// resurrect the overridden pins/colors on a tab switch). A result-less tab has no snapshot;
+        /// its display state now travels in the globals, which the active-tab history writers
+        /// serialize (see `writeHistoryEntry`) and which the eventual run's `saveHistory` records —
+        /// so the shared link keeps its pins/colors in the URL until a run materializes a snapshot.
+        const active = getActiveTab();
+        if (active && active.result) {
+            active.result.pinned_columns = pinned_columns;
+            active.result.color_modes = column_color_modes;
         }
     }
 
