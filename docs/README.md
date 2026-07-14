@@ -3,7 +3,8 @@
 This folder contains the documentation for ClickHouse.
 Content is built with [Mintlify](https://www.mintlify.com/) and hosted at [clickhouse.com/docs](https://clickhouse.com/docs).
 
-<a name="run-docs-locally">
+<a name="run-docs-locally"/>
+
 ## Run the docs site locally
 
 To run the docs locally in order to preview changes, you will need to install the Mintlify CLI tool.
@@ -73,7 +74,7 @@ The English language docs function as the source of truth, and we provide AI gen
 - Japanese (`/ja`)
 - Korean (`/ko`)
 - Spanish (`/es`)
-- Brazilian-Portuguese (`/br-Pt`)
+- Brazilian-Portuguese (`/pt-BR`)
 - Russian (`/ru`)
 - Simplified Chinese (`/zh`)
 - Arabic (`/ar`)
@@ -95,11 +96,11 @@ Here are two common questions:
 
 - "I don't know how to write."
 
-    We have prepared some [recommendations](#what-to-write) for you.
+    We have prepared some [recommendations](#common-recommendations) for you.
 
 - "I know what I want to write, but I don't know how to contribute to docs."
 
-    Here are some [tips](#how-to-contribute).
+    Here are some [tips](#how-to-contribute-to-docs).
 
 Writing the docs is extremely useful for project's users and developers, and grows your karma.
 
