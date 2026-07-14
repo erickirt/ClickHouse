@@ -320,6 +320,19 @@ struct ReentrancyGuard
     }
 };
 
+/// Credit the tracker for a pointer that is about to be freed. The size comes from the zone's own
+/// `size` callback (jemalloc's ivsalloc), which returns 0 for pointers jemalloc does not own.
+/// Darwin routes foreign pointers (e.g. from setenv) through these callbacks, and je_sallocx is
+/// UB on them, so we must use the ownership-aware zone size and skip untracking when it is 0.
+void untrackZonePointer(malloc_zone_t * zone, void * ptr)
+{
+    size_t actual_size = saved_zone.size(zone, ptr);
+    if (actual_size == 0)
+        return;
+    AllocationTrace trace = CurrentMemoryTracker::free(actual_size);
+    trace.onFree(ptr, actual_size);
+}
+
 extern "C"
 {
 
@@ -407,7 +420,8 @@ static void * trackedZoneRealloc(malloc_zone_t * zone, void * ptr, size_t size)
     if (!guard.engaged) [[unlikely]]
         return saved_zone.realloc(zone, ptr, size);
 
-    size_t old_actual_size = ptr ? je_sallocx(ptr, 0) : 0;
+    /// Ownership-aware size; 0 if ptr is not jemalloc-owned (je_sallocx would be UB on it).
+    size_t old_actual_size = ptr ? saved_zone.size(zone, ptr) : 0;
 
     AllocationTrace trace;
     size_t actual_size = Memory::trackMemoryFromC(size, trace);
@@ -438,11 +452,7 @@ static void trackedZoneFree(malloc_zone_t * zone, void * ptr)
 {
     ReentrancyGuard guard;
     if (guard.engaged)
-    {
-        AllocationTrace trace;
-        size_t actual_size = Memory::untrackMemory(ptr, trace);
-        trace.onFree(ptr, actual_size);
-    }
+        untrackZonePointer(zone, ptr);
     saved_zone.free(zone, ptr);
 }
 
@@ -450,11 +460,7 @@ static void trackedZoneFreeDefiniteSize(malloc_zone_t * zone, void * ptr, size_t
 {
     ReentrancyGuard guard;
     if (guard.engaged)
-    {
-        AllocationTrace trace;
-        size_t actual_size = Memory::untrackMemory(ptr, trace);
-        trace.onFree(ptr, actual_size);
-    }
+        untrackZonePointer(zone, ptr);
     saved_zone.free_definite_size(zone, ptr, size);
 }
 
@@ -483,11 +489,7 @@ static void trackedZoneBatchFree(malloc_zone_t * zone, void ** to_be_freed, unsi
             for (unsigned i = 0; i < num; ++i)
             {
                 if (to_be_freed[i] != nullptr)
-                {
-                    AllocationTrace trace;
-                    size_t actual_size = Memory::untrackMemory(to_be_freed[i], trace);
-                    trace.onFree(to_be_freed[i], actual_size);
-                }
+                    untrackZonePointer(zone, to_be_freed[i]);
             }
         }
     }
