@@ -2704,14 +2704,18 @@ void IMergeTreeDataPart::checkConsistencyWithProjections(bool require_part_metad
 
 void IMergeTreeDataPart::calculateColumnsAndSecondaryIndicesSizesOnDisk() const
 {
-    /// The per-column / per-secondary-index size maps are cached on the part for its whole lifetime,
-    /// so build them in the dedicated arena. The write/merge/mutation finalize path calls this
-    /// outside any arena scope; the load path already runs inside one, where this nests harmlessly.
-    /// Enter the arena before locking so the `thread.arena` switch/restore stays out of the critical
-    /// section (`lock` is destroyed first, releasing the mutex, then the arena scope restores).
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     UniqueLock lock(columns_and_secondary_indices_sizes_mutex);
     calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked();
+
+    /// The size maps are cached on the part for its whole lifetime, so re-home the finished maps into
+    /// the dedicated arena. Only the finished maps are copied here, deliberately not the computation
+    /// above: `calculateEachColumnSizes` resolves a stream name and builds a sample column for every
+    /// column and substream, which is heavy short-lived churn that must stay out of the shared arena.
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+    if (columns_sizes)
+        columns_sizes = std::make_shared<const ColumnSizeByName>(*columns_sizes);
+    if (secondary_index_sizes)
+        secondary_index_sizes = std::make_shared<const IndexSizeByName>(*secondary_index_sizes);
 }
 
 void IMergeTreeDataPart::calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked() const
