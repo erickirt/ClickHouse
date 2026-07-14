@@ -13,6 +13,12 @@
 
 #include <string_view>
 
+#include "config.h"
+
+#if USE_JEMALLOC
+#include <jemalloc/jemalloc.h>
+#endif
+
 namespace
 {
     /// Normally query_id is a UUID (string with a fixed length) but user can provide custom query_id.
@@ -70,7 +76,8 @@ void TraceSender::send(TraceType trace_type, const StackTrace & stack_trace, Ext
         + sizeof(UInt8)                      /// memory_context
         + sizeof(UInt8)                      /// memory_blocked_context
         + sizeof(ProfileEvents::Event)       /// event
-        + sizeof(ProfileEvents::Count);      /// increment
+        + sizeof(ProfileEvents::Count)       /// increment
+        + sizeof(Int64);                     /// jemalloc arena
 
     /// Write should be atomic to avoid overlaps
     /// (since recursive collect() is possible)
@@ -125,6 +132,22 @@ void TraceSender::send(TraceType trace_type, const StackTrace & stack_trace, Ext
         writePODBinary(static_cast<Int8>(MEMORY_CONTEXT_UNKNOWN), out);
     writePODBinary(extras.event, out);
     writePODBinary(extras.increment, out);
+
+    /// The jemalloc arena the allocation was routed to. Only meaningful for sampled memory
+    /// allocations, whose send sites run in a normal (non-signal) context where `je_mallctl` is
+    /// safe; -1 means unknown / not applicable. `thread.arena` is the arena the calling thread is
+    /// currently bound to, i.e. where the just-recorded allocation landed.
+    Int64 arena_index = -1;
+#if USE_JEMALLOC
+    if (trace_type == TraceType::MemorySample || trace_type == TraceType::JemallocSample)
+    {
+        unsigned arena = 0;
+        size_t arena_size = sizeof(arena);
+        if (je_mallctl("thread.arena", &arena, &arena_size, nullptr, 0) == 0)
+            arena_index = static_cast<Int64>(arena);
+    }
+#endif
+    writePODBinary(arena_index, out);
 
     out.next();
     out.finalize();

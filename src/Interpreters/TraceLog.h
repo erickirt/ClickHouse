@@ -39,6 +39,8 @@ struct TraceLogElement
     Int64 size{};
     /// Allocation ptr for TraceType::MemorySample.
     UInt64 ptr{};
+    /// jemalloc arena the sampled allocation was routed to (TraceType::MemorySample / JemallocSample), or -1 if unknown.
+    Int64 arena{-1};
     /// For memory tracing
     std::optional<VariableContext> memory_context{};
     std::optional<VariableContext> memory_blocked_context{};

@@ -101,6 +101,7 @@ ColumnsDescription TraceLogElement::getColumnsDescription()
         {"trace", std::make_shared<DataTypeArray>(std::make_shared<DataTypeUInt64>()), "Stack trace at the moment of sampling. Each element is a virtual memory address inside ClickHouse server process."},
         {"size", std::make_shared<DataTypeInt64>(), "For trace types Memory, MemorySample, MemoryAllocatedWithoutCheck or MemoryPeak is the amount of memory allocated, for other trace types is 0."},
         {"ptr", std::make_shared<DataTypeUInt64>(), "The address of the allocated chunk."},
+        {"arena", std::make_shared<DataTypeInt64>(), "For trace types MemorySample and JemallocSample is the jemalloc arena the allocation was routed to, or -1 if unknown."},
         {"memory_context", std::make_shared<ContextDataType>(context_values), fmt::format("Memory Tracker context (only for Memory/MemoryPeak): {}", context_description)},
         {"memory_blocked_context", std::make_shared<ContextDataType>(context_values), fmt::format("Context for which memory tracker is blocked (for ClickHouse developers only): {}", context_description)},
         {"event", std::make_shared<DataTypeLowCardinality>(std::make_shared<DataTypeString>()), "For trace type ProfileEvent is the name of updated profile event, for other trace types is an empty string."},
@@ -224,6 +225,7 @@ void TraceLogElement::appendToBlock(MutableColumns & columns) const
 
     typeid_cast<ColumnInt64 &>(*columns[i++]).getData().push_back(size);
     typeid_cast<ColumnUInt64 &>(*columns[i++]).getData().push_back(ptr);
+    typeid_cast<ColumnInt64 &>(*columns[i++]).getData().push_back(arena);
     if (memory_context.has_value())
         typeid_cast<ColumnInt8 &>(*columns[i++]).getData().push_back(static_cast<Int8>(memory_context.value()));
     else

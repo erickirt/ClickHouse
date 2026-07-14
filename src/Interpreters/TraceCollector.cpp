@@ -205,6 +205,9 @@ void TraceCollector::run()
             ProfileEvents::Count increment = 0;
             readPODBinary(increment, in);
 
+            Int64 arena = -1;
+            readPODBinary(arena, in);
+
             if (auto trace_log = getTraceLog())
             {
                 // time and time_in_microseconds are both being constructed from the same timespec so that the
@@ -228,6 +231,7 @@ void TraceCollector::run()
                     .trace = std::move(trace),
                     .size = size,
                     .ptr = ptr,
+                    .arena = arena,
                     .memory_context = memory_context == TraceSender::MEMORY_CONTEXT_UNKNOWN ? std::nullopt : std::make_optional<VariableContext>(static_cast<VariableContext>(memory_context)),
                     .memory_blocked_context = memory_blocked_context == TraceSender::MEMORY_CONTEXT_UNKNOWN ? std::nullopt : std::make_optional<VariableContext>(static_cast<VariableContext>(memory_blocked_context)),
                     .event = event,
