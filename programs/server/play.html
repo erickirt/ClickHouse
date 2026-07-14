@@ -5107,9 +5107,12 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
     }
 
     tab.logoVisible = !had_error;
-    tab.progressPhase = 'done';
-    /// A "Run all" where any statement failed marks the tab failed (red cross on its title).
+    /// A "Run all" where any statement failed marks the tab failed (red cross on its title) and is
+    /// encoded with the SAME `'error'` phase as a single-query failure — not `'done'`. Otherwise
+    /// `syncActiveTabChrome` (whose `'done'` branch calls `progressEl.finish()`) would replay the
+    /// green success check-mark when the failed background tab is reopened, contradicting its state.
     tab.failed = had_error;
+    tab.progressPhase = had_error ? 'error' : 'done';
     tab.finalStats = {
         rowCount: total_rows,
         elapsedNs: max_elapsed_ns || 1e6 * (performance.now() - query_start),
@@ -5117,12 +5120,18 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
     };
 
     if (active()) {
-        if (!had_error) logoEl.style.display = 'block';
-        progressEl.finish();
-        elapsed_ns = tab.finalStats.elapsedNs;
-        progressEl.updateText(total_rows, tab.finalStats.elapsedNs, any_incomplete);
-        progressEl.style.setProperty('--progress', '0');
-        document.documentElement.style.setProperty('--background-color-rotate', queryToColor(parsed[0].query));
+        if (had_error) {
+            /// Mirror the single-query error path: clear the shared progress widget rather than
+            /// showing the success check-mark; each statement's error is rendered in its own panel.
+            progressEl.clear();
+        } else {
+            logoEl.style.display = 'block';
+            progressEl.finish();
+            elapsed_ns = tab.finalStats.elapsedNs;
+            progressEl.updateText(total_rows, tab.finalStats.elapsedNs, any_incomplete);
+            progressEl.style.setProperty('--progress', '0');
+            document.documentElement.style.setProperty('--background-color-rotate', queryToColor(parsed[0].query));
+        }
     }
 
     if (posted_request_num != tab.reqNum) { updateTabIndicator(tab); return; }
@@ -5337,8 +5346,10 @@ async function restoreMultiQuery(snapshot, tab, matToken) {
     /// The logo returns only for a fully successful run, matching the live `postMulti` path.
     /// Recorded on the tab; `syncActiveTabChrome` applies it to the shared logo/progress bar.
     tab.logoVisible = !snapshot.multi.some(s => !s.ok);
-    tab.progressPhase = 'done';
     tab.failed = !tab.logoVisible;
+    /// Restore the same phase the live run recorded (`postMulti`): a failed "Run all" is `'error'`,
+    /// so reopening it does not paint the shared success check-mark over a failed tab.
+    tab.progressPhase = tab.failed ? 'error' : 'done';
     tab.finalStats = { rowCount: total_rows, elapsedNs: snapshot.elapsed_ns || max_elapsed_ns, incomplete: any_incomplete };
 }
 
