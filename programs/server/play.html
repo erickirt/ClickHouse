@@ -1756,16 +1756,36 @@ class QueryProgressElement extends HTMLElement
 customElements.define('query-progress', QueryProgressElement);
 
 
+/// Rebuild `obj` as a prototype-less object, so that entries keyed by names that collide with
+/// inherited `Object` members (`__proto__`, `constructor`, `toString`, `valueOf`, ...) behave as
+/// plain data: a column literally named `toString` must not read as pinned/colored before the user
+/// acts on it, and must be removable with `delete`. Applied to `column_color_modes` and
+/// `pinned_columns` at every point they are created or parsed from a URL or history snapshot, so
+/// their `obj[name]` lookups never see an inherited property. `Object.keys` copies only own
+/// enumerable keys, so inherited members of a normally-parsed object are dropped.
+function nullProtoMap(obj)
+{
+    const result = Object.create(null);
+    if (obj && typeof obj === 'object')
+    {
+        for (const key of Object.keys(obj)) { result[key] = obj[key]; }
+    }
+    return result;
+}
+
 /// Per-column color coding modes chosen by the user, keyed by column name.
 /// Only columns with an explicit (non-default) choice are stored here. It is the single source
 /// of truth shared across result tables and is persisted in the URL and browser history.
-let column_color_modes = {};
+/// A prototype-less object (see `nullProtoMap`) so a column named after an inherited `Object`
+/// member is not mistaken for one that has a stored color mode.
+let column_color_modes = Object.create(null);
 
 /// Names of the columns the user pinned, kept as a set (`{name: true}`). A pinned column sticks
 /// to the left/right edge of the result while it is scrolled horizontally instead of scrolling
 /// away; several pinned columns stack against the edge. Like `column_color_modes`, this is the
 /// single source of truth shared across result tables and is persisted in the URL and history.
-let pinned_columns = {};
+/// Also a prototype-less object, for the same reason as `column_color_modes`.
+let pinned_columns = Object.create(null);
 
 class QueryResultElement extends HTMLElement
 {
@@ -3876,7 +3896,9 @@ let run_immediately = current_url.searchParams.has("run");
 const color_modes_from_url = current_url.searchParams.get('color_modes');
 let url_color_modes = null;
 if (color_modes_from_url) {
-    try { url_color_modes = JSON.parse(color_modes_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    /// Normalize into a prototype-less map (`nullProtoMap`): the parsed object otherwise carries the
+    /// `Object` prototype, so a column named `toString` (etc.) would read as colored before any action.
+    try { url_color_modes = nullProtoMap(JSON.parse(color_modes_from_url)); } catch (e) { /* ignore malformed */ }
     if (url_color_modes) { column_color_modes = url_color_modes; }
 }
 
@@ -3885,7 +3907,8 @@ if (color_modes_from_url) {
 const pinned_columns_from_url = current_url.searchParams.get('pinned_columns');
 let url_pinned_columns = null;
 if (pinned_columns_from_url) {
-    try { url_pinned_columns = JSON.parse(pinned_columns_from_url) || {}; } catch (e) { /* ignore malformed */ }
+    /// Normalize into a prototype-less map, as for the color modes above.
+    try { url_pinned_columns = nullProtoMap(JSON.parse(pinned_columns_from_url)); } catch (e) { /* ignore malformed */ }
     if (url_pinned_columns) { pinned_columns = url_pinned_columns; }
 }
 
@@ -4684,12 +4707,12 @@ function updateServerInfoVisibility() {
 }
 window.addEventListener('resize', updateServerInfoVisibility);
 
-/// A viewport resize can make a table start or stop overflowing horizontally, which changes
-/// whether the pin option should be offered; it also changes the header widths that the pinned
-/// columns' sticky `left`/`right` offsets are baked from. So for a table with pinned columns
-/// recompute the whole layout (`applyPinnedColumns` refreshes `has-hscroll` itself), and for the
-/// rest just refresh the pin availability.
-window.addEventListener('resize', () => {
+/// A resize can make a table start or stop overflowing horizontally, which changes whether the pin
+/// option should be offered; it also changes the header widths that the pinned columns' sticky
+/// `left`/`right` offsets are baked from. So for a table with pinned columns recompute the whole
+/// layout (`applyPinnedColumns` refreshes `has-hscroll` itself), and for the rest just refresh the
+/// pin availability.
+function refreshPinnedLayout() {
     for (const el of document.querySelectorAll('query-result')) {
         if (el._hasPinnedColumns()) {
             el.applyPinnedColumns();
@@ -4697,7 +4720,18 @@ window.addEventListener('resize', () => {
             el._updatePinAvailability();
         }
     }
-});
+}
+window.addEventListener('resize', refreshPinnedLayout);
+
+/// A viewport `resize` is not the only thing that changes a result table's available width: opening
+/// or closing the database panel widens the `#menu` grid column and so narrows the `#main` results
+/// column WITHOUT any `resize` event. A table can therefore gain horizontal overflow while its pin
+/// controls stay hidden, or keep stale sticky offsets. Observe the results container so both a
+/// viewport resize and such internal layout changes keep the pin availability and offsets correct.
+const main_container = document.getElementById('main');
+if (main_container && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(refreshPinnedLayout).observe(main_container);
+}
 
 let check_credentials_request_num = 0;
 function checkCredentials() {
@@ -5381,12 +5415,13 @@ async function restoreFromHistory(state, token) {
     /// Restore the per-column color coding modes saved with this result before rendering, so the
     /// table is colored on the first paint. Reads `result.color_modes`, which covers both nested
     /// per-tab snapshots and legacy flat entries (where `result === state`, carrying a top-level
-    /// `color_modes`). A result-less entry leaves the modes empty.
-    column_color_modes = result.color_modes || {};
+    /// `color_modes`). A result-less entry leaves the modes empty. Normalized into a prototype-less
+    /// map (`nullProtoMap`): the snapshot may have been JSON-parsed from IndexedDB / history state.
+    column_color_modes = nullProtoMap(result.color_modes);
     /// Restore the pinned columns saved with this result before rendering, so the table is laid
     /// out with them on the first paint. Same shape as `color_modes` (nested per-tab snapshot or
-    /// legacy flat entry); a result-less entry leaves the set empty.
-    pinned_columns = result.pinned_columns || {};
+    /// legacy flat entry); a result-less entry leaves the set empty. Normalized like the modes above.
+    pinned_columns = nullProtoMap(result.pinned_columns);
     clear();
     /// Reset the result-action targets, so an empty/other tab can't download or copy the
     /// previously active tab's query/result. Shown again below if a result renders. They
@@ -5742,6 +5777,17 @@ function captureActiveTab() {
     /// the editor to this tab's query before the await. The guard lifts automatically once a run or
     /// a newer activation advances `request_num`, so it can never suppress capture indefinitely.
     if (params_restore_pending_token !== request_num) tab.params = getParamValues();
+    /// A tab with a result carries its display state (pins / color modes) in the result snapshot
+    /// (`tab.result`, kept by `saveHistory` / `persist*`). A RESULT-LESS tab has no snapshot, so keep
+    /// the state it currently shows on the tab itself; `activateTab` restores from these when the tab
+    /// is re-entered, so a shared link's reasserted pins/colors survive a tab switch, not just a
+    /// reload. The display globals are set synchronously by `restoreFromHistory` (before its await),
+    /// so they are valid to snapshot even while the parameter capture above is deferred.
+    if (!tab.result)
+    {
+        tab.pinned_columns = pinned_columns;
+        tab.color_modes = column_color_modes;
+    }
 }
 
 /// Invalidate any in-flight query and abort its HTTP requests, so a late response cannot
@@ -5767,8 +5813,13 @@ async function activateTab(id) {
     const token = request_num;
 
     /// Restore the editor from the live tab.query/tab.params (latest edits), while rendering
-    /// the stored result from tab.result, which keeps its own producing query/params.
-    await restoreFromHistory({ query: tab.query, params: tab.params, result: tab.result }, token);
+    /// the stored result from tab.result, which keeps its own producing query/params. For a
+    /// RESULT-LESS tab, the pins/color modes live at the top level of the tab (kept by
+    /// `captureActiveTab` / the startup reassert); pass them so `restoreFromHistory` recovers them
+    /// via `state.result || state` instead of resetting the display to empty. A tab with a result
+    /// carries them in its snapshot, which wins, so these are ignored in that case.
+    await restoreFromHistory({ query: tab.query, params: tab.params, result: tab.result,
+        pinned_columns: tab.pinned_columns, color_modes: tab.color_modes }, token);
     if (token !== request_num) return; /// a newer activation/run superseded this one
     /// Always recolor the page (and thus the active tab slab) to this tab's query,
     /// even when there is no result to render (restoreFromHistory skips this otherwise).
@@ -6003,6 +6054,12 @@ async function persist() {
                 /// reconciliation tell a stale reload (the URL hash is this tab's own last
                 /// synced query, but the tab was edited afterwards) from a fresh external URL.
                 lastSavedQuery: tab.lastSavedQuery,
+                /// Display state (pins / color modes) for a RESULT-LESS tab, which has no `result`
+                /// snapshot to carry it. Persisted so a shared link's reasserted pins/colors survive
+                /// a reload; for a tab with a result they live in `result` and this copy is ignored
+                /// on restore (`restoreFromHistory` reads `state.result || state`).
+                pinned_columns: tab.pinned_columns,
+                color_modes: tab.color_modes,
             });
         }
         tx.objectStore(META_STORE).put({
@@ -6091,9 +6148,18 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
     /// param) is honored instead of the stale snapshot winning. Every caller writes the active tab
     /// today; a non-active tab (not reached) falls back to its own snapshot.
     const active_display = tab.id === activeTabId;
-    const url_color_modes_out = active_display ? column_color_modes : (tab.result && tab.result.color_modes);
-    const url_pinned_columns_out = active_display ? pinned_columns : (tab.result && tab.result.pinned_columns);
+    const url_color_modes_out = active_display ? column_color_modes : (tab.result ? tab.result.color_modes : tab.color_modes);
+    const url_pinned_columns_out = active_display ? pinned_columns : (tab.result ? tab.result.pinned_columns : tab.pinned_columns);
     const history_params = buildHistoryParams(tab.params, tab.title, fromRun, url_color_modes_out, url_pinned_columns_out);
+    /// Carry the display state at the top level of the history entry too, so a RESULT-LESS entry
+    /// (whose `result` is null and therefore cannot hold it) still restores the reasserted pins /
+    /// colors on Back/Forward or reload. `restoreFromHistory` reads them from `state.result || state`,
+    /// so for a result-bearing entry the nested `result` snapshot wins and this top-level copy is
+    /// ignored; it matters only for the result-less case (mirroring `persistColorModes` /
+    /// `persistPinnedColumns`, which already fold the modes/pins into the top level of a result-less
+    /// entry).
+    state.color_modes = url_color_modes_out || {};
+    state.pinned_columns = url_pinned_columns_out || {};
     let history_url = window.location.pathname;
     if (history_params.length > 0) history_url += '?' + history_params.join('&');
     history_url += '#' + toBase64(tab.query);
@@ -6274,6 +6340,11 @@ window.onpopstate = function(event) {
         };
     } else {
         tab.result = null;
+        /// A result-less entry carries its display state at the top level (see `writeHistoryEntry`);
+        /// keep it on the tab so a later `activateTab` of this tab restores the pins/colors instead
+        /// of resetting them to empty. `restoreFromHistory(event.state)` below also reads it directly.
+        tab.pinned_columns = event.state.pinned_columns;
+        tab.color_modes = event.state.color_modes;
     }
     restoreFromHistory(event.state, token).then(() => {
         if (token !== request_num) return; /// a newer navigation/run superseded this one
@@ -8557,6 +8628,9 @@ async function reconcileStartup() {
         const savedTabs = ordered.map(r => ({
             id: r.id, title: r.title, query: r.query || '',
             params: r.params || {}, result: r.result || null, lastSavedQuery: r.lastSavedQuery,
+            /// Display state for a result-less tab (see `persist`); a result-bearing tab carries it
+            /// in `result` and these are ignored on restore.
+            pinned_columns: r.pinned_columns, color_modes: r.color_modes,
         }));
         if (loaded.meta) {
             tabSeq = Math.max(tabSeq, loaded.meta.tabSeq || 0);
@@ -8739,23 +8813,27 @@ async function reconcileStartup() {
         /// otherwise the saved values would survive and the trailing `syncHistory` would re-stamp
         /// them back into the URL. Kept symmetric for pinned columns and color modes, since the
         /// feature persists both the same way.
-        pinned_columns = url_pinned_columns || {};
-        column_color_modes = url_color_modes || {};
+        pinned_columns = url_pinned_columns || Object.create(null);
+        column_color_modes = url_color_modes || Object.create(null);
         /// Re-lay-out every rendered result table so its columns match the reasserted state.
         /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
         /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
         for (const el of document.querySelectorAll('query-result')) { el.applyColumnColors(); }
-        /// Mirror the authoritative state onto the active tab's result SNAPSHOT too, so the globals
-        /// and the snapshot agree — the same invariant `saveHistory` establishes on a run and the
-        /// state `activateTab` reads back when the tab is revisited (a stale snapshot would otherwise
-        /// resurrect the overridden pins/colors on a tab switch). A result-less tab has no snapshot;
-        /// its display state now travels in the globals, which the active-tab history writers
-        /// serialize (see `writeHistoryEntry`) and which the eventual run's `saveHistory` records —
-        /// so the shared link keeps its pins/colors in the URL until a run materializes a snapshot.
+        /// Mirror the authoritative state onto the active tab too, so the globals and the tab's
+        /// persisted display state agree — the same invariant `saveHistory` establishes on a run and
+        /// the state `activateTab` / Back-Forward reads back when the tab is revisited (a stale
+        /// snapshot would otherwise resurrect the overridden pins/colors on a tab switch). A tab with
+        /// a result keeps them in its result SNAPSHOT; a RESULT-LESS tab has no snapshot, so keep them
+        /// at the top level of the tab, which `captureActiveTab`/`activateTab` and the history writers
+        /// (`writeHistoryEntry`) carry, so a shared link's pins/colors survive a tab switch or
+        /// Back/Forward (not only a copy/reload) until a run materializes a snapshot.
         const active = getActiveTab();
         if (active && active.result) {
             active.result.pinned_columns = pinned_columns;
             active.result.color_modes = column_color_modes;
+        } else if (active) {
+            active.pinned_columns = pinned_columns;
+            active.color_modes = column_color_modes;
         }
     }
 
