@@ -427,11 +427,31 @@ void filterPartsAndCollectProjectionCandidates(
     RangesInDataParts projection_parts;
     std::unordered_set<const IMergeTreeDataPart *> valid_parts;
 
+    /// A drifted projection part can lack a column the current metadata expects (see
+    /// projectionPartHasRequiredColumns). Evaluating the filter over such a part here would default-fill
+    /// the missing column and prune the wrong parent rows, so route those parts to a parent read instead.
+    /// Only the filter inputs actually read from the projection part matter (filter-DAG inputs the
+    /// projection provides); the mark estimate below is index-based and safe on its own. A drifted part
+    /// keyed on the missing column cannot currently reach this path (a projection sort/INDEX column may
+    /// not be an ALIAS, which is the only known drift source), so this guard is defensive.
+    const auto parent_metadata = reading.getStorageMetadata();
+    Names filter_required_columns;
+    if (projection_query_info.filter_actions_dag)
+    {
+        for (const auto & name : projection_query_info.filter_actions_dag->getRequiredColumnsNames())
+        {
+            if (projection.sample_block.has(name))
+                filter_required_columns.push_back(name);
+        }
+    }
+
     for (const auto & part_with_ranges : parent_reading_select_result.parts_with_ranges)
     {
         const auto & created_projections = part_with_ranges.data_part->getProjectionParts();
         auto it = created_projections.find(projection.name);
-        if (it != created_projections.end() && !it->second->is_broken)
+        if (it != created_projections.end() && !it->second->is_broken
+            && projectionPartHasRequiredColumns(
+                *it->second, *part_with_ranges.data_part, projection, parent_metadata, filter_required_columns))
         {
             RangesInDataPart projection_part(
                 it->second,

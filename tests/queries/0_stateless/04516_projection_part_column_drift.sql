@@ -3,6 +3,12 @@
 -- ALIAS column selected by the projection). Reading or merging such a part must not fill the
 -- missing column with defaults: reads fall back to the parent part, merges rebuild the projection.
 
+-- The projections here select an ALIAS column, so building them on INSERT requires the alias to be
+-- resolved. Under optimize_respect_aliases=0 that resolution is skipped and every INSERT fails with
+-- UNKNOWN_IDENTIFIER, independently of the drift this test exercises (reproduces on master too), so
+-- pin the setting away from the randomized value.
+-- Random settings limits: optimize_respect_aliases=(1, 1)
+
 DROP TABLE IF EXISTS t_proj_column_drift;
 
 CREATE TABLE t_proj_column_drift
