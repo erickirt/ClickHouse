@@ -266,8 +266,6 @@ void * __libc_pvalloc(size_t size) __attribute__((alias("pvalloc"))); // NOLINT(
 #include <cstddef>
 #include <cstring>
 #include <pthread.h>
-#include <unistd.h>
-#include <sys/mman.h>
 
 #include <mach/mach.h>
 #include <malloc/malloc.h>
@@ -534,13 +532,9 @@ extern "C" void initializeJemallocZoneMemoryTracking()
         return;
     installed = true;
 
+    /// jemalloc's zone is its own mutable static (it writes the struct in zone_init and keeps
+    /// mutating it), so the page is writable; no mprotect dance is needed.
     saved_zone = *zone;
-
-    /// The zone struct may live on a read-only page on recent macOS; make it writable first.
-    long page_size = sysconf(_SC_PAGESIZE);
-    auto begin = reinterpret_cast<uintptr_t>(zone) & ~(static_cast<uintptr_t>(page_size) - 1);
-    auto end = reinterpret_cast<uintptr_t>(zone) + sizeof(*zone);
-    mprotect(reinterpret_cast<void *>(begin), end - begin, PROT_READ | PROT_WRITE);
 
     zone->malloc = trackedZoneMalloc;
     zone->calloc = trackedZoneCalloc;
