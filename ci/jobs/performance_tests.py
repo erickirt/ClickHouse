@@ -963,10 +963,9 @@ def rebuild_table(port, source, destination):
         print(f"rebuild_table: source {source} not attached, skipping")
         return
     insert_settings = "enable_filesystem_cache_on_write_operations=0, max_insert_threads=16"
-    target = destination
-    if source == destination:
-        target = f"{destination}_rebuild"
-        Shell.check(f'{client} --query "DROP TABLE IF EXISTS {target} SYNC"', strict=True, verbose=True)
+    target = f"{destination}_rebuild" if source == destination else destination
+    # Drop any leftover target from an interrupted previous run before rebuilding.
+    Shell.check(f'{client} --query "DROP TABLE IF EXISTS {target} SYNC"', strict=True, verbose=True)
     Shell.check(f'{client} --query "CREATE TABLE {target} AS {source}"', strict=True, verbose=True)
     Shell.check(f'{client} --query "INSERT INTO {target} SELECT * FROM {source} SETTINGS {insert_settings}"', strict=True, verbose=True)
     Shell.check(f'{client} --query "OPTIMIZE TABLE {target} FINAL"', strict=True, verbose=True)
@@ -979,37 +978,26 @@ def rebuild_table(port, source, destination):
         Shell.check(f'{client} --query "DROP TABLE {source} SYNC"', strict=True, verbose=True)
 
 
+POPULATE_DONE_MARKER = "test._populate_done"
+
+
 def populate_data(port):
-    # Rebuild the hits datasets on one server. All three tables are rebuilt in
-    # parallel: hits_100m_single dominates (~13min), so the two small tables
-    # (~20s each) finish within its window instead of adding on top. test.hits
-    # existence is the "done" marker for the re-entrant restart() skip.
-    if Shell.get_output(f'clickhouse-client --port {port} --query "EXISTS TABLE test.hits"').strip() == "1":
+    # Rebuild the hits datasets on one server, sequentially. The three inserts
+    # share the per-user memory limit (~28GiB) and hits_100m_single alone uses
+    # ~21GiB, so running them in parallel is killed by the OvercommitTracker.
+    # A dedicated marker table is created only after all three tables are
+    # rebuilt: it is the "done" signal for the re-entrant restart() skip. Table
+    # existence cannot serve as the marker, because the in-place *_single tables
+    # already exist (attached from the tarball) before they are rebuilt.
+    client = f"clickhouse-client --port {port}"
+    if Shell.get_output(f'{client} --query "EXISTS TABLE {POPULATE_DONE_MARKER}"').strip() == "1":
         print(f"populate_data: server {port} already populated, skipping")
         return
-    Shell.check(f'clickhouse-client --port {port} --query "CREATE DATABASE IF NOT EXISTS test"', strict=True, verbose=True)
-    # (source, destination); hits_100m_single is by far the longest, list first.
-    tables = [
-        ("default.hits_100m_single", "default.hits_100m_single"),
-        ("default.hits_10m_single", "default.hits_10m_single"),
-        ("datasets.hits_v1", "test.hits"),
-    ]
-    errors = []
-
-    def run(source, destination):
-        try:
-            rebuild_table(port, source, destination)
-        except Exception as e:  # noqa: BLE001
-            print(f"rebuild_table {source} failed on port {port}: {e}")
-            errors.append(e)
-
-    threads = [Thread(target=run, args=(s, d)) for s, d in tables]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    if errors:
-        raise errors[0]
+    Shell.check(f'{client} --query "CREATE DATABASE IF NOT EXISTS test"', strict=True, verbose=True)
+    rebuild_table(port, "default.hits_10m_single", "default.hits_10m_single")
+    rebuild_table(port, "default.hits_100m_single", "default.hits_100m_single")
+    rebuild_table(port, "datasets.hits_v1", "test.hits")
+    Shell.check(f'{client} --query "CREATE TABLE {POPULATE_DONE_MARKER} (done UInt8) ENGINE = Log"', strict=True, verbose=True)
 
 
 def populate_data_both(left_port, right_port):
