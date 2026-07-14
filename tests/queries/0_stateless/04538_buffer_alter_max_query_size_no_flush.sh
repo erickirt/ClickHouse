@@ -16,7 +16,13 @@ $CLICKHOUSE_CLIENT -q "DROP TABLE IF EXISTS dest_04538"
 # Columns with long names so the CREATE statement exceeds a small max_query_size.
 cols=$($CLICKHOUSE_CLIENT -q "SELECT arrayStringConcat(arrayMap(i -> 'column_with_a_long_name_' || toString(i) || ' Int8', range(30)), ', ')")
 $CLICKHOUSE_CLIENT -q "CREATE TABLE dest_04538 (${cols}) ENGINE = Memory"
-$CLICKHOUSE_CLIENT -q "CREATE TABLE buffer_04538 (${cols}) ENGINE = Buffer(currentDatabase(), 'dest_04538', 1, 1, 1, 1000000000, 1000000000, 1000000000, 1000000000)"
+
+# The time/rows/bytes thresholds are all set high enough that the background flush
+# thread never fires during the test, so the only thing that can move rows into
+# dest_04538 is an (erroneous) flush from StorageBuffer::alter — which is exactly
+# what this test checks for. A small max_time here would let the periodic flush
+# race the count() checks and make the test flaky.
+$CLICKHOUSE_CLIENT -q "CREATE TABLE buffer_04538 (${cols}) ENGINE = Buffer(currentDatabase(), 'dest_04538', 1, 1000000, 1000000, 1000000000, 1000000000, 1000000000, 1000000000)"
 
 # Insert a row into the buffer. It must stay in the buffer because no ALTER has flushed it.
 $CLICKHOUSE_CLIENT -q "INSERT INTO buffer_04538 (column_with_a_long_name_0) SELECT 1"
