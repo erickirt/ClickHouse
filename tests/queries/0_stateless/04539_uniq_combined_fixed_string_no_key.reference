@@ -1,0 +1,4 @@
+fixedstring cardinality, no key
+100	100	100	100
+fixedstring matches uniqExact
+1	1
