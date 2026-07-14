@@ -220,13 +220,12 @@ Positions: 6 0 1 2 3 4
           Type: LEFT
           Strictness: SEMI
           Algorithm: ConstantJoin
-          Clauses: [(__lhs_const) = (__rhs_const)]
+          Constant expression value: true
             Expression (Left Pre Join Actions)
-            Actions: COLUMN Const(UInt8) -> __lhs_const UInt8 : 0
-                     INPUT :: 0 -> __table2.uid Int16 : 1
-                     INPUT :: 1 -> __table2.name String : 2
-                     INPUT :: 2 -> __table2.age Int16 : 3
-            Positions: 0 1 2 3
+            Actions: INPUT :: 0 -> __table2.uid Int16 : 0
+                     INPUT :: 1 -> __table2.name String : 1
+                     INPUT :: 2 -> __table2.age Int16 : 2
+            Positions: 0 1 2
               Expression (Change column names to column identifiers)
               Actions: INPUT : 0 -> uid Int16 : 0
                        INPUT : 1 -> name String : 1
@@ -240,11 +239,10 @@ Positions: 6 0 1 2 3 4
                 Parts: 3
                 Granules: 3
             Expression (Right Pre Join Actions)
-            Actions: COLUMN Const(UInt8) -> __rhs_const UInt8 : 0
-                     INPUT :: 0 -> __table3.uid Int16 : 1
-                     INPUT :: 1 -> __table3.name String : 2
-                     INPUT :: 2 -> __table3.age Int16 : 3
-            Positions: 0 1 2 3
+            Actions: INPUT :: 0 -> __table3.uid Int16 : 0
+                     INPUT :: 1 -> __table3.name String : 1
+                     INPUT :: 2 -> __table3.age Int16 : 2
+            Positions: 0 1 2
               Expression (Change column names to column identifiers)
               Actions: INPUT : 0 -> uid Int16 : 0
                        INPUT : 1 -> name String : 1
@@ -311,13 +309,12 @@ Positions: 6 0 1 2 3 4
           Type: FULL
           Strictness: ALL
           Algorithm: ConstantJoin
-          Clauses: [(__lhs_const) = (__rhs_const)]
+          Constant expression value: true
             Expression (Left Pre Join Actions)
-            Actions: COLUMN Const(UInt8) -> __lhs_const UInt8 : 0
-                     INPUT :: 0 -> __table2.uid Int16 : 1
-                     INPUT :: 1 -> __table2.name String : 2
-                     INPUT :: 2 -> __table2.age Int16 : 3
-            Positions: 0 1 2 3
+            Actions: INPUT :: 0 -> __table2.uid Int16 : 0
+                     INPUT :: 1 -> __table2.name String : 1
+                     INPUT :: 2 -> __table2.age Int16 : 2
+            Positions: 0 1 2
               Expression (Change column names to column identifiers)
               Actions: INPUT : 0 -> uid Int16 : 0
                        INPUT : 1 -> name String : 1
@@ -331,11 +328,10 @@ Positions: 6 0 1 2 3 4
                 Parts: 3
                 Granules: 3
             Expression (Right Pre Join Actions)
-            Actions: COLUMN Const(UInt8) -> __rhs_const UInt8 : 0
-                     INPUT :: 0 -> __table3.uid Int16 : 1
-                     INPUT :: 1 -> __table3.name String : 2
-                     INPUT :: 2 -> __table3.age Int16 : 3
-            Positions: 0 1 2 3
+            Actions: INPUT :: 0 -> __table3.uid Int16 : 0
+                     INPUT :: 1 -> __table3.name String : 1
+                     INPUT :: 2 -> __table3.age Int16 : 2
+            Positions: 0 1 2
               Expression (Change column names to column identifiers)
               Actions: INPUT : 0 -> uid Int16 : 0
                        INPUT : 1 -> name String : 1
@@ -402,13 +398,12 @@ Positions: 6 0 1 2 3 4
           Type: LEFT
           Strictness: ANTI
           Algorithm: ConstantJoin
-          Clauses: [(__lhs_const) = (__rhs_const)]
+          Constant expression value: true
             Expression (Left Pre Join Actions)
-            Actions: COLUMN Const(UInt8) -> __lhs_const UInt8 : 0
-                     INPUT :: 0 -> __table2.uid Int16 : 1
-                     INPUT :: 1 -> __table2.name String : 2
-                     INPUT :: 2 -> __table2.age Int16 : 3
-            Positions: 0 1 2 3
+            Actions: INPUT :: 0 -> __table2.uid Int16 : 0
+                     INPUT :: 1 -> __table2.name String : 1
+                     INPUT :: 2 -> __table2.age Int16 : 2
+            Positions: 0 1 2
               Expression (Change column names to column identifiers)
               Actions: INPUT : 0 -> uid Int16 : 0
                        INPUT : 1 -> name String : 1
@@ -422,11 +417,10 @@ Positions: 6 0 1 2 3 4
                 Parts: 3
                 Granules: 3
             Expression (Right Pre Join Actions)
-            Actions: COLUMN Const(UInt8) -> __rhs_const UInt8 : 0
-                     INPUT :: 0 -> __table3.uid Int16 : 1
-                     INPUT :: 1 -> __table3.name String : 2
-                     INPUT :: 2 -> __table3.age Int16 : 3
-            Positions: 0 1 2 3
+            Actions: INPUT :: 0 -> __table3.uid Int16 : 0
+                     INPUT :: 1 -> __table3.name String : 1
+                     INPUT :: 2 -> __table3.age Int16 : 2
+            Positions: 0 1 2
               Expression (Change column names to column identifiers)
               Actions: INPUT : 0 -> uid Int16 : 0
                        INPUT : 1 -> name String : 1

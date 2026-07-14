@@ -6,6 +6,7 @@
 #include <optional>
 
 #include <Core/Block.h>
+#include <Core/Joins.h>
 #include <Interpreters/IJoin.h>
 #include <Interpreters/RowRefs.h>
 #include <Interpreters/TemporaryDataOnDisk.h>
@@ -57,7 +58,10 @@ public:
     IBlocksStreamPtr getNonJoinedBlocks(const Block & left_sample_block, const Block & result_sample_block, UInt64 max_block_size) const override;
 
 private:
-    friend class ConstantJoinResult;
+    friend class ConstantJoinResultBase;
+    friend class ConstantJoinUnmatchedLeftRowsResult;
+    friend class ConstantJoinSelectedRowResult;
+    friend class ConstantJoinCartesianResult;
     friend class ConstantJoinNotJoinedRightFiller;
 
     /// A right-side block prepared for probing. `rows` can be non-zero while `columns_info` is empty
@@ -78,12 +82,53 @@ private:
 
     using StoredBlocks = std::list<StoredBlock>;
 
+    /** With a constant predicate the join kind, strictness, and predicate value fully determine how blocks are
+      * stored and joined, so the whole strategy is fixed at construction time (see `makeOutputPlan`).
+      * Only two facts are discovered at runtime, and they merely select between the precomputed behaviors:
+      * whether the right side ended up empty (matched output needs right rows to join)
+      * and whether any probe row matched (`has_seen_matching_rows`, gating the unmatched right rows).
+      *
+      * NOTE: RightRowsToJoin::SelectedRowOnly && store_right_rows is a special case, only necessary for the legacy
+      * RightAny join (any_join_distinct_right_table_keys = 1).
+      */
+    struct OutputPlan
+    {
+        /// The left rows joined with the right side when the predicate matches and the right side is not empty.
+        enum class LeftRowsToJoin : uint8_t
+        {
+            None,
+            All,
+            /// The first probe row over all probe streams; implemented by `joinBlock` cutting the probe block.
+            FirstRowOnly,
+        };
+
+        /// The right rows joined to every left row selected by `left_rows_to_join`.
+        enum class RightRowsToJoin : uint8_t
+        {
+            AllStoredRows,
+            /// One row chosen at build time (see `select_last_right_row`), always kept in
+            /// `selected_right_columns_info`, separately from the stored blocks.
+            SelectedRowOnly,
+        };
+
+
+        LeftRowsToJoin left_rows_to_join = LeftRowsToJoin::None;
+        RightRowsToJoin right_rows_to_join = RightRowsToJoin::AllStoredRows;
+        bool store_right_rows = true;
+        /// `LEFT`/`FULL`/`ANTI`: when nothing matches, emit the left rows with right-side defaults.
+        bool emit_unmatched_left_rows = false;
+        /// `RIGHT`/`FULL`/`ANTI`: when no left row matched, emit the stored right rows with left-side defaults.
+        bool emit_unmatched_right_rows = false;
+        /// Which right row `SelectedRowOnly` refers to: the first one, or the last one (`join_any_take_last_row`).
+        bool select_last_right_row = false;
+    };
+
+    static OutputPlan makeOutputPlan(JoinKind kind, JoinStrictness strictness, bool constant_predicate_value, bool any_take_last_row);
+
     std::shared_ptr<TableJoin> table_join;
 
-    /// Header of the right columns appended to every output row.
-    Block sample_block_with_columns_to_add;
-    /// Empty block with the structure the stored right blocks are normalized to.
-    Block saved_block_sample;
+    /// Header of the right columns appended to every output row and the sample that stored right blocks normalize to.
+    Block right_sample_block;
 
     /// Right-side data kept in memory, possibly compressed.
     StoredBlocks right_blocks;
@@ -100,13 +145,16 @@ private:
     size_t allocated_size = 0;
     /// At least one stored block is compressed; readers then decompress every stored block.
     bool have_compressed = false;
-    /// The single right row joined by the selected-right-row modes (first or last, see `useLastRightRow`).
+    /// The single right row joined by `RightRowsToJoin::SelectedRowOnly`; kept separately from the stored blocks.
     std::optional<ColumnsInfo> selected_right_columns_info;
 
-    bool constant_predicate_value;
-    /// Whether any probe rows have matched; gates the non-joined right rows and the first-left-row cut in `joinBlock`.
+    /// Value of the constant join predicate; unconditionally true for explicit cartesian joins.
+    const bool constant_predicate_value;
+    /// How the right side is stored and how output rows are produced; fixed at construction.
+    const OutputPlan plan;
+    /// Whether any probe rows have matched; gates the unmatched right rows and the first-left-row cut in `joinBlock`.
     std::atomic_bool has_seen_matching_rows = false;
-    /// The `join_any_take_last_row` setting (see `useLastRightRow`).
+    /// The `join_any_take_last_row` setting; folded into `plan`, kept only for `clone`.
     const bool any_take_last_row;
 
     /// Per-result-block limits: `max_joined_block_size_rows` / `max_joined_block_size_bytes`.
@@ -120,6 +168,8 @@ private:
 
     LoggerPtr log;
 
+    bool trySpillRightBlock(const Block & block_to_save);
+    void storeRightBlock(Block block_to_save, size_t rows);
     void shrinkStoredBlocksToFit(size_t & total_bytes_in_join);
     void doDebugAsserts() const;
 };

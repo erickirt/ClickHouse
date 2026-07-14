@@ -13,6 +13,7 @@
 #include <Core/Joins.h>
 #include <Interpreters/JoinUtils.h>
 #include <Interpreters/TableJoin.h>
+#include <base/defines.h>
 
 namespace DB
 {
@@ -26,11 +27,16 @@ namespace ErrorCodes
 namespace
 {
 
-/// Intentionally mirrors `HashJoin`: `join_any_take_last_row` affects the modes that join one selected right row
-/// (see `selected_right_columns_info`), and never the `RIGHT` kinds, which join all right rows.
-bool useLastRightRow(JoinKind kind, JoinStrictness strictness, bool any_take_last_row)
+/// An explicit cartesian join or a join without any `ON`/`USING` clause matches unconditionally.
+/// The old analyzer encodes constant-false `JOIN ON` as a keyless join that still has its `ON` expression,
+/// so everything else defaults to false. The new analyzer passes the value explicitly.
+bool computeConstantPredicateValue(const TableJoin & table_join)
 {
-    return any_take_last_row && strictness == JoinStrictness::Any && !isRight(kind);
+    if (auto join_expression_value = table_join.getJoinExpressionValue())
+        return *join_expression_value;
+
+    bool is_no_clause_join = table_join.getClauses().empty() && !table_join.hasOn() && !table_join.hasUsing();
+    return isCrossOrComma(table_join.kind()) || is_no_clause_join;
 }
 
 }
@@ -53,32 +59,132 @@ size_t ConstantJoin::StoredBlock::allocatedBytes() const
 ConstantJoin::ConstantJoin(std::shared_ptr<TableJoin> table_join_, SharedHeader right_sample_block_, bool any_take_last_row_)
     : table_join(std::move(table_join_))
     , tmp_data(table_join->getTempDataOnDisk())
+    , constant_predicate_value(computeConstantPredicateValue(*table_join))
+    , plan(makeOutputPlan(table_join->kind(), table_join->strictness(), constant_predicate_value, any_take_last_row_))
     , any_take_last_row(any_take_last_row_)
     , max_joined_block_rows(table_join->maxJoinedBlockRows())
     , max_joined_block_bytes(table_join->maxJoinedBlockBytes())
     , log(getLogger("ConstantJoin"))
 {
-    bool is_cross_or_comma = isCrossOrComma(table_join->kind());
-    bool is_join_with_constant = table_join->isJoinWithConstant();
-    bool is_no_key_join = table_join->getClauses().empty();
-    if (!is_cross_or_comma && !is_join_with_constant && !is_no_key_join)
+    if (!isCrossOrComma(table_join->kind()) && !table_join->isJoinWithConstant() && !table_join->getClauses().empty())
         throw Exception(ErrorCodes::LOGICAL_ERROR, "ConstantJoin expects CROSS, comma or JOIN ON constant, got {}", table_join->kind());
 
-    bool is_no_clause_join = is_no_key_join && !table_join->hasOn() && !table_join->hasUsing();
+    Block right_header = *right_sample_block_;
+    JoinCommon::createMissedColumns(right_header);
 
-    if (auto join_expression_value = table_join->getJoinExpressionValue())
-        constant_predicate_value = *join_expression_value;
+    right_sample_block = materializeBlock(right_header);
+
+    LOG_TEST(log, "Right header: {}", right_header.dumpStructure());
+}
+
+/// The whole join strategy is a pure function of facts known at construction: the join kind, the strictness,
+/// and the constant predicate value. See the field comments in `OutputPlan` for what each decision controls.
+ConstantJoin::OutputPlan ConstantJoin::makeOutputPlan(JoinKind kind, JoinStrictness strictness, bool constant_predicate_value, bool any_take_last_row)
+{
+    using LeftRowsToJoin = OutputPlan::LeftRowsToJoin;
+    using RightRowsToJoin = OutputPlan::RightRowsToJoin;
+
+    OutputPlan plan{
+        .left_rows_to_join = LeftRowsToJoin::None,
+        .right_rows_to_join = RightRowsToJoin::AllStoredRows,
+        .store_right_rows = true,
+        .emit_unmatched_left_rows = false,
+        .emit_unmatched_right_rows = false,
+        .select_last_right_row = false,
+    };
+
+    /// Intentionally mirrors `HashJoin`: `join_any_take_last_row` affects only the modes that join one selected
+    /// right row, and never the `RIGHT` kinds, which join all right rows.
+    plan.select_last_right_row = any_take_last_row && strictness == JoinStrictness::Any && !isRight(kind);
+
+    /// An explicit cartesian join ignores strictness and has no unmatched rows to pad.
+    if (isCrossOrComma(kind))
+    {
+        if (constant_predicate_value)
+            plan.left_rows_to_join = LeftRowsToJoin::All;
+    }
     else
-        constant_predicate_value = is_cross_or_comma || is_no_clause_join;
+    {
+        /// ANTI/SEMI join can only be left or right
+        chassert(isLeftOrRight(kind) || (strictness != JoinStrictness::Anti && strictness != JoinStrictness::Semi));
+        const bool is_semi = strictness == JoinStrictness::Semi;
 
-    Block right_sample_block = *right_sample_block_;
-    JoinCommon::createMissedColumns(right_sample_block);
+        plan.emit_unmatched_left_rows = isLeftOrFull(kind) && !is_semi;
+        plan.emit_unmatched_right_rows = isRightOrFull(kind) && !is_semi;
+    }
 
-    sample_block_with_columns_to_add = materializeBlock(right_sample_block);
-    JoinCommon::createMissedColumns(sample_block_with_columns_to_add);
-    saved_block_sample = sample_block_with_columns_to_add.cloneEmpty();
+    /// With a false predicate no left row ever matches, so only the unmatched behaviors above remain.
+    if (constant_predicate_value && !isCrossOrComma(kind))
+    {
+        switch (strictness)
+        {
+            case JoinStrictness::All:
+                /// Every left row joins every right row.
+                plan.left_rows_to_join = LeftRowsToJoin::All;
+                plan.right_rows_to_join = RightRowsToJoin::AllStoredRows;
+                break;
+            case JoinStrictness::Any:
+                if (isRight(kind))
+                {
+                    /// `RIGHT ANY` keeps the right side intact: the first left row joins all right rows.
+                    plan.left_rows_to_join = LeftRowsToJoin::FirstRowOnly;
+                    plan.right_rows_to_join = RightRowsToJoin::AllStoredRows;
+                }
+                else if (isInner(kind))
+                {
+                    /// `INNER ANY` returns a single pair: the first left row with the selected right row.
+                    plan.left_rows_to_join = LeftRowsToJoin::FirstRowOnly;
+                    plan.right_rows_to_join = RightRowsToJoin::SelectedRowOnly;
+                }
+                else
+                {
+                    /// `LEFT`/`FULL ANY`: every left row joins the selected right row.
+                    plan.left_rows_to_join = LeftRowsToJoin::All;
+                    plan.right_rows_to_join = RightRowsToJoin::SelectedRowOnly;
+                }
+                break;
+            case JoinStrictness::RightAny:
+                /// Old `ANY` (`any_join_distinct_right_table_keys`), mirrors `HashJoin`: it assumes distinct
+                /// right keys and joins one right row to every left row for all kinds; `RIGHT`/`FULL` unmatched
+                /// right rows are covered by `emit_unmatched_right_rows`.
+                plan.left_rows_to_join = LeftRowsToJoin::All;
+                plan.right_rows_to_join = RightRowsToJoin::SelectedRowOnly;
+                break;
+            case JoinStrictness::Semi:
+                if (kind == JoinKind::Right)
+                {
+                    /// `RIGHT SEMI` preserves the right side: the first left row joins all right rows.
+                    plan.left_rows_to_join = LeftRowsToJoin::FirstRowOnly;
+                    plan.right_rows_to_join = RightRowsToJoin::AllStoredRows;
+                }
+                else
+                {
+                    /// `LEFT SEMI`: every left row once, with the selected right row.
+                    plan.left_rows_to_join = LeftRowsToJoin::All;
+                    plan.right_rows_to_join = RightRowsToJoin::SelectedRowOnly;
+                }
+                break;
+            case JoinStrictness::Anti:
+                /// A true constant predicate matches every left row, so `ANTI` suppresses all of them;
+                /// In case of empty left/right side, emit_unmatched_* take care of the output.
+                break;
+            case JoinStrictness::Unspecified:
+            case JoinStrictness::Asof:
+                UNREACHABLE();
+        }
+    }
 
-    LOG_TEST(log, "Right header: {}", right_sample_block.dumpStructure());
+    /// The stored right blocks feed only the cartesian matched output and the unmatched-right padding; when
+    /// neither can ever read them, store nothing. The selected-right-row modes keep their one row separately
+    /// in `selected_right_columns_info`, so beyond it only the right-side row count (`total_rows_to_join`)
+    /// can still affect the output.
+    const bool matched_output_reads_stored_rows = constant_predicate_value
+        && plan.left_rows_to_join != LeftRowsToJoin::None
+        && plan.right_rows_to_join == RightRowsToJoin::AllStoredRows;
+    if (!matched_output_reads_stored_rows && !plan.emit_unmatched_right_rows)
+        plan.store_right_rows = false;
+
+    return plan;
 }
 
 bool ConstantJoin::addBlockToJoin(const Block & source_block, bool check_limits)
@@ -88,10 +194,24 @@ bool ConstantJoin::addBlockToJoin(const Block & source_block, bool check_limits)
 
 bool ConstantJoin::addBlockToJoin(const Block & source_block, size_t num_rows, bool check_limits)
 {
-    auto materialized = JoinCommon::materializeColumnsFromRightBlock(source_block, saved_block_sample);
+    const bool select_right_row = plan.right_rows_to_join == OutputPlan::RightRowsToJoin::SelectedRowOnly;
 
-    size_t rows = materialized.rows();
-    if (rows == 0 && num_rows != 0 && !materialized.columns())
+    if (!plan.store_right_rows && !select_right_row)
+    {
+        /// The block can never be emitted; only the right-side row count is needed — `joinBlock` and
+        /// `alwaysReturnsEmptySet` check whether the right side turned out empty.
+        size_t rows_to_count = source_block.rows();
+        if (rows_to_count == 0 && !source_block.columns())
+            rows_to_count = num_rows;
+
+        total_rows_to_join += rows_to_count;
+        return true;
+    }
+
+    auto block_to_save = JoinCommon::materializeColumnsFromRightBlock(source_block, right_sample_block);
+
+    size_t rows = block_to_save.rows();
+    if (rows == 0 && num_rows != 0 && !block_to_save.columns())
         rows = num_rows;
 
     if (!memory_usage_before_adding_blocks)
@@ -99,37 +219,61 @@ bool ConstantJoin::addBlockToJoin(const Block & source_block, size_t num_rows, b
 
     total_rows_to_join += rows;
 
-    Block block_to_save = JoinCommon::filterColumnsPresentInSampleBlock(materialized, saved_block_sample);
+    assertBlocksHaveEqualStructureAllowReplicated(right_sample_block, block_to_save, "joined block");
+
     if (shrink_blocks)
         block_to_save = block_to_save.shrinkToFit();
 
-    if (rows)
+    if (rows && select_right_row)
     {
-        /// `SEMI` and old `ANY` (`RightAny`) use the first right row. New `ANY` may use the last one,
-        /// depending on the setting.
-        bool take_last_right_row = useLastRightRow(table_join->kind(), table_join->strictness(), any_take_last_row);
-        if (take_last_right_row || !selected_right_columns_info)
-            selected_right_columns_info.emplace(block_to_save.cloneWithCutColumns(take_last_right_row ? rows - 1 : 0, 1).getColumns());
+        /// The selected right row lives outside the stored blocks: the first row is captured once, while
+        /// `select_last_right_row` keeps replacing it with the freshest one.
+        if (plan.select_last_right_row || !selected_right_columns_info)
+            selected_right_columns_info.emplace(
+                block_to_save.cloneWithCutColumns(plan.select_last_right_row ? rows - 1 : 0, 1).getColumns());
     }
+
+    if (!plan.store_right_rows)
+        return true;
+
+    /// A spilled block does not count against the in-memory size limits, so it also skips the check below.
+    if (trySpillRightBlock(block_to_save))
+        return true;
+
+    storeRightBlock(std::move(block_to_save), rows);
+
+    if (!check_limits)
+        return true;
+
+    return table_join->sizeLimits().check(getTotalRowCount(), getTotalByteCount(), "JOIN", ErrorCodes::SET_SIZE_LIMIT_EXCEEDED);
+}
+
+/// Streams the block to disk when the in-memory size limits would be exceeded, and keeps streaming from then on.
+/// Blocks without columns never spill: the Native format cannot persist a bare row count, so they stay
+/// in memory as row-count metadata.
+bool ConstantJoin::trySpillRightBlock(const Block & block_to_save)
+{
+    if (block_to_save.columns() == 0 || !tmp_data)
+        return false;
 
     size_t max_bytes_in_join = table_join->sizeLimits().max_bytes;
     size_t max_rows_in_join = table_join->sizeLimits().max_rows;
+    bool limits_reached = (max_bytes_in_join && getTotalByteCount() + block_to_save.allocatedBytes() >= max_bytes_in_join)
+        || (max_rows_in_join && getTotalRowCount() + block_to_save.rows() >= max_rows_in_join);
 
-    /// Empty blocks can still represent rows when no right-side columns are needed by the query.
-    /// Keep them in memory as row-count metadata because Native format cannot persist that row count without columns.
-    bool can_spill_block = block_to_save.columns() != 0;
-    if (can_spill_block && tmp_data
-        && (tmp_stream || (max_bytes_in_join && getTotalByteCount() + block_to_save.allocatedBytes() >= max_bytes_in_join)
-            || (max_rows_in_join && getTotalRowCount() + block_to_save.rows() >= max_rows_in_join)))
-    {
-        if (!tmp_stream)
-            tmp_stream.emplace(std::make_shared<const Block>(sample_block_with_columns_to_add), tmp_data);
+    if (!tmp_stream && !limits_reached)
+        return false;
 
-        tmp_stream.value()->write(block_to_save);
-        return true;
-    }
+    if (!tmp_stream)
+        tmp_stream.emplace(std::make_shared<const Block>(right_sample_block), tmp_data);
 
-    assertBlocksHaveEqualStructureAllowReplicated(saved_block_sample, block_to_save, "joined block");
+    tmp_stream.value()->write(block_to_save);
+    return true;
+}
+
+void ConstantJoin::storeRightBlock(Block block_to_save, size_t rows)
+{
+    assertBlocksHaveEqualStructureAllowReplicated(right_sample_block, block_to_save, "joined block");
 
     size_t min_bytes_to_compress = table_join->crossJoinMinBytesToCompress();
     size_t min_rows_to_compress = table_join->crossJoinMinRowsToCompress();
@@ -143,19 +287,12 @@ bool ConstantJoin::addBlockToJoin(const Block & source_block, size_t num_rows, b
 
     doDebugAsserts();
     right_blocks.emplace_back(ColumnsInfo(block_to_save.getColumns()), rows);
-    auto & stored_block = right_blocks.back();
-    allocated_size += stored_block.allocatedBytes();
+    allocated_size += right_blocks.back().allocatedBytes();
     in_memory_rows += rows;
     doDebugAsserts();
 
-    size_t total_rows = getTotalRowCount();
     size_t total_bytes = getTotalByteCount();
     shrinkStoredBlocksToFit(total_bytes);
-
-    if (!check_limits)
-        return true;
-
-    return table_join->sizeLimits().check(total_rows, total_bytes, "JOIN", ErrorCodes::SET_SIZE_LIMIT_EXCEEDED);
 }
 
 void ConstantJoin::doDebugAsserts() const
@@ -265,106 +402,6 @@ void ConstantJoin::shrinkStoredBlocksToFit(size_t & total_bytes_in_join)
 namespace
 {
 
-enum class MatchingRowsOutput
-{
-    None,
-    All,
-    /// The selected right row is the first or last stored right row, chosen at build time (see `useLastRightRow`).
-    AllLeftRowsWithSelectedRightRow,
-    FirstLeftRowWithSelectedRightRow,
-    FirstLeftRowWithAllRightRows,
-};
-
-/// Modes where only the first matching probe row joins the right side; `joinBlock` cuts the probe block accordingly.
-bool usesOnlyFirstLeftRow(MatchingRowsOutput output)
-{
-    return output == MatchingRowsOutput::FirstLeftRowWithSelectedRightRow
-        || output == MatchingRowsOutput::FirstLeftRowWithAllRightRows;
-}
-
-bool usesSelectedRightRow(MatchingRowsOutput output)
-{
-    return output == MatchingRowsOutput::AllLeftRowsWithSelectedRightRow
-        || output == MatchingRowsOutput::FirstLeftRowWithSelectedRightRow;
-}
-
-MatchingRowsOutput makeMatchingRowsOutput(JoinKind kind, JoinStrictness strictness, bool has_match)
-{
-    if (!has_match)
-        return MatchingRowsOutput::None;
-
-    if (isCrossOrComma(kind))
-        return MatchingRowsOutput::All;
-
-    if (strictness == JoinStrictness::Any)
-    {
-        if (isRight(kind))
-            return MatchingRowsOutput::FirstLeftRowWithAllRightRows;
-        if (isInner(kind))
-            return MatchingRowsOutput::FirstLeftRowWithSelectedRightRow;
-        return MatchingRowsOutput::AllLeftRowsWithSelectedRightRow;
-    }
-
-    if (strictness == JoinStrictness::RightAny)
-    {
-        /// Intentionally mirrors `HashJoin`: old `ANY` assumes distinct right keys and emits one right row for
-        /// each matching left row. `RIGHT` and `FULL` unmatched right rows are handled by
-        /// `output_non_matching_right_rows`.
-        return MatchingRowsOutput::AllLeftRowsWithSelectedRightRow;
-    }
-
-    if (strictness == JoinStrictness::All)
-        return MatchingRowsOutput::All;
-
-    if (strictness == JoinStrictness::Semi)
-        return kind == JoinKind::Right ? MatchingRowsOutput::FirstLeftRowWithAllRightRows
-                                       : MatchingRowsOutput::AllLeftRowsWithSelectedRightRow;
-
-    return MatchingRowsOutput::None;
-}
-
-struct ConstantJoinOutputFlags
-{
-    MatchingRowsOutput output_matching_rows = MatchingRowsOutput::None;
-    bool output_non_matching_left_rows = false;
-    bool output_non_matching_right_rows = false;
-};
-
-/// Classifies which rows one evaluation of the join emits. It is a pure function of its arguments;
-/// `alwaysReturnsEmptySet` relies on that to enumerate hypothetical scenarios.
-///
-/// `has_match` — whether the left rows under classification match the right side, i.e. the constant predicate is
-/// true and the right side is not empty. It describes one evaluation, not the whole join: the non-joined stream
-/// (`getNonJoinedBlocks`) always passes false because it processes no left rows.
-///
-/// `has_seen_matching_rows` — whether any probe rows have matched so far (the accumulated member of the same
-/// name). It only gates `output_non_matching_right_rows`: `RIGHT`/`FULL` kinds emit the stored right rows as
-/// non-matching only when no left row ever claimed them.
-///
-/// `has_match && !has_seen_matching_rows` cannot occur: a matching probe block sets `has_seen_matching_rows`
-/// before its result is constructed.
-ConstantJoinOutputFlags makeConstantJoinOutputFlags(JoinKind kind, JoinStrictness strictness, bool has_match, bool has_seen_matching_rows)
-{
-    ConstantJoinOutputFlags flags;
-    flags.output_matching_rows = makeMatchingRowsOutput(kind, strictness, has_match);
-
-    /// Explicit cartesian joins never emit non-matching rows, regardless of strictness.
-    if (isCrossOrComma(kind))
-        return flags;
-
-    const bool is_right_semi = kind == JoinKind::Right && strictness == JoinStrictness::Semi;
-    const bool is_right_anti = kind == JoinKind::Right && strictness == JoinStrictness::Anti;
-
-    flags.output_non_matching_left_rows =
-        (strictness == JoinStrictness::Anti && !has_match && !is_right_anti)
-        || (strictness != JoinStrictness::Semi && strictness != JoinStrictness::Anti && !has_match && isLeftOrFull(kind));
-    flags.output_non_matching_right_rows = isRightOrFull(kind)
-        && !is_right_semi
-        && !has_seen_matching_rows;
-
-    return flags;
-}
-
 ColumnsInfo decompressColumns(const ColumnsInfo & columns_info)
 {
     Columns new_columns;
@@ -395,44 +432,29 @@ void insertRangeFromColumnsInfo(MutableColumns & dst_columns, size_t dst_offset,
 
 bool ConstantJoin::alwaysReturnsEmptySet() const
 {
-    const auto kind = table_join->kind();
-    const auto strictness = table_join->strictness();
+    /// The join emits rows in three ways; it is statically empty only when none of them can ever fire.
+    /// The left-side cardinality is unknown here, so a behavior counts as possible if some cardinality
+    /// triggers it: e.g. `RIGHT ANTI JOIN ... ON 1` emits right rows only when the left side turns out empty.
+    const bool may_emit_matched_rows = constant_predicate_value && total_rows_to_join != 0
+        && plan.left_rows_to_join != OutputPlan::LeftRowsToJoin::None;
+    const bool may_emit_unmatched_left_rows = plan.emit_unmatched_left_rows;
+    const bool may_emit_unmatched_right_rows = total_rows_to_join != 0 && plan.emit_unmatched_right_rows;
 
-    auto can_output = [&](bool has_match, bool has_seen_matching_rows_)
-    {
-        const auto output_flags = makeConstantJoinOutputFlags(kind, strictness, has_match, has_seen_matching_rows_);
-        return output_flags.output_matching_rows != MatchingRowsOutput::None
-            || output_flags.output_non_matching_left_rows
-            || (total_rows_to_join != 0 && output_flags.output_non_matching_right_rows);
-    };
-
-    auto predicate_always_returns_empty_set = [&](bool predicate_matches)
-    {
-        if (!predicate_matches || total_rows_to_join == 0)
-            return !can_output(/* has_match */ false, /* has_seen_matching_rows_ */ false);
-
-        /// Consider all left-side cardinalities. For example, `RIGHT SEMI JOIN ON 1` can emit
-        /// right rows only after at least one left row was seen, while `RIGHT ANTI JOIN ON 1`
-        /// can emit right rows only when no left rows were seen.
-        return !can_output(/* has_match */ true, /* has_seen_matching_rows_ */ true)
-            && !can_output(/* has_match */ false, /* has_seen_matching_rows_ */ false)
-            && !can_output(/* has_match */ false, /* has_seen_matching_rows_ */ true);
-    };
-
-    return predicate_always_returns_empty_set(constant_predicate_value);
+    return !may_emit_matched_rows && !may_emit_unmatched_left_rows && !may_emit_unmatched_right_rows;
 }
 
-class ConstantJoinResult final : public IJoinResult
+/** Base of the `ConstantJoin` results: builds the output header, replicates the probe (left) rows, and chunks
+  * the output by `max_joined_block_size_rows` / `max_joined_block_size_bytes`.
+  * Each subclass emits one specific output shape; `ConstantJoin::joinBlock` decides which one to construct.
+  * The probe-row cursor `left_row` makes `next` resumable: a result finishes only when the cursor reaches
+  * the end of the probe block.
+  */
+class ConstantJoinResultBase : public IJoinResult
 {
 public:
-    ConstantJoinResult(const ConstantJoin & join_, Block block_, bool has_match_)
+    ConstantJoinResultBase(const ConstantJoin & join_, Block block_)
         : join(join_)
         , block(std::move(block_))
-        , output_flags(makeConstantJoinOutputFlags(
-            join.table_join->kind(),
-            join.table_join->strictness(),
-            has_match_,
-            join.has_seen_matching_rows.load()))
     {
         src_left_columns.reserve(block.columns());
         for (size_t i = 0; i != block.columns(); ++i)
@@ -442,187 +464,234 @@ public:
             src_left_columns.push_back(left_column.column.get());
         }
 
-        for (const auto & right_column : join.sample_block_with_columns_to_add)
+        for (const auto & right_column : join.right_sample_block)
             result_sample.insert(right_column);
     }
 
-    JoinResultBlock next() override;
-
-private:
-    const ConstantJoin & join;
-    Block block;
-    ConstantJoinOutputFlags output_flags;
-    /// The result header and raw pointers to the left data columns; invariant across `next` calls.
-    Block result_sample;
-    ColumnRawPtrs src_left_columns;
-    size_t left_row = 0;
-    std::optional<ConstantJoin::StoredBlocks::const_iterator> right_block_it;
-    std::optional<TemporaryBlockStreamReaderHolder> reader;
-};
-
-IJoinResult::JoinResultBlock ConstantJoinResult::next()
-{
-    const size_t num_existing_columns = src_left_columns.size();
-    const size_t num_columns_to_add = join.sample_block_with_columns_to_add.columns();
-    const size_t rows_total = block.rows();
-
-    MutableColumns dst_columns = result_sample.cloneEmptyColumns();
-
-    /// Reserve the exact output size of the current mode (`enough_data` may still cut it short).
-    size_t to_reserve = 0;
-    switch (output_flags.output_matching_rows)
-    {
-        case MatchingRowsOutput::All:
-            if (common::mulOverflow(rows_total, join.total_rows_to_join, to_reserve))
-                to_reserve = join.max_joined_block_rows;
-            break;
-        case MatchingRowsOutput::AllLeftRowsWithSelectedRightRow:
-            to_reserve = rows_total;
-            break;
-        case MatchingRowsOutput::FirstLeftRowWithSelectedRightRow:
-            to_reserve = 1;
-            break;
-        case MatchingRowsOutput::FirstLeftRowWithAllRightRows:
-            to_reserve = join.total_rows_to_join;
-            break;
-        case MatchingRowsOutput::None:
-            to_reserve = output_flags.output_non_matching_left_rows ? rows_total : 0;
-            break;
-    }
-    /// Without a row cap do not pre-reserve: the estimates of `All` and `FirstLeftRowWithAllRightRows` are not
-    /// bounded by the probe block, while `max_joined_block_bytes` may still chunk the output into much smaller
-    /// blocks, so reserving the full estimate could allocate far more than one output block ever holds.
+protected:
+    /// Starts the next output block, reserving for the expected number of rows (`outputBlockIsFull` may still
+    /// cut the block short). Without a row cap nothing is reserved: the cartesian estimate is not bounded by
+    /// the probe block, while `max_joined_block_bytes` may still chunk the output into much smaller blocks,
+    /// so reserving the full estimate could allocate far more than one output block ever holds.
     /// `HashJoin` skips reservation for `max_joined_block_rows = 0` the same way.
-    if (join.max_joined_block_rows)
-        to_reserve = std::min(join.max_joined_block_rows, to_reserve);
-    else
-        to_reserve = 0;
+    void startOutputBlock(size_t expected_rows)
+    {
+        dst_columns = result_sample.cloneEmptyColumns();
+        size_t to_reserve = join.max_joined_block_rows ? std::min(join.max_joined_block_rows, expected_rows) : 0;
+        for (auto & dst : dst_columns)
+            dst->reserve(to_reserve);
+        rows_added = 0;
+        bytes_added = 0;
+    }
 
-    for (auto & dst : dst_columns)
-        dst->reserve(to_reserve);
-    size_t rows_added = 0;
-    size_t bytes_added = 0;
-
-    auto enough_data = [&]()
+    bool outputBlockIsFull() const
     {
         return (join.max_joined_block_rows && rows_added > join.max_joined_block_rows)
             || (join.max_joined_block_bytes && bytes_added > join.max_joined_block_bytes);
-    };
+    }
 
-    auto update_bytes = [&]()
+    /// Joins the probe row at `left_row` with the given right rows.
+    void appendRightRowsForCurrentLeftRow(const ColumnsInfo & right_columns, size_t rows_right)
     {
+        replicateCurrentLeftRow(rows_right);
+        insertRangeFromColumnsInfo(dst_columns, src_left_columns.size(), right_columns, 0, rows_right);
+        accountAddedRows(rows_right);
+    }
+
+    JoinResultBlock finishOutputBlock()
+    {
+        bool is_last = left_row >= block.rows();
+        auto res = result_sample.cloneWithColumns(std::move(dst_columns));
+        return {res, nullptr, is_last};
+    }
+
+    const ConstantJoin & join;
+    Block block;
+    /// The result header and raw pointers to the left data columns; invariant across `next` calls.
+    Block result_sample;
+    ColumnRawPtrs src_left_columns;
+    /// The probe-row cursor: `next` resumes from it when the previous output block was cut short.
+    size_t left_row = 0;
+
+private:
+    void replicateCurrentLeftRow(size_t count)
+    {
+        for (size_t col_num = 0; col_num < src_left_columns.size(); ++col_num)
+            dst_columns[col_num]->insertManyFrom(*src_left_columns[col_num], left_row, count);
+    }
+
+    void accountAddedRows(size_t count)
+    {
+        rows_added += count;
+
         if (!join.max_joined_block_bytes)
             return;
 
         bytes_added = 0;
         for (const auto & dst : dst_columns)
             bytes_added += dst->byteSize();
-    };
-
-    auto insert_left_rows = [&](size_t rows)
-    {
-        for (size_t col_num = 0; col_num < num_existing_columns; ++col_num)
-            dst_columns[col_num]->insertManyFrom(*src_left_columns[col_num], left_row, rows);
-    };
-
-    auto insert_right_defaults = [&](size_t rows)
-    {
-        for (size_t col_num = 0; col_num < num_columns_to_add; ++col_num)
-        {
-            const auto & right_column = join.sample_block_with_columns_to_add.getByPosition(col_num);
-            JoinCommon::addDefaultValues(*dst_columns[num_existing_columns + col_num], right_column.type, rows);
-        }
-    };
-
-    auto process_right_block = [&](const ColumnsInfo & columns_info, size_t rows_right)
-    {
-        rows_added += rows_right;
-        insert_left_rows(rows_right);
-        insertRangeFromColumnsInfo(dst_columns, num_existing_columns, columns_info, 0, rows_right);
-        update_bytes();
-    };
-
-    auto process_default_right = [&]()
-    {
-        ++rows_added;
-        insert_left_rows(1);
-        insert_right_defaults(1);
-        update_bytes();
-    };
-
-    if (output_flags.output_matching_rows == MatchingRowsOutput::None && !output_flags.output_non_matching_left_rows)
-        left_row = rows_total;
-
-    for (; left_row < rows_total; ++left_row)
-    {
-        if (enough_data())
-            break;
-
-        if (output_flags.output_non_matching_left_rows)
-        {
-            process_default_right();
-            continue;
-        }
-
-        if (usesSelectedRightRow(output_flags.output_matching_rows))
-        {
-            if (join.selected_right_columns_info)
-                process_right_block(*join.selected_right_columns_info, 1);
-            continue;
-        }
-
-        chassert(
-            output_flags.output_matching_rows == MatchingRowsOutput::All
-            || output_flags.output_matching_rows == MatchingRowsOutput::FirstLeftRowWithAllRightRows);
-        if (!right_block_it.has_value())
-            right_block_it = join.right_blocks.begin();
-
-        for (; *right_block_it != join.right_blocks.end(); ++*right_block_it)
-        {
-            if (enough_data())
-                break;
-
-            const auto & stored_block = **right_block_it;
-            if (!join.have_compressed)
-                process_right_block(stored_block.columns_info, stored_block.rows);
-            else
-                process_right_block(decompressColumns(stored_block.columns_info), stored_block.rows);
-        }
-
-        if (*right_block_it != join.right_blocks.end())
-            break;
-
-        if (join.tmp_stream)
-        {
-            if (!reader)
-                reader = join.tmp_stream->getReadStream();
-
-            while (reader)
-            {
-                if (enough_data())
-                    break;
-
-                auto block_right = reader.value()->read();
-                if (block_right.empty())
-                {
-                    reader.reset();
-                    break;
-                }
-
-                process_right_block(ColumnsInfo(block_right.getColumns()), block_right.rows());
-            }
-        }
-
-        if (reader)
-            break;
-
-        right_block_it = std::nullopt;
     }
 
-    bool is_last = left_row >= rows_total;
-    auto res = result_sample.cloneWithColumns(std::move(dst_columns));
-    return {res, nullptr, is_last};
-}
+    MutableColumns dst_columns;
+    size_t rows_added = 0;
+    size_t bytes_added = 0;
+};
+
+/// Nothing to emit for this probe block: the rows match but `ANTI` suppresses them, or nothing matches
+/// and the kind has no left-side padding.
+class ConstantJoinEmptyResult final : public ConstantJoinResultBase
+{
+public:
+    /// The probe block is needed only for its structure — the output header must still contain its columns —
+    /// so its data is dropped right away.
+    ConstantJoinEmptyResult(const ConstantJoin & join_, const Block & block_)
+        : ConstantJoinResultBase(join_, block_.cloneEmpty())
+    {
+    }
+
+    JoinResultBlock next() override { return {result_sample.cloneEmpty(), nullptr, true}; }
+};
+
+/// Unmatched probe rows padded with right-side defaults (`LEFT`/`FULL`/`ANTI` kinds when nothing matches).
+/// The output is the probe block itself with default right columns appended — every probe row is emitted
+/// exactly once, in order — so the left columns are reused (or sliced when the block limits require chunking)
+/// instead of being rebuilt row by row.
+class ConstantJoinUnmatchedLeftRowsResult final : public ConstantJoinResultBase
+{
+public:
+    using ConstantJoinResultBase::ConstantJoinResultBase;
+
+    JoinResultBlock next() override
+    {
+        const size_t rows_total = block.rows();
+
+        size_t chunk_rows = rows_total - left_row;
+        if (join.max_joined_block_rows)
+            chunk_rows = std::min(chunk_rows, join.max_joined_block_rows);
+        if (join.max_joined_block_bytes && rows_total)
+        {
+            /// The output size is dominated by the left columns: the appended right columns hold only
+            /// default values.
+            size_t left_bytes_per_row = std::max<size_t>(1, block.bytes() / rows_total);
+            chunk_rows = std::min(chunk_rows, std::max<size_t>(1, join.max_joined_block_bytes / left_bytes_per_row));
+        }
+
+        Columns res_columns;
+        res_columns.reserve(result_sample.columns());
+
+        for (size_t i = 0; i < src_left_columns.size(); ++i)
+        {
+            const auto & left_column = block.getByPosition(i).column;
+            res_columns.push_back(chunk_rows == rows_total ? left_column : left_column->cut(left_row, chunk_rows));
+        }
+
+        for (const auto & right_column : join.right_sample_block)
+        {
+            auto default_column = right_column.column->cloneEmpty();
+            JoinCommon::addDefaultValues(*default_column, right_column.type, chunk_rows);
+            res_columns.push_back(std::move(default_column));
+        }
+
+        left_row += chunk_rows;
+        bool is_last = left_row >= rows_total;
+        return {result_sample.cloneWithColumns(res_columns), nullptr, is_last};
+    }
+};
+
+/// Every probe row joined with the single selected right row (`RightRowsToJoin::SelectedRowOnly`).
+class ConstantJoinSelectedRowResult final : public ConstantJoinResultBase
+{
+public:
+    using ConstantJoinResultBase::ConstantJoinResultBase;
+
+    JoinResultBlock next() override
+    {
+        const size_t rows_total = block.rows();
+        startOutputBlock(rows_total);
+
+        for (; left_row < rows_total && !outputBlockIsFull(); ++left_row)
+            if (join.selected_right_columns_info)
+                appendRightRowsForCurrentLeftRow(*join.selected_right_columns_info, 1);
+
+        return finishOutputBlock();
+    }
+};
+
+/// Every probe row joined with every stored right row: the cartesian product.
+/// Iterating the right side is resumable: when the output block fills up mid-way, `right_block_it`/`reader`
+/// keep the position and the next call continues from the same probe row.
+class ConstantJoinCartesianResult final : public ConstantJoinResultBase
+{
+public:
+    using ConstantJoinResultBase::ConstantJoinResultBase;
+
+    JoinResultBlock next() override
+    {
+        const size_t rows_total = block.rows();
+
+        size_t expected_rows = 0;
+        if (common::mulOverflow(rows_total, join.total_rows_to_join, expected_rows))
+            expected_rows = join.max_joined_block_rows;
+        startOutputBlock(expected_rows);
+
+        for (; left_row < rows_total; ++left_row)
+        {
+            if (outputBlockIsFull())
+                break;
+
+            if (!right_block_it.has_value())
+                right_block_it = join.right_blocks.begin();
+
+            for (; *right_block_it != join.right_blocks.end(); ++*right_block_it)
+            {
+                if (outputBlockIsFull())
+                    break;
+
+                const auto & stored_block = **right_block_it;
+                if (!join.have_compressed)
+                    appendRightRowsForCurrentLeftRow(stored_block.columns_info, stored_block.rows);
+                else
+                    appendRightRowsForCurrentLeftRow(decompressColumns(stored_block.columns_info), stored_block.rows);
+            }
+
+            if (*right_block_it != join.right_blocks.end())
+                break;
+
+            if (join.tmp_stream)
+            {
+                if (!reader)
+                    reader = join.tmp_stream->getReadStream();
+
+                while (reader)
+                {
+                    if (outputBlockIsFull())
+                        break;
+
+                    auto block_right = reader.value()->read();
+                    if (block_right.empty())
+                    {
+                        reader.reset();
+                        break;
+                    }
+
+                    appendRightRowsForCurrentLeftRow(ColumnsInfo(block_right.getColumns()), block_right.rows());
+                }
+            }
+
+            if (reader)
+                break;
+
+            /// The right side is exhausted for this probe row; the next one starts over.
+            right_block_it = std::nullopt;
+        }
+
+        return finishOutputBlock();
+    }
+
+private:
+    std::optional<ConstantJoin::StoredBlocks::const_iterator> right_block_it;
+    std::optional<TemporaryBlockStreamReaderHolder> reader;
+};
 
 class ConstantJoinNotJoinedRightFiller final : public NotJoinedBlocks::RightColumnsFiller
 {
@@ -633,7 +702,7 @@ public:
     {
     }
 
-    Block getEmptyBlock() override { return join.sample_block_with_columns_to_add.cloneEmpty(); }
+    Block getEmptyBlock() override { return join.right_sample_block.cloneEmpty(); }
 
     size_t fillColumns(MutableColumns & columns_right) override
     {
@@ -740,41 +809,48 @@ private:
 JoinResultPtr ConstantJoin::joinBlock(Block block)
 {
     /// A constant predicate cannot match rows of an empty right side; `alwaysReturnsEmptySet` applies the same rule.
-    bool has_match = constant_predicate_value && total_rows_to_join != 0;
-    if (has_match && block.rows())
+    const bool has_match = constant_predicate_value && total_rows_to_join != 0;
+
+    if (!has_match)
     {
-        if (usesOnlyFirstLeftRow(makeMatchingRowsOutput(table_join->kind(), table_join->strictness(), /* has_match */ true)))
+        if (plan.emit_unmatched_left_rows)
+            return std::make_unique<ConstantJoinUnmatchedLeftRowsResult>(*this, std::move(block));
+
+        return std::make_unique<ConstantJoinEmptyResult>(*this, block);
+    }
+
+    if (block.rows())
+    {
+        if (plan.left_rows_to_join == OutputPlan::LeftRowsToJoin::FirstRowOnly)
         {
-            /// Probe streams race here: exactly one matching block keeps its first row, all others become empty.
+            /// Probe streams race here: exactly one matching block keeps its first row, the losers emit nothing.
             bool expected = false;
             if (has_seen_matching_rows.compare_exchange_strong(expected, true))
                 block = block.cloneWithCutColumns(0, 1);
             else
-                block = block.cloneEmpty();
+                return std::make_unique<ConstantJoinEmptyResult>(*this, block);
         }
         else
             has_seen_matching_rows = true;
     }
 
-    return std::make_unique<ConstantJoinResult>(*this, std::move(block), has_match);
+    /// The left rows match, but `ANTI` kinds suppress matched rows.
+    if (plan.left_rows_to_join == OutputPlan::LeftRowsToJoin::None)
+        return std::make_unique<ConstantJoinEmptyResult>(*this, block);
+
+    if (plan.right_rows_to_join == OutputPlan::RightRowsToJoin::SelectedRowOnly)
+        return std::make_unique<ConstantJoinSelectedRowResult>(*this, std::move(block));
+
+    return std::make_unique<ConstantJoinCartesianResult>(*this, std::move(block));
 }
 
 IBlocksStreamPtr ConstantJoin::getNonJoinedBlocks(const Block &, const Block & result_sample_block, UInt64 max_block_size) const
 {
-    if (total_rows_to_join == 0)
-        return {};
-
-    auto output_flags = makeConstantJoinOutputFlags(
-        table_join->kind(),
-        table_join->strictness(),
-        /* has_match */ false,
-        has_seen_matching_rows.load());
-
-    if (!output_flags.output_non_matching_right_rows)
+    if (total_rows_to_join == 0 || !plan.emit_unmatched_right_rows || has_seen_matching_rows.load())
         return {};
 
     auto filler = std::make_unique<ConstantJoinNotJoinedRightFiller>(*this, max_block_size);
-    size_t left_columns_count = result_sample_block.columns() - sample_block_with_columns_to_add.columns();
+    size_t left_columns_count = result_sample_block.columns() - right_sample_block.columns();
     return std::make_shared<NotJoinedBlocks>(std::move(filler), result_sample_block, left_columns_count, *table_join);
 }
 

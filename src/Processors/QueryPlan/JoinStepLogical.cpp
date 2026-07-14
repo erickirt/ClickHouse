@@ -304,7 +304,7 @@ std::vector<std::pair<String, String>> JoinStepLogical::describeJoinProperties()
     description.emplace_back("Strictness", toString(join_operator.strictness));
     description.emplace_back("Locality", toString(join_operator.locality));
     if (join_operator.constant_expression_value)
-        description.emplace_back("Expression", *join_operator.constant_expression_value ? "true" : "false");
+        description.emplace_back("Constant expression value", *join_operator.constant_expression_value ? "true" : "false");
     else
         description.emplace_back("Expression", formatJoinCondition(join_operator.expression));
 

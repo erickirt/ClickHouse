@@ -14,7 +14,7 @@ Positions: 0
     Type: LEFT
     Strictness: SEMI
     Locality: UNSPECIFIED
-    Expression: 
+    Constant expression value: true
     Expression:
     Actions: INPUT :: 0 -> __table1.`1` UInt8 : 0
              INPUT :: 1 -> __table3.c0 UInt8 : 1
