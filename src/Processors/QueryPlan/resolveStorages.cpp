@@ -176,6 +176,14 @@ static QueryPlanResourceHolder replaceReadingFromTable(QueryPlan::Node & node, Q
         {
             storage = table_function_node->getStorage();
             snapshot = table_function_node->getStorageSnapshot();
+            /// Carry the resolved table-function subtree so that the aggregation hash-table-stats
+            /// cache key (see calculateHashTableCacheKeys) can tell different arguments apart. A
+            /// table-function storage has no UUID and its StorageID does not depend on the arguments
+            /// (any numbers(N) reads from `_table_function.numbers`), so without this the key would
+            /// hash only the storage name and e.g. numbers(1) and numbers(1e6) would collide after a
+            /// serialized-plan round-trip (distributed / serialize_query_plan). This mirrors the
+            /// analyzer read path, which sets table_expression in PlannerJoinTree.
+            select_query_info.table_expression = query_tree_node;
         }
         else if (auto * table_node = query_tree_node->as<TableNode>())
         {
