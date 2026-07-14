@@ -60,6 +60,14 @@ void StaticRequestHandler::handleRequest(HTTPServerRequest & request, HTTPServer
     catch (...)
     {
         tryLogCurrentException("StaticRequestHandler");
+
+        /// If we are about to send an uncompressed exception body (no compression layer was set up,
+        /// e.g. the response was pre-encoded via configured `Content-Encoding`), that header would
+        /// mislabel the plain-text error and the client would fail to decode it. Drop it while the
+        /// response has not been sent yet.
+        if (!response_output.compression_holder && !response.sent() && response.has("Content-Encoding"))
+            response.erase("Content-Encoding");
+
         response_output.response_holder->cancelWithException(
             request, getCurrentExceptionCode(), getCurrentExceptionMessage(false, true), response_output.compression_holder.get());
     }
