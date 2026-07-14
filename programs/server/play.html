@@ -6622,11 +6622,15 @@ async function postOne()
     /// freezing it at launch would, for a quick `SELECT {x}` -> `SELECT {y}` edit-and-run, send
     /// `param_x` and lose `param_y`. Deriving the names from the launched text itself keeps the
     /// executed request and its recorded params consistent with the query that actually ran; when
-    /// the list cannot be derived (no lexer / text too large) fall back to the launch snapshot.
+    /// the list cannot be derived (no lexer / text too large) fall back to every value known for
+    /// the launching tab (`param_sources` = live inputs over the tab's saved `params`), NOT to the
+    /// live inputs alone: restoring a saved parameterized tab whose query the lexer cannot tokenize
+    /// clears the `param_*` DOM while the authoritative bindings live only in `tab.params`, and
+    /// sourcing the empty inputs would drop them entirely.
     const run_params = await extractRunParamNames(editor_text);
     if (my_run !== tab.reqNum) return;
     const paramValuesSnapshot = run_params === null
-        ? param_values_at_launch
+        ? param_sources
         : pickRunParams(run_params, param_sources);
 
     /// Entering flight (which drops the tab's previous result — see `beginFlight`) is deferred
@@ -6697,11 +6701,13 @@ async function postAll()
     tab.launchQuery = editor_text;   /// see `postOne`: lets `saveHistory` detect a newer draft
     const sel_start = query_area.selectionStart;
 
-    /// See `postOne`: bind the parameter names to the run's own text.
+    /// See `postOne`: bind the parameter names to the run's own text, and on a no-lexer /
+    /// too-large fallback send every value known for the launching tab (`param_sources`, which
+    /// includes `tab.params`) rather than the possibly-empty live inputs.
     const run_params = await extractRunParamNames(editor_text);
     if (my_run !== tab.reqNum) return;
     const paramValuesSnapshot = run_params === null
-        ? param_values_at_launch
+        ? param_sources
         : pickRunParams(run_params, param_sources);
 
     /// See `postOne`: flight is entered only once the preflight has produced a statement to run.
@@ -8624,8 +8630,9 @@ function setParamValues(values)
 /// may still describe the PREVIOUS text — e.g. for `SELECT {x}` -> `SELECT {y}` they would send
 /// `param_x` and drop `param_y`. `postOne`/`postAll` therefore re-derive the names from the RUN's
 /// own tokenization of the launched text (`extractRunParamNames`) and bind them to the values
-/// snapshotted here (`pickRunParams`); this function's result is used directly only as the
-/// fallback when that derivation is unavailable.
+/// snapshotted here (`pickRunParams`). When that derivation is unavailable (no lexer / text too
+/// large) the caller falls back to the merged `param_sources` (this result over `tab.params`), so
+/// a saved tab whose parameter inputs could not be rebuilt still runs with its persisted bindings.
 function resolveRunParams(params_restore_pending, tab)
 {
     if (!params_restore_pending) return getParamValues();
