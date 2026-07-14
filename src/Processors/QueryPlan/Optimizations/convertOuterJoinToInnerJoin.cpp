@@ -251,10 +251,14 @@ size_t tryConvertOuterJoinToInnerJoin(QueryPlan::Node * parent_node, QueryPlan::
     bool right_stream_safe = true;
 
     if (check_left_stream)
-        left_stream_safe = filter_dag.isFilterAlwaysFalseForDefaultValueInputs(filter_column_name, *left_stream_input_header);
+        left_stream_safe = filterResultForNotMatchedRows(
+            filter_dag, filter_column_name, *left_stream_input_header,
+            /*allow_unknown_function_arguments=*/true) == FilterResult::FALSE;
 
     if (check_right_stream)
-        right_stream_safe = filter_dag.isFilterAlwaysFalseForDefaultValueInputs(filter_column_name, *right_stream_input_header);
+        right_stream_safe = filterResultForNotMatchedRows(
+            filter_dag, filter_column_name, *right_stream_input_header,
+            /*allow_unknown_function_arguments=*/true) == FilterResult::FALSE;
 
     if (!left_stream_safe || !right_stream_safe)
     {
