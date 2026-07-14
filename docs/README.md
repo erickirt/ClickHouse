@@ -53,8 +53,9 @@ which walks you through how to make your first contribution.
 | `concepts/` | Conceptual topics: core concepts, features, and best practices |
 | `reference/` | Reference documentation: SQL functions, data types, table engines, formats, and interfaces |
 | `integrations/` | Documentation for integrations: ClickPipes, connectors, and language clients |
-| `products/` | Product-specific documentation: Cloud, BYOC, chDB, Kubernetes operator, and more |
+| `products/` | Product-specific documentation: Cloud, BYOC, Kubernetes operator, and more |
 | `clickstack/` | Documentation for ClickStack, the observability stack |
+| `chdb/` | Documentation for chDB, the in-process ClickHouse engine |
 | `resources/` | Supporting material: about, changelogs, contribution guides, and support center |
 | `changelogs/` | Release changelogs for each ClickHouse version |
 | `en/` | Legacy content from the previous (Docusaurus) documentation site — do not add new content here |
