@@ -259,3 +259,292 @@ void * __libc_pvalloc(size_t size) __attribute__((alias("pvalloc"))); // NOLINT(
 #pragma clang diagnostic pop
 
 #endif // USE_JEMALLOC && (OS_LINUX || OS_FREEBSD)
+
+
+#if USE_JEMALLOC && defined(OS_DARWIN)
+
+#include <cstddef>
+#include <cstring>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/mman.h>
+
+#include <mach/mach.h>
+#include <malloc/malloc.h>
+#include <jemalloc/jemalloc.h>
+
+#include <Common/CurrentMemoryTracker.h>
+#include <Common/memory.h>
+
+/// macOS counterpart of the symbol interposition above.
+///
+/// On Linux/FreeBSD we override the libc allocation symbols so every raw malloc/free is tracked.
+/// That does not work on Mach-O: `free` is dispatched through the "malloc zone" that owns the
+/// pointer, so overriding the `free` symbol with one that calls `je_free` would corrupt pointers
+/// belonging to other zones, and dyld interposition cannot reach the malloc calls libSystem makes
+/// internally. Instead we lean on the fact that jemalloc installs itself as the process' default
+/// malloc zone (contrib/jemalloc/src/zone.c): every allocation and free flows through that zone's
+/// callbacks, so wrapping them tracks the whole process while staying zone-consistent.
+///
+/// `initializeJemallocZoneMemoryTracking` must run once, after jemalloc has registered its zone.
+extern "C" void initializeJemallocZoneMemoryTracking();
+
+namespace
+{
+
+/// Original jemalloc callbacks, captured before we overwrite them.
+malloc_zone_t saved_zone;
+
+/// Reentrancy guard. macOS allocates thread-local storage lazily, on first access per thread, by
+/// calling malloc. Our tracking touches thread-locals (CurrentMemoryTracker), so the first
+/// allocation on a new thread would recurse: malloc -> track -> TLV init -> malloc -> ... until the
+/// stack overflows. We detect the reentry with a pthread key, whose thread-specific slot lives in a
+/// preallocated array and never itself calls malloc, and pass such allocations straight through
+/// untracked. This is macOS-specific: on Linux TLS is set up at thread creation, not lazily.
+pthread_key_t reentrancy_key;
+
+struct ReentrancyGuard
+{
+    bool engaged;
+
+    ReentrancyGuard()
+        : engaged(pthread_getspecific(reentrancy_key) == nullptr)
+    {
+        if (engaged)
+            pthread_setspecific(reentrancy_key, reinterpret_cast<void *>(1));
+    }
+
+    ~ReentrancyGuard()
+    {
+        if (engaged)
+            pthread_setspecific(reentrancy_key, nullptr);
+    }
+};
+
+extern "C"
+{
+
+static void * trackedZoneMalloc(malloc_zone_t * zone, size_t size)
+{
+    ReentrancyGuard guard;
+    if (!guard.engaged) [[unlikely]]
+        return saved_zone.malloc(zone, size);
+
+    AllocationTrace trace;
+    size_t actual_size = Memory::trackMemoryFromC(size, trace);
+    void * ptr = saved_zone.malloc(zone, size);
+    if (ptr == nullptr) [[unlikely]]
+    {
+        [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
+        return nullptr;
+    }
+    trace.onAlloc(ptr, actual_size);
+    return ptr;
+}
+
+static void * trackedZoneCalloc(malloc_zone_t * zone, size_t num, size_t size)
+{
+    ReentrancyGuard guard;
+    if (!guard.engaged) [[unlikely]]
+        return saved_zone.calloc(zone, num, size);
+
+    size_t real_size = 0;
+    if (__builtin_mul_overflow(num, size, &real_size))
+        real_size = 0;
+
+    AllocationTrace trace;
+    size_t actual_size = Memory::trackMemoryFromC(real_size, trace);
+    void * ptr = saved_zone.calloc(zone, num, size);
+    if (ptr == nullptr) [[unlikely]]
+    {
+        [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
+        return nullptr;
+    }
+    trace.onAlloc(ptr, actual_size);
+    return ptr;
+}
+
+static void * trackedZoneValloc(malloc_zone_t * zone, size_t size)
+{
+    ReentrancyGuard guard;
+    if (!guard.engaged) [[unlikely]]
+        return saved_zone.valloc(zone, size);
+
+    AllocationTrace trace;
+    size_t actual_size = Memory::trackMemoryFromC(size, trace);
+    void * ptr = saved_zone.valloc(zone, size);
+    if (ptr == nullptr) [[unlikely]]
+    {
+        [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
+        return nullptr;
+    }
+    trace.onAlloc(ptr, actual_size);
+    return ptr;
+}
+
+static void * trackedZoneMemalign(malloc_zone_t * zone, size_t alignment, size_t size)
+{
+    ReentrancyGuard guard;
+    if (!guard.engaged) [[unlikely]]
+        return saved_zone.memalign(zone, alignment, size);
+
+    AllocationTrace trace;
+    size_t actual_size = Memory::trackMemoryFromC(size, trace, static_cast<std::align_val_t>(alignment));
+    void * ptr = saved_zone.memalign(zone, alignment, size);
+    if (ptr == nullptr) [[unlikely]]
+    {
+        [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
+        return nullptr;
+    }
+    trace.onAlloc(ptr, actual_size);
+    return ptr;
+}
+
+static void * trackedZoneRealloc(malloc_zone_t * zone, void * ptr, size_t size)
+{
+    ReentrancyGuard guard;
+    if (!guard.engaged) [[unlikely]]
+        return saved_zone.realloc(zone, ptr, size);
+
+    size_t old_actual_size = ptr ? je_sallocx(ptr, 0) : 0;
+
+    AllocationTrace trace;
+    size_t actual_size = Memory::trackMemoryFromC(size, trace);
+    void * res = saved_zone.realloc(zone, ptr, size);
+    if (res == nullptr) [[unlikely]]
+    {
+        [[maybe_unused]] auto rollback_trace = CurrentMemoryTracker::free(actual_size);
+        return nullptr;
+    }
+
+    if (ptr != nullptr)
+    {
+        AllocationTrace free_trace = CurrentMemoryTracker::free(old_actual_size);
+        free_trace.onFree(ptr, old_actual_size);
+    }
+    trace.onAlloc(res, actual_size);
+    return res;
+}
+
+static void trackedZoneFree(malloc_zone_t * zone, void * ptr)
+{
+    ReentrancyGuard guard;
+    if (guard.engaged)
+    {
+        AllocationTrace trace;
+        size_t actual_size = Memory::untrackMemory(ptr, trace);
+        trace.onFree(ptr, actual_size);
+    }
+    saved_zone.free(zone, ptr);
+}
+
+static void trackedZoneFreeDefiniteSize(malloc_zone_t * zone, void * ptr, size_t size)
+{
+    ReentrancyGuard guard;
+    if (guard.engaged)
+    {
+        AllocationTrace trace;
+        size_t actual_size = Memory::untrackMemory(ptr, trace);
+        trace.onFree(ptr, actual_size);
+    }
+    saved_zone.free_definite_size(zone, ptr, size);
+}
+
+static unsigned trackedZoneBatchMalloc(malloc_zone_t * zone, size_t size, void ** results, unsigned num_requested)
+{
+    unsigned num = saved_zone.batch_malloc(zone, size, results, num_requested);
+    ReentrancyGuard guard;
+    if (guard.engaged)
+    {
+        for (unsigned i = 0; i < num; ++i)
+        {
+            AllocationTrace trace;
+            size_t actual_size = Memory::trackMemoryFromC(size, trace);
+            trace.onAlloc(results[i], actual_size);
+        }
+    }
+    return num;
+}
+
+static void trackedZoneBatchFree(malloc_zone_t * zone, void ** to_be_freed, unsigned num)
+{
+    {
+        ReentrancyGuard guard;
+        if (guard.engaged)
+        {
+            for (unsigned i = 0; i < num; ++i)
+            {
+                if (to_be_freed[i] != nullptr)
+                {
+                    AllocationTrace trace;
+                    size_t actual_size = Memory::untrackMemory(to_be_freed[i], trace);
+                    trace.onFree(to_be_freed[i], actual_size);
+                }
+            }
+        }
+    }
+    saved_zone.batch_free(zone, to_be_freed, num);
+}
+
+} // extern "C"
+
+}
+
+extern "C" void initializeJemallocZoneMemoryTracking()
+{
+    static bool installed = false;
+    if (installed)
+        return;
+
+    /// Find jemalloc's registered zone by name. We must not rely on malloc_default_zone(): on
+    /// modern macOS it returns a helper zone that merely dispatches to the real default, and our
+    /// free/realloc wrappers size pointers with je_sallocx, which is only valid for jemalloc's
+    /// own allocations.
+    vm_address_t * zones = nullptr;
+    unsigned count = 0;
+    if (malloc_get_all_zones(mach_task_self(), nullptr, &zones, &count) != KERN_SUCCESS)
+        return;
+
+    malloc_zone_t * zone = nullptr;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        auto * candidate = reinterpret_cast<malloc_zone_t *>(zones[i]);
+        const char * name = malloc_get_zone_name(candidate);
+        if (name != nullptr && std::strcmp(name, "jemalloc_zone") == 0)
+        {
+            zone = candidate;
+            break;
+        }
+    }
+    if (zone == nullptr)
+        return;
+
+    /// Must exist before the wrappers (which read it) become reachable.
+    if (pthread_key_create(&reentrancy_key, nullptr) != 0)
+        return;
+    installed = true;
+
+    saved_zone = *zone;
+
+    /// The zone struct may live on a read-only page on recent macOS; make it writable first.
+    long page_size = sysconf(_SC_PAGESIZE);
+    auto begin = reinterpret_cast<uintptr_t>(zone) & ~(static_cast<uintptr_t>(page_size) - 1);
+    auto end = reinterpret_cast<uintptr_t>(zone) + sizeof(*zone);
+    mprotect(reinterpret_cast<void *>(begin), end - begin, PROT_READ | PROT_WRITE);
+
+    zone->malloc = trackedZoneMalloc;
+    zone->calloc = trackedZoneCalloc;
+    zone->valloc = trackedZoneValloc;
+    zone->realloc = trackedZoneRealloc;
+    zone->free = trackedZoneFree;
+    if (saved_zone.memalign != nullptr)
+        zone->memalign = trackedZoneMemalign;
+    if (saved_zone.free_definite_size != nullptr)
+        zone->free_definite_size = trackedZoneFreeDefiniteSize;
+    if (saved_zone.batch_malloc != nullptr)
+        zone->batch_malloc = trackedZoneBatchMalloc;
+    if (saved_zone.batch_free != nullptr)
+        zone->batch_free = trackedZoneBatchFree;
+}
+
+#endif // USE_JEMALLOC && OS_DARWIN
