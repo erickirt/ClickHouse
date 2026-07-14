@@ -785,7 +785,7 @@ def test_s3_glob_scheherazade(started_cluster):
         count = min(start + batch, 1001) - start
         run_query(
             instance,
-            "insert into table function s3('http://{}:{}/{}/night_{{_partition_id}}/tale.csv', 'CSV', '{}') "
+            "insert into table function s3('http://{}:{}/{}/night_{{_partition_id}}/tale.csv', 'CSV', '{}', partition_strategy='wildcard') "
             "partition by column1 select number, 1, 1 from numbers({}, {}) settings s3_truncate_on_insert=1".format(
                 started_cluster.minio_ip,
                 MINIO_INTERNAL_PORT,
@@ -896,7 +896,7 @@ def test_s3_glob_many_objects_under_selection(started_cluster):
         count = min(start + batch, 1008) - start
         run_query(
             instance,
-            "insert into table function s3('http://{}:{}/{}/folder1/file{{_partition_id}}.csv', 'CSV', '{}') "
+            "insert into table function s3('http://{}:{}/{}/folder1/file{{_partition_id}}.csv', 'CSV', '{}', partition_strategy='wildcard') "
             "partition by column1 select number, 1, 1 from numbers({}, {}) settings s3_truncate_on_insert=1".format(
                 started_cluster.minio_ip,
                 MINIO_INTERNAL_PORT,
