@@ -18,7 +18,7 @@ If you have multiple replicas in your cluster, you can use the [s3Cluster functi
 ## Syntax {#syntax}
 
 ```sql
-gcs(url [, NOSIGN | hmac_key, hmac_secret] [,format] [,structure] [,compression_method])
+gcs(url [, NOSIGN | hmac_key, hmac_secret] [,format] [,structure] [,compression_method] [,partition_strategy])
 gcs(named_collection[, option=value [,..]])
 ```
 
@@ -37,6 +37,7 @@ See the [Google interoperability docs]( https://cloud.google.com/storage/docs/in
 | `format`                     | The [format](/sql-reference/formats) of the file.                                                                                                                                        |
 | `structure`                  | Structure of the table. Format `'column1_name column1_type, column2_name column2_type, ...'`.                                                                                            |
 | `compression_method`         | Parameter is optional. Supported values: `none`, `gzip` or `gz`, `brotli` or `br`, `xz` or `LZMA`, `zstd` or `zst`. By default, it will autodetect compression method by file extension. |
+| `partition_strategy`         | Parameter is optional. Supported values: `WILDCARD` or `HIVE`. `WILDCARD` requires a `{_partition_id}` in the path, which is replaced with the partition key. `HIVE` does not allow wildcards, assumes the path is the table root, and generates Hive-style partitioned directories with Snowflake IDs as file names and the file format as the extension. |
 
 :::note GCS
 The GCS path is in this format as the endpoint for the Google XML API is different than the JSON API:
