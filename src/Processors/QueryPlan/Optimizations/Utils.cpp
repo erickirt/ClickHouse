@@ -7,7 +7,6 @@
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/FilterStep.h>
 
-#include <stack>
 #include <utility>
 
 namespace DB::ErrorCodes
@@ -190,35 +189,13 @@ FilterResult filterResultForNotMatchedRows(
     if (auto result = getFilterResult(filter_output[0]); result != FilterResult::UNKNOWN)
         return result;
 
-    /// A per-atom witness must reference at least one substituted (reduced-side) input. An atom that
-    /// depends on none of them (e.g. a QUALIFY-produced constant `NULL`, or a predicate over the other
-    /// side only) has the same value for matched and not-matched rows, so it says nothing about whether
-    /// this side's not-matched rows are specifically dropped. Treating such a constant atom as a FALSE
-    /// witness would reduce a side that must be preserved (issue #106949 / test 04335).
-    const auto atom_references_substituted_input = [&](const ActionsDAG::Node * atom) -> bool
-    {
-        std::stack<const ActionsDAG::Node *> nodes;
-        nodes.push(atom);
-        while (!nodes.empty())
-        {
-            const auto * node = nodes.top();
-            nodes.pop();
-            if (node->type == ActionsDAG::ActionType::INPUT && input_stream_header.has(node->result_name))
-                return true;
-            for (const auto * child : node->children)
-                nodes.push(child);
-        }
-        return false;
-    };
-
     /// In filter context NULL is equivalent to false, but `and` with a constant NULL argument
     /// does not fold to a constant: the result is 0 or NULL depending on the other arguments
     /// (e.g. `NULL = 42 AND <unknown>`).
     /// Both are falsy, so if any conjunction atom is a falsy constant, the filter cannot pass.
     for (size_t i = 1; i < filter_output.size(); ++i)
     {
-        if (getFilterResult(filter_output[i]) == FilterResult::FALSE
-            && atom_references_substituted_input(conjunction_atoms[i - 1]))
+        if (getFilterResult(filter_output[i]) == FilterResult::FALSE)
             return FilterResult::FALSE;
     }
 
