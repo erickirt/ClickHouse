@@ -6815,29 +6815,41 @@ async function postOne()
     /// Entering flight (which drops the tab's previous result — see `beginFlight`) is deferred
     /// until the preflight has produced a statement to run: a no-op launch and a preflight
     /// failure (a tokenizer exception on a huge query) leave the tab and its result untouched.
-    if (has_selection && isMultiQuery) {
-        /// Find all queries that intersect the selection and run them.
+    ///
+    /// Multi-query behavior is decided from the LAUNCHED text (`splitAllQueries` /
+    /// `getQueryUnderCursor(...).isMulti` on the snapshot), never from the global `isMultiQuery`
+    /// flag: that flag tracks whatever the shared editor currently shows, and a tab switch during
+    /// the preflight awaits rewrites it for the newly shown tab — deciding from it would let a
+    /// switch to a single-statement tab downgrade this run to "single mode", recording only the
+    /// statement under the cursor as the launching tab's full draft (which `saveHistory` would
+    /// then install over the real multi-statement draft).
+    let launched = false;
+    if (has_selection) {
         const parsed = await splitAllQueries(editor_text);
         if (my_run !== tab.reqNum) return;
-
-        /// Use start/end offsets from splitAllQueries to find which queries overlap with the selection.
-        const selected = [];
-        for (let i = 0; i < parsed.length; ++i) {
-            if (parsed[i].end > sel_start && parsed[i].start < sel_end) {
-                selected.push(parsed[i]);
+        /// A selection in a single-statement editor runs like a plain cursor launch below.
+        if (parsed.length > 1) {
+            /// Use start/end offsets from splitAllQueries to find which queries overlap with the selection.
+            const selected = [];
+            for (let i = 0; i < parsed.length; ++i) {
+                if (parsed[i].end > sel_start && parsed[i].start < sel_end) {
+                    selected.push(parsed[i]);
+                }
             }
-        }
 
-        /// A whitespace/comment-only selection intersects nothing runnable: the launch is a no-op.
-        if (selected.length === 0) return;
+            /// A whitespace/comment-only selection intersects nothing runnable: the launch is a no-op.
+            if (selected.length === 0) return;
 
-        beginFlight(tab, launch_interaction);
-        if (selected.length > 1) {
-            await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text, connection);
-        } else {
-            await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart, connection);
+            beginFlight(tab, launch_interaction);
+            if (selected.length > 1) {
+                await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text, connection);
+            } else {
+                await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart, connection);
+            }
+            launched = true;
         }
-    } else {
+    }
+    if (!launched) {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
         beginFlight(tab, launch_interaction);
@@ -6848,9 +6860,10 @@ async function postOne()
             if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
             focusEditorForRun();
         }
-        /// In multi-query mode, preserve the full textarea content in history/URL
-        /// even when running a single query under cursor (so refresh restores all queries).
-        await postSingle(tab, my_run, under.query, isMultiQuery ? editor_text : undefined, paramValuesSnapshot, under.queryStart, connection);
+        /// When the launched text held several statements, preserve the full textarea content in
+        /// history/URL even though only the query under the cursor ran (so refresh restores all
+        /// queries).
+        await postSingle(tab, my_run, under.query, under.isMulti ? editor_text : undefined, paramValuesSnapshot, under.queryStart, connection);
     }
 
     /// Reset the run/favicon state only if this run still owns its tab's in-flight state; a newer
@@ -7255,7 +7268,11 @@ async function tokenize(query) {
 /// algorithm on top of the same `DB::Lexer`). Keep the two in sync when changing the logic.
 /// Pure w.r.t. the DOM: it takes a snapshot of the editor (`all_queries` + `cursor_position`,
 /// captured by the caller before any await) and RETURNS the query to run plus the editor range to
-/// highlight and the query's start offset (`{ query, selStart, selEnd, queryStart }`). `selStart` is
+/// highlight and the query's start offset (`{ query, selStart, selEnd, queryStart, isMulti }`).
+/// `isMulti` reports whether the SNAPSHOTTED text contains more than one statement, so the caller
+/// can decide multi-query behavior (e.g. what to record as the tab's full draft) from the launched
+/// text itself rather than from the global `isMultiQuery` flag, which a tab switch during the
+/// caller's awaits rewrites to describe another tab's content. `selStart` is
 /// null when nothing should be selected (single query, or the WebAssembly-less fallback). `queryStart`
 /// is the absolute character offset of the query in the editor, threaded into `highlightQueryError`
 /// so a server-reported error position maps back to the statement that actually ran, even when the
@@ -7263,7 +7280,7 @@ async function tokenize(query) {
 /// tab is still active — so a background run cannot move the foreground editor.
 async function getQueryUnderCursor(all_queries, cursor_position) {
     if (typeof WebAssembly !== 'object' || typeof WebAssembly.instantiate !== 'function') {
-        return { query: all_queries, selStart: null, selEnd: null, queryStart: 0 };
+        return { query: all_queries, selStart: null, selEnd: null, queryStart: 0, isMulti: false };
     }
 
     const tokens = await tokenize(all_queries);
@@ -7297,6 +7314,7 @@ async function getQueryUnderCursor(all_queries, cursor_position) {
                     selStart: should_select_query ? current_query_start : null,
                     selEnd: should_select_query ? current_offset : null,
                     queryStart: current_query_start,
+                    isMulti: should_select_query,
                 };
             }
             if (has_content) {
@@ -7320,6 +7338,7 @@ async function getQueryUnderCursor(all_queries, cursor_position) {
             selStart: should_select_query ? last_query_start : null,
             selEnd: should_select_query ? last_query_end : null,
             queryStart: last_query_start,
+            isMulti: should_select_query,
         };
     }
 
@@ -7329,6 +7348,7 @@ async function getQueryUnderCursor(all_queries, cursor_position) {
         selStart: should_select_query ? current_query_start : null,
         selEnd: should_select_query ? all_queries.length : null,
         queryStart: current_query_start,
+        isMulti: should_select_query,
     };
 }
 
