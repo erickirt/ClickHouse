@@ -72,6 +72,9 @@ public:
     void removeFile(const String & name) override;
     void removeFileIfExists(const String & name) override;
 
+    void removeRecursive() override;
+    void removeSharedRecursive(bool keep_in_remote_fs) override;
+
     void createHardLinkFrom(const IDataPartStorage & source, const std::string & from, const std::string & to) override;
     void copyFileFrom(const IDataPartStorage & source, const std::string & from, const std::string & to) override;
 

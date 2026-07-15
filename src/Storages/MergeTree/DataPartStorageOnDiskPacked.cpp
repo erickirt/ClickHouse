@@ -476,6 +476,22 @@ void DataPartStorageOnDiskPacked::removeFileIfExists(const String & name)
         });
 }
 
+void DataPartStorageOnDiskPacked::removeRecursive()
+{
+    DataPartStorageOnDiskBase::removeRecursive();
+    /// The reader caches the index of the data.packed inside this directory, which no longer exists.
+    /// Drop it so that a part written into this same (reclaimed) directory afterwards starts from an
+    /// empty archive instead of merging the removed archive's stale index in finalizeWriter. This is
+    /// what makes reclaiming a leftover temporary directory safe for packed storage.
+    reader.reset();
+}
+
+void DataPartStorageOnDiskPacked::removeSharedRecursive(bool keep_in_remote_fs)
+{
+    DataPartStorageOnDiskBase::removeSharedRecursive(keep_in_remote_fs);
+    reader.reset();
+}
+
 void DataPartStorageOnDiskPacked::createHardLinkFrom(const IDataPartStorage &, const std::string &, const std::string &)
 {
     throw Exception(ErrorCodes::NOT_IMPLEMENTED, "DataPartStorageOnDiskPacked does not support creating hardlinks");
