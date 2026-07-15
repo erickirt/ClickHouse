@@ -347,13 +347,15 @@ struct AddDaysImpl
     {
         return static_cast<UInt32>(time_zone.addDays(t, delta));
     }
-    static NO_SANITIZE_UNDEFINED UInt16 execute(UInt16 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    /// UInt64 domain: wraps by construction; FillingRow::doLongJump relies on the wraparound and
+    /// signed overflow would be UB (see AddSecondsImpl).
+    static UInt16 execute(UInt16 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt16>(d + delta);
+        return static_cast<UInt16>(static_cast<UInt64>(d) + static_cast<UInt64>(delta));
     }
-    static NO_SANITIZE_UNDEFINED Int32 execute(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static Int32 execute(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<Int32>(d + delta);
+        return static_cast<Int32>(static_cast<UInt64>(d) + static_cast<UInt64>(delta));
     }
     static NO_SANITIZE_UNDEFINED Int8 execute(Int64, Int64, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
@@ -392,13 +394,15 @@ struct AddWeeksImpl
     {
         return static_cast<UInt32>(time_zone.addWeeks(t, delta));
     }
-    static NO_SANITIZE_UNDEFINED UInt16 execute(UInt16 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    /// UInt64 domain: wraps by construction; FillingRow::doLongJump relies on the wraparound and
+    /// signed overflow would be UB (see AddSecondsImpl).
+    static UInt16 execute(UInt16 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt16>(d + delta * 7);
+        return static_cast<UInt16>(static_cast<UInt64>(d) + static_cast<UInt64>(delta) * 7);
     }
-    static NO_SANITIZE_UNDEFINED Int32 execute(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static Int32 execute(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<Int32>(d + delta * 7);
+        return static_cast<Int32>(static_cast<UInt64>(d) + static_cast<UInt64>(delta) * 7);
     }
     static NO_SANITIZE_UNDEFINED Int8 execute(Int64, Int64, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {

@@ -5,24 +5,25 @@
 -- UB and no hang.
 --
 -- The overflowing multiply is only reachable via the STALENESS shift path (FillingRow::shift ->
--- doLongJump), where step_len is doubled repeatedly. It is reached only for the plain-modular DateTime
--- (UInt32) kinds SECOND/MINUTE/HOUR: their Add*Impl truncates to UInt32, so a large per-jump delta
--- wraps back into range and lets doLongJump keep doubling step_len until step * jumps_count overflows
--- Int64. The steps here are picked so the per-jump delta is 2^31 in the UInt32 domain: odd jumps
--- advance, even jumps land on the same value, so step_len keeps doubling to the overflow point.
+-- doLongJump), where step_len is doubled repeatedly. It is reached for the plain-modular kinds whose
+-- Add*Impl truncates to a small domain: SECOND/MINUTE/HOUR on DateTime (UInt32) and WEEK on Date
+-- (UInt16). The large per-jump delta wraps back into range and lets doLongJump keep doubling step_len
+-- until step * jumps_count overflows Int64. The steps here are picked so the per-jump delta is half
+-- the domain (2^31 for DateTime, 2^15 days for Date): odd jumps advance, even jumps land on the same
+-- value, so step_len keeps doubling to the overflow point.
 --
--- The MINUTE/HOUR cases also drive the wrapped delta to -2^63, which used to overflow a second time
--- inside AddMinutesImpl/AddHoursImpl (delta * 60 resp. delta * 3600). Those helper overloads now
--- compute in the UInt64 domain too and are no longer NO_SANITIZE_UNDEFINED, so this test enforces
--- the whole WITH FILL interval-step chain under UBSan.
+-- The MINUTE/HOUR/WEEK cases also drive the wrapped delta far enough that it used to overflow a
+-- second time inside AddMinutesImpl/AddHoursImpl/AddWeeksImpl (delta * 60, delta * 3600, delta * 7).
+-- Those helper overloads now compute in the UInt64 domain too and are no longer
+-- NO_SANITIZE_UNDEFINED, so this test enforces the whole WITH FILL interval-step chain under UBSan.
 --
--- DateTime64/Decimal64 and the calendar kinds (DAY/WEEK/MONTH) cannot be driven to that overflow in a
--- terminating query: DateTime64 execute() works in the full Int64 tick domain (no small-domain wrap,
--- so a large delta immediately overshoots the target or overflows Int64 and doLongJump stops
--- doubling), and calendar kinds converge via DateLUT. The DateTime64 case below is therefore a
--- correctness smoke test of the same code path (the Decimal64 branch uses the identical
--- mulStepWrapping via the same FOR_EACH_INTERVAL_KIND macro, so it is protected by construction), not
--- an overflow trigger.
+-- DateTime64/Decimal64 and the calendar kinds (DAY/MONTH and WEEK on DateTime) cannot be driven to
+-- that overflow in a terminating query: DateTime64 execute() works in the full Int64 tick domain (no
+-- small-domain wrap, so a large delta immediately overshoots the target or overflows Int64 and
+-- doLongJump stops doubling), and the calendar kinds converge via DateLUT. The DateTime64 case below
+-- is therefore a correctness smoke test of the same code path (the Decimal64 branch uses the
+-- identical mulStepWrapping via the same FOR_EACH_INTERVAL_KIND macro, so it is protected by
+-- construction), not an overflow trigger.
 SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 1970-01-01 00:00:00
 2106-02-07 06:28:15
@@ -32,6 +33,9 @@ SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY 
 SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY d WITH FILL STEP INTERVAL 134217728 HOUR STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 1970-01-01 00:00:00
 2106-02-07 06:28:15
+SELECT toDate(arrayJoin([toUInt16(0), toUInt16(65535)])) AS d ORDER BY d WITH FILL STEP INTERVAL 32768 WEEK STALENESS INTERVAL 1 DAY SETTINGS session_timezone = 'UTC';
+1970-01-01
+2149-06-06
 SELECT toDateTime64(arrayJoin([toDateTime64('1970-01-01 00:00:00', 0), toDateTime64('2262-01-01 00:00:00', 0)]), 0) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 1970-01-01 00:00:00
 2262-01-01 00:00:00
