@@ -2042,7 +2042,14 @@ public:
     {
         const Values & values = lut[toLUTIndex(v)];
 
-        auto year = values.year + static_cast<Int16>(delta);
+        /// Clamp delta to a window wide enough to reach any representable year but narrow enough that
+        /// values.year + delta stays within Int16 (makeLUTIndex saturates out-of-range years). WITH FILL
+        /// passes deltas from the whole Int64 range and the UInt32 (DateTime) / DayNum (Date) carriers
+        /// reach here without a window check; the previous static_cast<Int16>(delta) narrowed e.g. 32768
+        /// to -32768 and ran the calendar backward. The calendar saturates far inside this window anyway,
+        /// so clamping does not change any representable result.
+        static constexpr Int64 max_year_delta = DATE_LUT_MAX_REPRESENTABLE_YEAR + 1;
+        Int64 year = values.year + std::clamp<Int64>(delta, -max_year_delta, max_year_delta);
         auto month = values.month;
         auto day_of_month = values.day_of_month;
 

@@ -30,12 +30,14 @@ SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY 
 SELECT toDate(arrayJoin([toUInt16(0), toUInt16(65535)])) AS d ORDER BY d WITH FILL STEP INTERVAL 32768 WEEK STALENESS INTERVAL 1 DAY SETTINGS session_timezone = 'UTC';
 SELECT toDateTime64(arrayJoin([toDateTime64('1970-01-01 00:00:00', 0), toDateTime64('2262-01-01 00:00:00', 0)]), 0) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 -- The WITH FILL step functions delegate to the interval Add##NAME##sImpl helpers, some of which do a
--- further signed multiply/addition on the delta: AddWeeksImpl on DateTime64/Time64 (delta * 7) and
--- addMonthsIndex (values.month + delta), reached by MONTH/QUARTER on Date/DateTime. Those extra
--- operations overflow Int64 for a large enough delta and used to be UB. They cannot be driven from a
--- terminating WITH FILL query (the DateTime64 step is capped at Decimal(18, 0), and a saturating
--- calendar step makes the fill loop non-terminating), so they are exercised directly through the
--- interval functions with an Int64-overflowing delta. Each must terminate and saturate deterministically.
+-- further signed multiply/addition on the delta: AddWeeksImpl on DateTime64/Time64 (delta * 7),
+-- addMonthsIndex (values.month + delta) reached by MONTH/QUARTER, and addYearsIndex
+-- (values.year + static_cast<Int16>(delta)) reached by YEAR on Date/DateTime. Those extra operations
+-- were UB (or an Int16 narrowing that ran the calendar backward, e.g. YEAR 32768 narrowing to -32768)
+-- for a large enough delta. They cannot be driven from a terminating WITH FILL query (the DateTime64
+-- step is capped at Decimal(18, 0), and a saturating calendar step makes the fill loop non-terminating),
+-- so they are exercised directly through the interval functions with an Int64-overflowing delta. Each
+-- must terminate and saturate forward (or clamp to the LUT floor for a negative delta) deterministically.
 SELECT addWeeks(toDateTime64('1970-01-01 00:00:00', 0, 'UTC'), 9223372036854775807);
 SELECT addWeeks(toDateTime64('1970-01-01 00:00:00.000', 3, 'UTC'), 9223372036854775807);
 SELECT addMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
@@ -43,6 +45,10 @@ SELECT addMonths(toDate('2000-01-01'), 9223372036854775807);
 SELECT addMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), -9223372036854775808);
 SELECT addQuarters(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
 SELECT addQuarters(toDate('2000-01-01'), 9223372036854775807);
+SELECT addYears(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
+SELECT addYears(toDate('2000-01-01'), 9223372036854775807);
+SELECT addYears(toDateTime('2000-01-01 00:00:00', 'UTC'), -9223372036854775808);
+SELECT addYears(toDate('2000-01-01'), -9223372036854775808);
 -- getStepFunction allows sub-day interval kinds (SECOND/MINUTE/HOUR) on Date/Date32 when the interval
 -- is at least one day in seconds, and next() invokes the step lambda with jumps_count == 1, so a single
 -- huge STEP reaches the AddSecondsImpl/AddMinutesImpl/AddHoursImpl Date (UInt16) and Date32 (Int32)
