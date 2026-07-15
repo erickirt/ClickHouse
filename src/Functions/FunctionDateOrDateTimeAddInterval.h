@@ -382,13 +382,15 @@ struct AddWeeksImpl
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addDays(d.quot, delta * 7) * multiplier + d.rem;
+        /// Route through addWeeks so the delta * 7 happens in the UInt64 domain (wrap by construction).
+        /// WITH FILL passes deltas from the whole Int64 range; a signed delta * 7 here would be UB.
+        return time_zone.addWeeks(d.quot, delta) * multiplier + d.rem;
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addDays(d.quot, delta * 7) * multiplier + d.rem;
+        return time_zone.addWeeks(d.quot, delta) * multiplier + d.rem;
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {

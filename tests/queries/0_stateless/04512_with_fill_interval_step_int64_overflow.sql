@@ -17,8 +17,8 @@
 -- Those helper overloads now compute in the UInt64 domain too and are no longer
 -- NO_SANITIZE_UNDEFINED, so this test enforces the whole WITH FILL interval-step chain under UBSan.
 --
--- DateTime64/Decimal64 and the calendar kinds (DAY/MONTH and WEEK on DateTime) cannot be driven to
--- that overflow in a terminating query: DateTime64 execute() works in the full Int64 tick domain (no
+-- The DateTime64/Decimal64 branch and the calendar kinds cannot be driven to the step * jumps_count
+-- overflow in a terminating query: DateTime64 execute() works in the full Int64 tick domain (no
 -- small-domain wrap, so a large delta immediately overshoots the target or overflows Int64 and
 -- doLongJump stops doubling), and the calendar kinds converge via DateLUT. The DateTime64 case below
 -- is therefore a correctness smoke test of the same code path (the Decimal64 branch uses the
@@ -29,3 +29,17 @@ SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY 
 SELECT toDateTime(arrayJoin([toUInt32(0), toUInt32(4294967295)])) AS d ORDER BY d WITH FILL STEP INTERVAL 134217728 HOUR STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
 SELECT toDate(arrayJoin([toUInt16(0), toUInt16(65535)])) AS d ORDER BY d WITH FILL STEP INTERVAL 32768 WEEK STALENESS INTERVAL 1 DAY SETTINGS session_timezone = 'UTC';
 SELECT toDateTime64(arrayJoin([toDateTime64('1970-01-01 00:00:00', 0), toDateTime64('2262-01-01 00:00:00', 0)]), 0) AS d ORDER BY d WITH FILL STEP INTERVAL 2147483648 SECOND STALENESS INTERVAL 1 SECOND SETTINGS session_timezone = 'UTC';
+-- The WITH FILL step functions delegate to the interval Add##NAME##sImpl helpers, some of which do a
+-- further signed multiply/addition on the delta: AddWeeksImpl on DateTime64/Time64 (delta * 7) and
+-- addMonthsIndex (values.month + delta), reached by MONTH/QUARTER on Date/DateTime. Those extra
+-- operations overflow Int64 for a large enough delta and used to be UB. They cannot be driven from a
+-- terminating WITH FILL query (the DateTime64 step is capped at Decimal(18, 0), and a saturating
+-- calendar step makes the fill loop non-terminating), so they are exercised directly through the
+-- interval functions with an Int64-overflowing delta. Each must terminate and saturate deterministically.
+SELECT addWeeks(toDateTime64('1970-01-01 00:00:00', 0, 'UTC'), 9223372036854775807);
+SELECT addWeeks(toDateTime64('1970-01-01 00:00:00.000', 3, 'UTC'), 9223372036854775807);
+SELECT addMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
+SELECT addMonths(toDate('2000-01-01'), 9223372036854775807);
+SELECT addMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), -9223372036854775808);
+SELECT addQuarters(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
+SELECT addQuarters(toDate('2000-01-01'), 9223372036854775807);

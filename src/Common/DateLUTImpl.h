@@ -1942,7 +1942,12 @@ public:
     {
         const Values & values = lut[toLUTIndex(v)];
 
-        Int64 month = values.month + delta;
+        /// Clamp delta to a window wide enough to reach any representable calendar month but narrow enough
+        /// that values.month + delta cannot overflow Int64. WITH FILL passes deltas from the whole Int64
+        /// range and a plain values.month + delta would be UB on overflow; the calendar saturates far
+        /// inside this window anyway, so clamping does not change any representable result.
+        static constexpr Int64 max_month_delta = 12 * (DATE_LUT_MAX_REPRESENTABLE_YEAR + 1);
+        Int64 month = values.month + std::clamp<Int64>(delta, -max_month_delta, max_month_delta);
 
         if (month > 0)
         {
