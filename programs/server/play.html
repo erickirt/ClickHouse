@@ -6416,7 +6416,20 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         tabName: tab.title,
     };
     const title = "ClickHouse Query: " + (titleForDoc || tab.query);
-    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, tab.result && tab.result.color_modes);
+    /// Once the tab has materialized, its live `colorModes` object is the authoritative palette:
+    /// URL reconciliation and per-column toggles mutate it in place, and a rerun nulls
+    /// `tab.result` entirely, so the snapshot's `color_modes` may lag it or be missing (e.g. a
+    /// snapshot saved with the default palette stores none, then a shared link's URL modes are
+    /// applied on top). Serialize the live palette, and mirror it into the snapshot so the
+    /// IndexedDB persistence (`scheduleSave` below) and the history-state copy carry it too.
+    /// A tab whose stored result has NOT been rendered yet keeps its snapshot's saved palette:
+    /// its `colorModes` is still the `makeTab` placeholder and must not clobber the saved one.
+    let color_modes = tab.result && tab.result.color_modes;
+    if (tab.materialized) {
+        color_modes = tab.colorModes;
+        if (tab.result) tab.result.color_modes = tab.colorModes;
+    }
+    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, color_modes);
     let history_url = window.location.pathname;
     if (history_params.length > 0) history_url += '?' + history_params.join('&');
     history_url += '#' + toBase64(tab.query);
