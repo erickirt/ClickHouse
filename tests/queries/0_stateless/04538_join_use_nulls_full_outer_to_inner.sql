@@ -61,6 +61,14 @@ SELECT trim(explain) FROM (
     WHERE r.k = 10 AND l.id >= 0
 ) WHERE trim(explain) LIKE 'Type:%';
 
+-- RIGHT with a filter on the left side: converted to INNER.
+SELECT trim(explain) FROM (
+    EXPLAIN actions = 1
+    SELECT count() FROM t_outer_to_inner_l AS l
+    RIGHT JOIN t_outer_to_inner_r AS r ON l.k = r.k
+    WHERE l.k = 10 AND r.id >= 0
+) WHERE trim(explain) LIKE 'Type:%';
+
 -- Results must be the same with and without the optimization.
 SELECT count(), sum(l.id), sum(r.id) FROM t_outer_to_inner_l AS l
 FULL JOIN t_outer_to_inner_r AS r ON l.k = r.k
@@ -80,6 +88,16 @@ SETTINGS query_plan_convert_outer_join_to_inner_join = 0;
 SELECT count(), sum(l.id), sum(coalesce(r.id, 0)) FROM t_outer_to_inner_l AS l
 FULL JOIN t_outer_to_inner_r AS r ON l.k = r.k
 WHERE l.k = 2
+SETTINGS query_plan_convert_outer_join_to_inner_join = 1;
+
+SELECT count(), sum(l.id), sum(r.id) FROM t_outer_to_inner_l AS l
+RIGHT JOIN t_outer_to_inner_r AS r ON l.k = r.k
+WHERE l.k = 10 AND r.id >= 0
+SETTINGS query_plan_convert_outer_join_to_inner_join = 0;
+
+SELECT count(), sum(l.id), sum(r.id) FROM t_outer_to_inner_l AS l
+RIGHT JOIN t_outer_to_inner_r AS r ON l.k = r.k
+WHERE l.k = 10 AND r.id >= 0
 SETTINGS query_plan_convert_outer_join_to_inner_join = 1;
 
 SELECT count(), sum(coalesce(l.id, 0)), sum(r.id) FROM t_outer_to_inner_l AS l
