@@ -1565,10 +1565,6 @@
     "destination": "/products/cloud/features/cloud-tiers"
   },
   {
-    "source": "/cloud/manage/clickstack",
-    "destination": "/products/cloud/features/sql-console-features/clickstack"
-  },
-  {
     "source": "/cloud/manage/cmek",
     "destination": "/products/cloud/guides/security/cmek"
   },
@@ -28223,10 +28219,6 @@
   {
     "source": "/primary-indexes",
     "destination": "/concepts/core-concepts/primary-indexes"
-  },
-  {
-    "source": "/products/cloud/features/sql-console-features/hyperdx",
-    "destination": "/products/cloud/features/sql-console-features/clickstack"
   },
   {
     "source": "/products/cloud/guides/security/cmek-migration",
