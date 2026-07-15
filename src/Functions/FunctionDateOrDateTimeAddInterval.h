@@ -569,8 +569,9 @@ struct SubtractIntervalImpl : public Transform
     template <typename T>
     NO_SANITIZE_UNDEFINED auto execute(T t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl & utc_time_zone, UInt16 scale) const
     {
-        /// Signed integer overflow is Ok.
-        return Transform::execute(t, -delta, time_zone, utc_time_zone, scale);
+        /// Negate in the UInt64 domain: plain -delta is signed-overflow UB for delta == INT64_MIN.
+        /// The two's-complement result is identical for every other value.
+        return Transform::execute(t, static_cast<Int64>(-static_cast<UInt64>(delta)), time_zone, utc_time_zone, scale);
     }
 
     template <typename T>
@@ -581,8 +582,9 @@ struct SubtractIntervalImpl : public Transform
         const DateLUTImpl & utc_time_zone,
         UInt16 scale) const
     {
-        /// Signed integer overflow is Ok.
-        return Transform::executeForTime(t, -delta, time_zone, utc_time_zone, scale);
+        /// Negate in the UInt64 domain: plain -delta is signed-overflow UB for delta == INT64_MIN.
+        /// The two's-complement result is identical for every other value.
+        return Transform::executeForTime(t, static_cast<Int64>(-static_cast<UInt64>(delta)), time_zone, utc_time_zone, scale);
     }
 };
 

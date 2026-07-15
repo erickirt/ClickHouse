@@ -89,3 +89,16 @@ SELECT addHours(toDate('2000-01-01'), 9223372036854775807) SETTINGS session_time
 1999-12-31 23:00:00
 SELECT addHours(toDate32('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
 1999-12-31 23:00:00.000
+-- The public subtract* siblings implement each variant as Transform::execute(..., -delta, ...) in
+-- SubtractIntervalImpl. checkOverflow accepts toInt64('-9223372036854775808') (INT64_MIN) unchanged, so
+-- a plain -delta negation was signed-overflow UB reached before the now-safe Add*Impl path. The negation
+-- is now done in the UInt64 domain, so -delta is defined by construction (INT64_MIN negates to itself).
+-- Each must terminate and saturate deterministically.
+SELECT subtractYears(toDateTime('2000-01-01 00:00:00', 'UTC'), toInt64('-9223372036854775808'));
+1970-01-01 00:00:00
+SELECT subtractYears(toDate('2000-01-01'), toInt64('-9223372036854775808'));
+1970-01-01
+SELECT subtractMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), toInt64('-9223372036854775808'));
+1970-01-01 00:00:00
+SELECT subtractSeconds(toDate('2000-01-01'), toInt64('-9223372036854775808')) SETTINGS session_timezone = 'UTC';
+2000-01-01 00:00:00
