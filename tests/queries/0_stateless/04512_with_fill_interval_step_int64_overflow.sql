@@ -11,6 +11,11 @@
 -- Int64. The steps here are picked so the per-jump delta is 2^31 in the UInt32 domain: odd jumps
 -- advance, even jumps land on the same value, so step_len keeps doubling to the overflow point.
 --
+-- The MINUTE/HOUR cases also drive the wrapped delta to -2^63, which used to overflow a second time
+-- inside AddMinutesImpl/AddHoursImpl (delta * 60 resp. delta * 3600). Those helper overloads now
+-- compute in the UInt64 domain too and are no longer NO_SANITIZE_UNDEFINED, so this test enforces
+-- the whole WITH FILL interval-step chain under UBSan.
+--
 -- DateTime64/Decimal64 and the calendar kinds (DAY/WEEK/MONTH) cannot be driven to that overflow in a
 -- terminating query: DateTime64 execute() works in the full Int64 tick domain (no small-domain wrap,
 -- so a large delta immediately overshoots the target or overflows Int64 and doLongJump stops

@@ -200,9 +200,13 @@ struct AddSecondsImpl
     {
         return DateTime64(DecimalUtils::multiplyAdd(delta, DecimalUtils::scaleMultiplier<Time64>(scale), t.value));
     }
-    static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    /// Compute in the UInt64 domain so an out-of-range delta wraps by construction instead of hitting
+    /// signed overflow, which is UB even under NO_SANITIZE_UNDEFINED. FillingRow::doLongJump passes
+    /// deltas from the whole Int64 range and relies on the wraparound. Bit-identical to the previous
+    /// two's complement behavior for all inputs.
+    static UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt32>(t + delta);
+        return static_cast<UInt32>(static_cast<UInt64>(t) + static_cast<UInt64>(delta));
     }
     static NO_SANITIZE_UNDEFINED DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -235,17 +239,20 @@ struct AddMinutesImpl
 {
     static constexpr auto name = "addMinutes";
 
-    static NO_SANITIZE_UNDEFINED DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
+    /// UInt64 domain: wraps by construction; FillingRow::doLongJump relies on the wraparound and a
+    /// signed multiply would be UB (see AddSecondsImpl).
+    static DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
     {
-        return t + 60 * delta * DecimalUtils::scaleMultiplier<DateTime64>(scale);
+        return DateTime64(static_cast<Int64>(
+            static_cast<UInt64>(t.value) + 60 * static_cast<UInt64>(delta) * static_cast<UInt64>(DecimalUtils::scaleMultiplier<DateTime64>(scale))));
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
     {
         return t + 60 * delta * DecimalUtils::scaleMultiplier<Time64>(scale);
     }
-    static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt32>(t + delta * 60);
+        return static_cast<UInt32>(static_cast<UInt64>(t) + static_cast<UInt64>(delta) * 60);
     }
     static NO_SANITIZE_UNDEFINED DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -278,17 +285,20 @@ struct AddHoursImpl
 {
     static constexpr auto name = "addHours";
 
-    static NO_SANITIZE_UNDEFINED DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
+    /// UInt64 domain: wraps by construction; FillingRow::doLongJump relies on the wraparound and a
+    /// signed multiply would be UB (see AddSecondsImpl).
+    static DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
     {
-        return t + 3600 * delta * DecimalUtils::scaleMultiplier<DateTime64>(scale);
+        return DateTime64(static_cast<Int64>(
+            static_cast<UInt64>(t.value) + 3600 * static_cast<UInt64>(delta) * static_cast<UInt64>(DecimalUtils::scaleMultiplier<DateTime64>(scale))));
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
     {
         return t + 3600 * delta * DecimalUtils::scaleMultiplier<Time64>(scale);
     }
-    static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt32>(t + delta * 3600);
+        return static_cast<UInt32>(static_cast<UInt64>(t) + static_cast<UInt64>(delta) * 3600);
     }
     static NO_SANITIZE_UNDEFINED DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
