@@ -1,11 +1,13 @@
 #pragma once
 
 #include <IO/CompressionMethod.h>
+#include <Server/HTTP/HTTPResponse.h>
 #include <Server/HTTP/HTTPServerRequest.h>
 #include <Server/HTTP/WriteBufferFromHTTPServerResponse.h>
 #include <base/defines.h>
 
 #include <Poco/String.h>
+#include <Poco/StringTokenizer.h>
 
 #include <memory>
 
@@ -43,7 +45,7 @@ struct ResponseOutput
 
 /// Advertise that the response varies by the given request header field, merging with
 /// any `Vary` value that may already be present (e.g. from configured response headers).
-inline void addVaryField(HTTPServerResponse & response, const String & field)
+inline void addVaryField(HTTPResponse & response, const String & field)
 {
     if (!response.has("Vary"))
     {
@@ -51,15 +53,25 @@ inline void addVaryField(HTTPServerResponse & response, const String & field)
         return;
     }
 
-    String existing = response.get("Vary");
+    const String & existing = response.get("Vary");
 
-    /// "*" already means the response varies on everything, so there is nothing to add.
-    if (existing == "*")
-        return;
+    /// The value is a comma-separated list of field names. Compare whole tokens
+    /// case-insensitively so that e.g. an already configured "X-Accept-Encoding-Debug"
+    /// does not pass for "Accept-Encoding". A "*" member already means the response
+    /// varies on everything, so there is nothing to add either.
+    Poco::StringTokenizer tokens(existing, ",", Poco::StringTokenizer::TOK_TRIM | Poco::StringTokenizer::TOK_IGNORE_EMPTY);
+    for (const auto & token : tokens)
+    {
+        if (token == "*" || Poco::icompare(token, field) == 0)
+            return;
+    }
 
-    /// Do not add the field twice (header field names are case-insensitive).
-    if (Poco::toLower(existing).find(Poco::toLower(field)) != String::npos)
+    /// A present but empty (or all-whitespace) value is replaced rather than appended to.
+    if (tokens.count() == 0)
+    {
+        response.set("Vary", field);
         return;
+    }
 
     response.set("Vary", existing + ", " + field);
 }
