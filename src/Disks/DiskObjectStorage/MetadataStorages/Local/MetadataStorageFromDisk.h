@@ -115,6 +115,10 @@ public:
 
     bool isReadOnly() const override { return disk->isReadOnly(); }
 
+    /// Blobs are stored in the object storage under random keys, but the path->blob map (the keys, sizes and
+    /// refcounts for each file) is kept in per-server local files.
+    bool isReconstructableFromObjectStorage() const override { return false; }
+
     void startup() override;
 
     BlobsToRemove getBlobsToRemove(const ClusterConfigurationPtr & cluster, int64_t max_count) override;

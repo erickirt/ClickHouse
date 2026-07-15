@@ -275,9 +275,9 @@ public:
         return delegate->isReadOnly();
     }
 
-    bool supportsTableDisk() const override
+    bool isReconstructableFromObjectStorage() const override
     {
-        return delegate->supportsTableDisk();
+        return delegate->isReconstructableFromObjectStorage();
     }
 
     void updateCache(const std::vector<std::string> & paths, bool recursive, bool enforce_fresh, std::string * serialized_cache_update_description) override

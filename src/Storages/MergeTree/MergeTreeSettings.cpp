@@ -2337,9 +2337,14 @@ static void validateTableDisk(const DiskPtr & disk)
     if (description.type != DataSourceType::ObjectStorage)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "MergeTree settings `table_disk` is not supported for non-ObjectStorage disks");
 
+    /// With table_disk the table lives at the disk root and is loaded directly from the disk (no database/UUID path),
+    /// so its metadata must be reconstructable from the object storage (per-server Local/Keeper metadata isn't).
     const auto metadata_storage = disk->getMetadataStorage();
-    if (!metadata_storage->supportsTableDisk())
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "MergeTree settings `table_disk` is not supported for {}", description.toString());
+    if (!metadata_storage->isReconstructableFromObjectStorage())
+        throw Exception(
+            ErrorCodes::BAD_ARGUMENTS,
+            "MergeTree settings `table_disk` is not supported for {}: it requires metadata stored on the object storage.",
+            description.toString());
 }
 
 IMPLEMENT_SETTINGS_TRAITS_CUSTOM_IMPL(MergeTreeSettingsTraits, LIST_OF_MERGE_TREE_SETTINGS, MergeTreeSettings, MergeTreeSetting)
