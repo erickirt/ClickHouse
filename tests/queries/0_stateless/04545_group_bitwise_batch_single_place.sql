@@ -1,21 +1,22 @@
 -- Correctness of groupBitOr/groupBitAnd/groupBitXor batch paths for all integer
--- types: plain, -If, Nullable and Nullable + -If, verified against an arrayFold
--- with the scalar bit functions; plus identity values for empty selections.
+-- types: plain, -If, Nullable and Nullable + -If, verified against arrayReduce,
+-- which aggregates the same values through the scalar per-row add instead of
+-- addBatchSinglePlace; plus identity values for empty selections.
 
 SELECT
     'UInt8',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'UInt8')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'UInt8'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'UInt8')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'UInt8')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'UInt8'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'UInt8')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'UInt8')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'UInt8'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'UInt8')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'UInt8')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'UInt8'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'UInt8'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -44,18 +45,18 @@ SELECT 'UInt8 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull(
 
 SELECT
     'UInt16',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'UInt16')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'UInt16'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'UInt16')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'UInt16')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'UInt16'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'UInt16')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'UInt16')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'UInt16'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'UInt16')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'UInt16')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'UInt16'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'UInt16'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -84,18 +85,18 @@ SELECT 'UInt16 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull
 
 SELECT
     'UInt32',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'UInt32')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'UInt32'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'UInt32')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'UInt32')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'UInt32'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'UInt32')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'UInt32')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'UInt32'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'UInt32')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'UInt32')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'UInt32'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'UInt32'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -124,18 +125,18 @@ SELECT 'UInt32 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull
 
 SELECT
     'UInt64',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'UInt64')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'UInt64'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'UInt64')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'UInt64')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'UInt64'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'UInt64')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'UInt64')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'UInt64'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'UInt64')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'UInt64')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'UInt64'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'UInt64'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -164,18 +165,18 @@ SELECT 'UInt64 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull
 
 SELECT
     'UInt128',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'UInt128')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'UInt128'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'UInt128')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'UInt128')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'UInt128'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'UInt128')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'UInt128')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'UInt128'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'UInt128')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'UInt128')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'UInt128'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'UInt128'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -204,18 +205,18 @@ SELECT 'UInt128 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNul
 
 SELECT
     'UInt256',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'UInt256')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'UInt256'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'UInt256')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'UInt256')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'UInt256'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'UInt256')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'UInt256')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'UInt256'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'UInt256')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'UInt256')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'UInt256'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'UInt256'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -244,18 +245,18 @@ SELECT 'UInt256 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNul
 
 SELECT
     'Int8',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'Int8')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'Int8'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'Int8')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'Int8')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'Int8'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'Int8')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'Int8')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'Int8'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'Int8')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'Int8')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'Int8'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'Int8'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -284,18 +285,18 @@ SELECT 'Int8 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull(g
 
 SELECT
     'Int16',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'Int16')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'Int16'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'Int16')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'Int16')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'Int16'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'Int16')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'Int16')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'Int16'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'Int16')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'Int16')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'Int16'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'Int16'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -324,18 +325,18 @@ SELECT 'Int16 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull(
 
 SELECT
     'Int32',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'Int32')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'Int32'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'Int32')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'Int32')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'Int32'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'Int32')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'Int32')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'Int32'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'Int32')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'Int32')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'Int32'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'Int32'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -364,18 +365,18 @@ SELECT 'Int32 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull(
 
 SELECT
     'Int64',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'Int64')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'Int64'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'Int64')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'Int64')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'Int64'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'Int64')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'Int64')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'Int64'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'Int64')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'Int64')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'Int64'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'Int64'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -404,18 +405,18 @@ SELECT 'Int64 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull(
 
 SELECT
     'Int128',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'Int128')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'Int128'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'Int128')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'Int128')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'Int128'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'Int128')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'Int128')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'Int128'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'Int128')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'Int128')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'Int128'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'Int128'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
@@ -444,18 +445,18 @@ SELECT 'Int128 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull
 
 SELECT
     'Int256',
-    gbOr = arrayFold((acc, e) -> bitOr(acc, e), arr, CAST(0, 'Int256')),
-    gbAnd = arrayFold((acc, e) -> bitAnd(acc, e), arr, bitNot(CAST(0, 'Int256'))),
-    gbXor = arrayFold((acc, e) -> bitXor(acc, e), arr, CAST(0, 'Int256')),
-    gbOrIf = arrayFold((acc, e) -> bitOr(acc, e), arrIf, CAST(0, 'Int256')),
-    gbAndIf = arrayFold((acc, e) -> bitAnd(acc, e), arrIf, bitNot(CAST(0, 'Int256'))),
-    gbXorIf = arrayFold((acc, e) -> bitXor(acc, e), arrIf, CAST(0, 'Int256')),
-    gbOrNull = arrayFold((acc, e) -> bitOr(acc, e), arrNull, CAST(0, 'Int256')),
-    gbAndNull = arrayFold((acc, e) -> bitAnd(acc, e), arrNull, bitNot(CAST(0, 'Int256'))),
-    gbXorNull = arrayFold((acc, e) -> bitXor(acc, e), arrNull, CAST(0, 'Int256')),
-    gbOrNullIf = arrayFold((acc, e) -> bitOr(acc, e), arrNullIf, CAST(0, 'Int256')),
-    gbAndNullIf = arrayFold((acc, e) -> bitAnd(acc, e), arrNullIf, bitNot(CAST(0, 'Int256'))),
-    gbXorNullIf = arrayFold((acc, e) -> bitXor(acc, e), arrNullIf, CAST(0, 'Int256'))
+    gbOr = arrayReduce('groupBitOr', arr),
+    gbAnd = arrayReduce('groupBitAnd', arr),
+    gbXor = arrayReduce('groupBitXor', arr),
+    gbOrIf = arrayReduce('groupBitOr', arrIf),
+    gbAndIf = arrayReduce('groupBitAnd', arrIf),
+    gbXorIf = arrayReduce('groupBitXor', arrIf),
+    gbOrNull = arrayReduce('groupBitOr', arrNull),
+    gbAndNull = arrayReduce('groupBitAnd', arrNull),
+    gbXorNull = arrayReduce('groupBitXor', arrNull),
+    gbOrNullIf = arrayReduce('groupBitOr', arrNullIf),
+    gbAndNullIf = arrayReduce('groupBitAnd', arrNullIf),
+    gbXorNullIf = arrayReduce('groupBitXor', arrNullIf)
 FROM
 (
     SELECT
