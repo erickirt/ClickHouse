@@ -372,26 +372,36 @@ struct AddWeeksImpl
 {
     static constexpr auto name = "addWeeks";
 
+    /// Wraps like the plain multiplication the calendar path used to do, but reports the overflow so
+    /// that the fast path can decline it instead of deciding on a wrapped shift.
+    static bool weeksToDays(Int64 delta, Int64 & days)
+    {
+        return !__builtin_mul_overflow(delta, 7, &days);
+    }
+
     static NO_SANITIZE_UNDEFINED DateTime64 execute(DateTime64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
-        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta * 7, multiplier))
-            return t + delta * 7 * DATE_SECONDS_PER_DAY * multiplier;
+        Int64 days = 0;
+        if (weeksToDays(delta, days) && time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, days, multiplier))
+            return t + days * DATE_SECONDS_PER_DAY * multiplier;
         auto d = std::div(t, multiplier);
-        return time_zone.addDays(d.quot, delta * 7) * multiplier + d.rem;
+        return time_zone.addDays(d.quot, days) * multiplier + d.rem;
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
-        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta * 7, multiplier))
-            return t + delta * 7 * DATE_SECONDS_PER_DAY * multiplier;
+        Int64 days = 0;
+        if (weeksToDays(delta, days) && time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, days, multiplier))
+            return t + days * DATE_SECONDS_PER_DAY * multiplier;
         auto d = std::div(t, multiplier);
-        return time_zone.addDays(d.quot, delta * 7) * multiplier + d.rem;
+        return time_zone.addDays(d.quot, days) * multiplier + d.rem;
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
-        if (time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, delta * 7))
-            return static_cast<UInt32>(t + delta * 7 * DATE_SECONDS_PER_DAY);
+        Int64 days = 0;
+        if (weeksToDays(delta, days) && time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, days))
+            return static_cast<UInt32>(t + days * DATE_SECONDS_PER_DAY);
         return static_cast<UInt32>(time_zone.addWeeks(t, delta));
     }
     static NO_SANITIZE_UNDEFINED UInt16 execute(UInt16 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
