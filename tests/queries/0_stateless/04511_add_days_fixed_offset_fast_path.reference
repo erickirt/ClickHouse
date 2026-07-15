@@ -46,6 +46,7 @@ Boundaries keep the calendar-path behavior in fixed-offset time zones
 9999-12-31 00:00:00	253402214400
 2106-01-28 08:40:32	4294111232
 2106-01-28 08:40:32	4294111232
+2106-01-28 08:40:32	4294111232
 DST time zone keeps calendar semantics
 2021-03-28 12:00:00
 82800

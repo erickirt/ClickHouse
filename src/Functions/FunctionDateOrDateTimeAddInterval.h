@@ -402,7 +402,7 @@ struct AddWeeksImpl
         Int64 days = 0;
         if (weeksToDays(delta, days) && time_zone.hasFixedOffset() && time_zone.dayShiftStaysWithinLUT(t, days))
             return static_cast<UInt32>(t + days * DATE_SECONDS_PER_DAY);
-        return static_cast<UInt32>(time_zone.addWeeks(t, delta));
+        return static_cast<UInt32>(time_zone.addDays(t, days));
     }
     static NO_SANITIZE_UNDEFINED UInt16 execute(UInt16 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {

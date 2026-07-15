@@ -59,6 +59,7 @@ SELECT addWeeks(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), 92233720368547758
 -- DateTime whose result leaves the LUT range.
 SELECT addDays(toDateTime('2020-01-01 00:00:00', 'UTC'), 10000000) AS x, toUInt32(x);
 SELECT addWeeks(toDateTime('2020-01-01 00:00:00', 'UTC'), 10000000) AS x, toUInt32(x);
+SELECT addWeeks(toDateTime('2020-01-01 00:00:00', 'UTC'), 9223372036854775807) AS x, toUInt32(x);
 
 SELECT 'DST time zone keeps calendar semantics';
 -- Crossing the spring-forward transition (2021-03-28 in Europe/Berlin): the day is 23 hours long.
