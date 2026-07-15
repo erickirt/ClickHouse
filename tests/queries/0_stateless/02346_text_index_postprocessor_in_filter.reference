@@ -1,0 +1,10 @@
+1. if(token IN (tuple)): listed stop words dropped
+brown end fox here quick
+2
+1
+2. if(token NOT IN (keep-set)): only the keep-set survives
+fox the
+3. if(token IN (array)): array right-hand side, same as tuple
+brown end fox here quick
+4. multiIf(token IN (tuple)): CASE spelling drops the same tokens
+brown end fox here quick

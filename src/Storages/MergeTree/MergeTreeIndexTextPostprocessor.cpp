@@ -74,64 +74,98 @@ bool isFilterOnlyExpression(const ASTPtr & ast, std::string_view token_name)
     return false;
 }
 
-/// Collects the string literals of an `IN` right-hand side (a single literal, a Tuple/Array literal, or a
-/// `tuple(...)`/`array(...)` function of literals). Returns false if any element is not a string literal.
+/// Collects string literals from an `IN` right-hand side (literal / tuple / array); false if any isn't a string.
 bool collectStringLiterals(const ASTPtr & ast, std::vector<String> & out)
 {
     auto collect_from_container = [&out](const auto & elements) -> bool
     {
         for (const auto & element : elements)
         {
-            if (element.getType() != Field::Types::String) return false;
+            if (element.getType() != Field::Types::String)
+                return false;
             out.push_back(element.template safeGet<String>());
         }
         return true;
     };
+
     if (const auto * literal = ast->as<ASTLiteral>())
     {
         const Field & value = literal->value;
-        if (value.getType() == Field::Types::String) { out.push_back(value.safeGet<String>()); return true; }
-        if (value.getType() == Field::Types::Tuple)  return collect_from_container(value.safeGet<Tuple>());
-        if (value.getType() == Field::Types::Array)  return collect_from_container(value.safeGet<Array>());
+        if (value.getType() == Field::Types::String)
+        {
+            out.push_back(value.safeGet<String>());
+            return true;
+        }
+        if (value.getType() == Field::Types::Tuple)
+            return collect_from_container(value.safeGet<Tuple>());
+        if (value.getType() == Field::Types::Array)
+            return collect_from_container(value.safeGet<Array>());
         return false;
     }
+
     if (const auto * function = ast->as<ASTFunction>())
     {
-        if ((function->name != "tuple" && function->name != "array") || !function->arguments) return false;
+        if ((function->name != "tuple" && function->name != "array") || !function->arguments)
+            return false;
         for (const auto & child : function->arguments->children)
-            if (!collectStringLiterals(child, out)) return false;
+        {
+            if (!collectStringLiterals(child, out))
+                return false;
+        }
         return true;
     }
+
     return false;
 }
 
-/// Recognizes `if(token IN/NOT IN (<string literals>), '', token)` (and the swapped branches) and extracts
-/// the drop set. The membership test is byte-exact identical to `IN`, so the hybrid path stores the same
-/// tokens the general path would. Anything else returns nullopt (falls back to the flush/general path).
+/// Extracts the drop set from `if`/`multiIf(token IN/NOT IN (<literals>), '', token)`; else nullopt.
 std::optional<MergeTreeIndexTextInlineFilter> tryExtractInlineFilter(const ASTPtr & ast, std::string_view token_name)
 {
     const auto * function = ast->as<ASTFunction>();
-    if (!function || function->name != "if" || !function->arguments || function->arguments->children.size() != 3) return {};
+    if (!function || !function->arguments || function->arguments->children.size() != 3)
+        return {};
+
+    /// `if` and single-WHEN `multiIf` share the same 3-arg (cond, then, else) shape.
+    if (function->name != "if" && function->name != "multiIf")
+        return {};
+
     const auto & condition = function->arguments->children[0];
     const auto & then_branch = function->arguments->children[1];
     const auto & else_branch = function->arguments->children[2];
+
     bool drop_on_condition = false;
-    if (isEmptyStringLiteral(then_branch) && isTokenIdentifier(else_branch, token_name)) drop_on_condition = true;
-    else if (isTokenIdentifier(then_branch, token_name) && isEmptyStringLiteral(else_branch)) drop_on_condition = false;
-    else return {};
+    if (isEmptyStringLiteral(then_branch) && isTokenIdentifier(else_branch, token_name))
+        drop_on_condition = true;
+    else if (isTokenIdentifier(then_branch, token_name) && isEmptyStringLiteral(else_branch))
+        drop_on_condition = false;
+    else
+        return {};
+
     const auto * in_function = condition->as<ASTFunction>();
-    if (!in_function || !in_function->arguments || in_function->arguments->children.size() != 2) return {};
+    if (!in_function || !in_function->arguments || in_function->arguments->children.size() != 2)
+        return {};
+
     bool is_not_in = false;
-    if (in_function->name == "in" || in_function->name == "globalIn") is_not_in = false;
-    else if (in_function->name == "notIn" || in_function->name == "globalNotIn") is_not_in = true;
-    else return {};
-    if (!isTokenIdentifier(in_function->arguments->children[0], token_name)) return {};
+    if (in_function->name == "in" || in_function->name == "globalIn")
+        is_not_in = false;
+    else if (in_function->name == "notIn" || in_function->name == "globalNotIn")
+        is_not_in = true;
+    else
+        return {};
+
+    if (!isTokenIdentifier(in_function->arguments->children[0], token_name))
+        return {};
+
     std::vector<String> literals;
-    if (!collectStringLiterals(in_function->arguments->children[1], literals) || literals.empty()) return {};
+    if (!collectStringLiterals(in_function->arguments->children[1], literals) || literals.empty())
+        return {};
+
     MergeTreeIndexTextInlineFilter filter;
+    /// `NOT IN`: invert so `shouldDrop` fires for tokens outside the set.
     filter.drop_on_match = is_not_in ? !drop_on_condition : drop_on_condition;
     filter.tokens.reserve(literals.size());
-    for (auto & literal : literals) filter.tokens.insert(std::move(literal));
+    for (auto & literal : literals)
+        filter.tokens.insert(std::move(literal));
     return filter;
 }
 

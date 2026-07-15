@@ -1559,32 +1559,19 @@ void MergeTreeIndexTextGranuleBuilder::addDocument(std::string_view document)
 
 void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 token_position)
 {
+    /// Drop before inserting so dropped tokens allocate nothing (bounds `NOT IN` memory); still counted for flush.
+    if (token_drop_filter && token_drop_filter->shouldDrop(token))
+    {
+        ++num_processed_tokens;
+        return;
+    }
+
     bool inserted = false;
     TokenToPostingsBuilderMap::LookupResult it;
     ArenaKeyHolder key_holder(token, *arena);
     tokens_map.emplace(key_holder, it, inserted);
 
     PostingListBuilder & posting_list_builder = it->getMapped();
-
-    if (token_drop_filter)
-    {
-        /// Hybrid fast path: decide the drop once per distinct token (on first insert). Dropped tokens keep
-        /// an empty posting builder as a sentinel and never build postings; later occurrences short-circuit
-        /// on the empty builder (isSmall() avoids the roaring cardinality() call in isEmpty()), so each
-        /// occurrence is hashed only once (into tokens_map).
-        const bool dropped = inserted
-            ? token_drop_filter->shouldDrop(token)
-            : (posting_list_builder.isSmall() && posting_list_builder.isEmpty());
-        if (dropped)
-        {
-            /// Dropped tokens build no postings, but still count toward the temporary-segment flush
-            /// threshold so the flush cadence (and thus peak memory) tracks the input volume rather than
-            /// the drop rate - counting only kept tokens would enlarge each segment as the drop rate rises.
-            ++num_processed_tokens;
-            return;
-        }
-    }
-
     posting_list_builder.add(static_cast<UInt32>(current_row), posting_lists);
 
     if (position_map)
@@ -1595,7 +1582,6 @@ void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 t
         positions_builder.add(static_cast<UInt32>(current_row), token_position);
     }
 
-    /// Kept tokens (and every token on the non-hybrid paths) count toward the flush threshold.
     ++num_processed_tokens;
 }
 
@@ -1613,11 +1599,7 @@ std::unique_ptr<MergeTreeIndexGranuleTextWritable> MergeTreeIndexTextGranuleBuil
     tokens_map.forEachValue([&](const auto & key, auto & mapped)
     {
         std::string_view token = key;
-        /// Hybrid fast path leaves dropped tokens with an empty posting builder; skip them. (No non-dropped
-        /// token is ever empty - every kept occurrence adds at least one posting - so this never over-drops.)
-        /// isSmall() short-circuits the roaring cardinality() call in isEmpty() for large kept tokens.
-        if (mapped.isSmall() && mapped.isEmpty())
-            return;
+        /// Flush fast path: skip the distinct tokens the postprocessor emptied (the hybrid path leaves none).
         if (!dropped_tokens.empty() && dropped_tokens.contains(token))
             return;
         sorted_tokens.push_back(SortedToken{token, &mapped, nullptr});
