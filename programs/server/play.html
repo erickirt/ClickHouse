@@ -4694,11 +4694,15 @@ const default_format = 'JSONStringsEachRowWithProgress';
 /// late response bails once the tab is re-run/cancelled/closed. `abortController` cancels the fetch.
 /// `queryStart` is the absolute character offset of `query` in the editor, threaded to
 /// `highlightQueryError` so a server-reported error position maps back to the statement that ran.
-async function postImpl(tab, posted_request_num, query, targetResultEl, abortController, paramValuesSnapshot, queryStart)
+/// `connection` is the { server, user, password } snapshot taken by `postOne`/`postAll` BEFORE the
+/// lexer preflight await: the shared connection inputs must not be re-read here, or a tab switch +
+/// connection edit during that await (or between the sequential statement groups of a "Run all")
+/// would send this run's already-snapshotted query to a different server or identity.
+async function postImpl(tab, posted_request_num, query, targetResultEl, abortController, paramValuesSnapshot, queryStart, connection)
 {
-    const user = user_elem.value;
-    const password = password_elem.value;
-    const server_address = url_elem.value;
+    const user = connection.user;
+    const password = connection.password;
+    const server_address = connection.server;
     let url = server_address +
         (server_address.indexOf('?') >= 0 ? '&' : '?') +
         /// Ask server to allow cross-domain requests.
@@ -4926,9 +4930,10 @@ function compactFailureSnapshot(reply)
 /// background run never disturbs the foreground.
 /// When `history_query_text` is provided, it overrides `query` for browser history/URL storage,
 /// preserving the full textarea content when running a selected query in multi-query mode.
-/// `paramValuesSnapshot` is captured by the caller (`postOne`/`postAll`) BEFORE the lexer preflight
-/// await, so a tab switch during that await cannot rebind this run to another tab's parameters.
-async function postSingle(tab, posted_request_num, query, history_query_text, paramValuesSnapshot, queryStart)
+/// `paramValuesSnapshot` and `connection` are captured by the caller (`postOne`/`postAll`) BEFORE
+/// the lexer preflight await, so a tab switch during that await cannot rebind this run to another
+/// tab's parameters or to freshly edited connection fields.
+async function postSingle(tab, posted_request_num, query, history_query_text, paramValuesSnapshot, queryStart, connection)
 {
     /// Per-run start time: tabs execute concurrently, so a shared global would be overwritten
     /// by whichever tab launched last and misreport the elapsed time of the others.
@@ -4943,7 +4948,7 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     if (active()) { paintDownloadCopy(tab); progressEl.start(); }
 
     tab.controller = new AbortController();
-    const result = await postImpl(tab, posted_request_num, query, el, tab.controller, paramValuesSnapshot, queryStart);
+    const result = await postImpl(tab, posted_request_num, query, el, tab.controller, paramValuesSnapshot, queryStart, connection);
 
     if (result.cancelled) return;
 
@@ -5045,8 +5050,10 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
 /// `parsed` is an array of { query, is_select } objects from splitAllQueries; `editorText` is the
 /// full editor content captured at launch (used as the tab's saved query — must NOT be re-read
 /// from the shared editor at completion, which by then may hold another tab's text).
-/// `paramValuesSnapshot` is captured by the caller before the lexer preflight await (see `postSingle`).
-async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText)
+/// `paramValuesSnapshot` and `connection` are captured by the caller before the lexer preflight
+/// await (see `postSingle`); every statement group of this run uses the same snapshot, so a
+/// connection edit mid-run cannot reroute the later groups to a different server or identity.
+async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText, connection)
 {
     /// Per-run start time, as in `postSingle`: concurrent tabs must not share it.
     const query_start = performance.now();
@@ -5149,7 +5156,7 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
         const promises = group.indices.map(i => {
             const ac = new AbortController();
             tab.multiControllers.push(ac);
-            return postImpl(tab, posted_request_num, parsed[i].query, resultElements[i], ac, paramValuesSnapshot, parsed[i].queryStart)
+            return postImpl(tab, posted_request_num, parsed[i].query, resultElements[i], ac, paramValuesSnapshot, parsed[i].queryStart, connection)
                 .then(result => ({ index: i, result }));
         });
 
@@ -6766,6 +6773,11 @@ async function postOne()
     /// (the latter cover names whose inputs have not been (re)built yet, e.g. a placeholder that
     /// reappeared in the editor moments before the run).
     const param_sources = Object.assign({}, tab.params || {}, param_values_at_launch);
+    /// Snapshot the connection context (server / user / password) at launch too, for the same
+    /// reason: these inputs are shared, and re-reading them after the preflight await (as
+    /// `postImpl` used to) would let a tab switch + connection edit during it send this run's
+    /// snapshotted query to the newly entered server or identity.
+    const connection = { server: url_elem.value, user: user_elem.value, password: password_elem.value };
     /// Bump `activation_num` so a concurrent, still-awaiting `activateTab` restore bails instead of
     /// overwriting the editor after this run starts; the run itself is no longer gated on it.
     ++activation_num;
@@ -6821,9 +6833,9 @@ async function postOne()
 
         beginFlight(tab, launch_interaction);
         if (selected.length > 1) {
-            await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text);
+            await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text, connection);
         } else {
-            await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart);
+            await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart, connection);
         }
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
@@ -6838,7 +6850,7 @@ async function postOne()
         }
         /// In multi-query mode, preserve the full textarea content in history/URL
         /// even when running a single query under cursor (so refresh restores all queries).
-        await postSingle(tab, my_run, under.query, isMultiQuery ? editor_text : undefined, paramValuesSnapshot, under.queryStart);
+        await postSingle(tab, my_run, under.query, isMultiQuery ? editor_text : undefined, paramValuesSnapshot, under.queryStart, connection);
     }
 
     /// Reset the run/favicon state only if this run still owns its tab's in-flight state; a newer
@@ -6859,6 +6871,9 @@ async function postAll()
     /// text below.
     const param_values_at_launch = resolveRunParams(params_restore_pending, tab);
     const param_sources = Object.assign({}, tab.params || {}, param_values_at_launch);
+    /// See `postOne`: the connection context is snapshotted at launch so a tab switch +
+    /// connection edit during the preflight await cannot reroute this run.
+    const connection = { server: url_elem.value, user: user_elem.value, password: password_elem.value };
     ++activation_num;
     const my_run = ++tab.reqNum;
     const launch_interaction = editorInteractionGen;   /// see `postOne`
@@ -6883,7 +6898,7 @@ async function postAll()
 
     if (parsed.length > 1) {
         beginFlight(tab, launch_interaction);
-        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text);
+        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text, connection);
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
@@ -6892,7 +6907,7 @@ async function postAll()
             if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
             focusEditorForRun();
         }
-        await postSingle(tab, my_run, under.query, undefined, paramValuesSnapshot, under.queryStart);
+        await postSingle(tab, my_run, under.query, undefined, paramValuesSnapshot, under.queryStart, connection);
     }
 
     if (my_run === tab.reqNum) endFlight(tab);
