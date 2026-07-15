@@ -2684,6 +2684,21 @@ class QueryResultElement extends HTMLElement
         if (!Array.isArray(this._header) || !this._dataTable.tHead) { return; }
         if (this._willTranspose()) { return; }
 
+        /// Fast path for the common case where nothing is pinned in this table and there is no
+        /// stale pinned layout left over from a previous pass to clear: the full sweep below would
+        /// be a no-op except for horizontal-scroll availability, so just refresh that and return.
+        /// Both `applyColumnColors` and `_changeTableLayout` call this on every render, so without
+        /// this guard every ordinary result would pay two O(rows x columns) DOM passes before the
+        /// user has pinned anything - a real regression on large results. `_hasPinnedColumns` is
+        /// O(columns); the `querySelector` is a native read-only lookup that also catches cells
+        /// left `pinned-column` by a just-unpinned column (a pinned column always marks its header
+        /// cell too, so no stale layout escapes), for which the full clearing pass must still run.
+        if (!this._hasPinnedColumns() && !this._dataTable.querySelector('.pinned-column'))
+        {
+            this._updatePinAvailability();
+            return;
+        }
+
         const thead = this._dataTable.tHead;
         const header_len = this._header.length;
         /// Cell index in a row for data column `j` (the leading row-number cell is at index 0).
