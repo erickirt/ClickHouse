@@ -410,3 +410,60 @@ SELECT groupArray(id) FROM tab WHERE message ILIKE '%foo%';
 SELECT groupArray(id) FROM tab WHERE message NOT ILIKE '%foo%';
 
 DROP TABLE tab;
+
+SELECT 'Test ILIKE optimization is applied for lcase/ucase preprocessor aliases';
+
+-- lcase and ucase are aliases of lower and upper, so they are also pure case folding and must
+-- be recognized as such (the function name is canonicalized) so that ILIKE uses the index.
+
+SET use_text_index_like_evaluation_by_dictionary_scan = 1;
+
+DROP TABLE IF EXISTS tab;
+
+CREATE TABLE tab
+(
+    id UInt32,
+    message String,
+    INDEX idx(message) TYPE text(tokenizer = splitByNonAlpha, preprocessor = lcase(message)) GRANULARITY 1
+)
+ENGINE = MergeTree ORDER BY id SETTINGS index_granularity = 1;
+
+INSERT INTO tab SELECT number, 'Hello World' FROM numbers(1024);
+INSERT INTO tab SELECT number, 'Goodbye Planet' FROM numbers(1024);
+
+SELECT '-- lcase: results match a full scan (case-insensitive)';
+SELECT count() FROM tab WHERE message ILIKE '%world%';
+SELECT count() FROM tab WHERE message ILIKE '%world%' SETTINGS use_skip_indexes = 0;
+
+SELECT '-- lcase: the index prunes to the one matching part';
+SELECT trimLeft(explain) AS explain FROM (
+    EXPLAIN indexes=1
+    SELECT count() FROM tab WHERE message ILIKE '%WORLD%'
+) WHERE explain LIKE '%Description:%' OR explain LIKE '%Parts:%' OR explain LIKE '%Granules:%'
+LIMIT 2, 3;
+
+DROP TABLE tab;
+
+CREATE TABLE tab
+(
+    id UInt32,
+    message String,
+    INDEX idx(message) TYPE text(tokenizer = splitByNonAlpha, preprocessor = ucase(message)) GRANULARITY 1
+)
+ENGINE = MergeTree ORDER BY id SETTINGS index_granularity = 1;
+
+INSERT INTO tab SELECT number, 'Hello World' FROM numbers(1024);
+INSERT INTO tab SELECT number, 'Goodbye Planet' FROM numbers(1024);
+
+SELECT '-- ucase: results match a full scan (case-insensitive)';
+SELECT count() FROM tab WHERE message ILIKE '%world%';
+SELECT count() FROM tab WHERE message ILIKE '%world%' SETTINGS use_skip_indexes = 0;
+
+SELECT '-- ucase: the index prunes to the one matching part';
+SELECT trimLeft(explain) AS explain FROM (
+    EXPLAIN indexes=1
+    SELECT count() FROM tab WHERE message ILIKE '%WORLD%'
+) WHERE explain LIKE '%Description:%' OR explain LIKE '%Parts:%' OR explain LIKE '%Granules:%'
+LIMIT 2, 3;
+
+DROP TABLE tab;

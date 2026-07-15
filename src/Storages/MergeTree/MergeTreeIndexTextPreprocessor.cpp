@@ -10,6 +10,7 @@
 #include <DataTypes/DataTypeLowCardinality.h>
 #include <DataTypes/DataTypeString.h>
 #include <DataTypes/IDataType.h>
+#include <Functions/FunctionFactory.h>
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Parsers/ASTFunction.h>
@@ -152,11 +153,14 @@ MergeTreeIndexTextPreprocessor::MergeTreeIndexTextPreprocessor(ASTPtr expression
         /// because the additional transformation would change the dictionary tokens in a way
         /// that the ILIKE case-insensitive regex can no longer match them correctly.
         const auto * func = expression_ast->as<ASTFunction>();
-        if (func && (func->name == "lower" || func->name == "lowerUTF8" || func->name == "upper" || func->name == "upperUTF8")
-            && func->arguments && func->arguments->children.size() == 1)
+        if (func && func->arguments && func->arguments->children.size() == 1)
         {
-            const auto & arg = func->arguments->children.front();
-            is_lower_or_upper = arg->getColumnName() == index_description.column_names.front();
+            const auto & name = getFunctionCanonicalNameIfAny(func->name);
+            if (name == "lower" || name == "lowerUTF8" || name == "upper" || name == "upperUTF8")
+            {
+                const auto & arg = func->arguments->children.front();
+                is_lower_or_upper = arg->getColumnName() == index_description.column_names.front();
+            }
         }
     }
 }

@@ -130,3 +130,18 @@ Test ILIKE optimization is disabled for non-case-folding preprocessor (reverse(c
 -- with optimization (must produce same results)
 [1]
 [2]
+Test ILIKE optimization is applied for lcase/ucase preprocessor aliases
+-- lcase: results match a full scan (case-insensitive)
+1024
+1024
+-- lcase: the index prunes to the one matching part
+Description: text GRANULARITY 100000000
+Parts: 1/2
+Granules: 1024/2048
+-- ucase: results match a full scan (case-insensitive)
+1024
+1024
+-- ucase: the index prunes to the one matching part
+Description: text GRANULARITY 100000000
+Parts: 1/2
+Granules: 1024/2048
