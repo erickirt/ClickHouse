@@ -894,26 +894,30 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
         auto files = reader->getFileNames();
         for (const auto & file : files)
         {
-            auto is_metadata_version = (file == IMergeTreeDataPart::METADATA_VERSION_FILE_NAME);
-            if (is_metadata_version)
+            if (file == IMergeTreeDataPart::METADATA_VERSION_FILE_NAME)
             {
-                if (!params.keep_metadata_version)
-                    continue;
-
+                /// An explicit version override takes precedence over both keeping and dropping the
+                /// original, and must be honored regardless of keep_metadata_version (a caller that
+                /// relies on freeze to persist the destination version passes it with
+                /// keep_metadata_version = false).
                 if (params.metadata_version_to_write.has_value())
                 {
                     auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
                     writeIntText(*params.metadata_version_to_write, *write_buf);
                     write_buf->finalize();
+                    continue;
                 }
+
+                /// No override: drop the version only when the caller does not want to keep it;
+                /// otherwise copy the original through the generic path below.
+                if (!params.keep_metadata_version)
+                    continue;
             }
-            else
-            {
-                auto read_buf = reader->readFile(volume->getDisk(), getRelativeDataPath(), file, read_settings, {});
-                auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
-                copyData(*read_buf, *write_buf);
-                write_buf->finalize();
-            }
+
+            auto read_buf = reader->readFile(volume->getDisk(), getRelativeDataPath(), file, read_settings, {});
+            auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
+            copyData(*read_buf, *write_buf);
+            write_buf->finalize();
         }
     }
     else if (disk->existsFile(getRelativeDataPath()))
@@ -997,26 +1001,30 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freezeRemote(
         src_disk->listFiles(getRelativePath(), all_files);
         for (const auto & file : files)
         {
-            auto is_metadata_version = (file == IMergeTreeDataPart::METADATA_VERSION_FILE_NAME);
-            if (is_metadata_version)
+            if (file == IMergeTreeDataPart::METADATA_VERSION_FILE_NAME)
             {
-                if (!params.keep_metadata_version)
-                    continue;
-
+                /// An explicit version override takes precedence over both keeping and dropping the
+                /// original, and must be honored regardless of keep_metadata_version (a caller that
+                /// relies on freeze to persist the destination version passes it with
+                /// keep_metadata_version = false).
                 if (params.metadata_version_to_write.has_value())
                 {
                     auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
                     writeIntText(*params.metadata_version_to_write, *write_buf);
                     write_buf->finalize();
+                    continue;
                 }
+
+                /// No override: drop the version only when the caller does not want to keep it;
+                /// otherwise copy the original through the generic path below.
+                if (!params.keep_metadata_version)
+                    continue;
             }
-            else
-            {
-                auto read_buf = reader->readFile(volume->getDisk(), getRelativeDataPath(), file, read_settings, {});
-                auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
-                copyData(*read_buf, *write_buf);
-                write_buf->finalize();
-            }
+
+            auto read_buf = reader->readFile(volume->getDisk(), getRelativeDataPath(), file, read_settings, {});
+            auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
+            copyData(*read_buf, *write_buf);
+            write_buf->finalize();
         }
     }
     else if (src_disk->existsFile(getRelativeDataPath()))
