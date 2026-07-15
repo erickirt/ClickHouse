@@ -91,6 +91,8 @@ public:
     void undoTransaction() override;
 #endif
 
+    bool cloneCopiesWholeArchive(const ClonePartParams & params) const override;
+
     MutableDataPartStoragePtr freeze(
         const std::string & to,
         const std::string & dir_path,
@@ -127,6 +129,10 @@ private:
 
     String getRelativeDataPath() const;
     bool isWrittenSeparately(const String & file_name) const;
+
+    /// True if any of the given files lives inside data.packed (rather than being written separately),
+    /// which forces the whole archive to be copied rather than hardlinked during a clone/freeze.
+    bool anyArchivedFileRequestedForCopy(const NameSet & files_to_copy_instead_of_hardlinks) const;
 
     /// Native file access hooks for the base storage. On packed-part storage skp_idx.packed is a
     /// virtual file inside data.packed, so the base file-read overlay (which reads a standalone

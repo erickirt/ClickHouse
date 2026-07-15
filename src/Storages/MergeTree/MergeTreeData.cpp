@@ -10000,7 +10000,14 @@ std::pair<MergeTreeData::MutableDataPartPtr, scope_guard> MergeTreeData::cloneAn
         .withPartFormatFromDisk()
         .build();
 
-    if (!params.copy_instead_of_hardlink && params.hardlinked_files)
+    /// When the source is packed and freeze copies the whole data.packed archive (rather than
+    /// hardlinking it), none of the archive's logical members - of the part or its packed projections -
+    /// share a blob with the source. Recording them as hardlinks would make zero-copy keep the source
+    /// blob alive for a child that owns a fresh copy, leaking it once the source is removed. The archive
+    /// is the only thing that could be hardlinked here (the separate files below are excluded anyway),
+    /// so in that case there is nothing to record.
+    if (!params.copy_instead_of_hardlink && params.hardlinked_files
+        && !src_part->getDataPartStorage().cloneCopiesWholeArchive(params))
     {
         params.hardlinked_files->source_part_name = src_part->name;
         params.hardlinked_files->source_table_shared_id = src_part->storage.getTableSharedID();
