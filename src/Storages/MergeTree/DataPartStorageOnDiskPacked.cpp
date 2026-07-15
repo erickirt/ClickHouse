@@ -843,10 +843,27 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
     }
 
 
+    /// For packed storage the whole part lives inside a single data.packed archive, so hardlinking the
+    /// archive shares every file it contains (including checksums.txt) between the source and the clone.
+    /// Callers list files in files_to_copy_instead_of_hardlinks precisely to give the clone a fresh blob
+    /// for those files: a mutation copies checksums.txt (FILE_FOR_REFERENCES_CHECK) so the source and
+    /// the mutated part do not end up sharing the same zero-copy lock path and local reference count. If
+    /// any such file is stored inside the archive rather than separately, the archive itself has to be
+    /// copied, not hardlinked, or that request is silently defeated (which leaks the source part's
+    /// zero-copy lock on cleanup). isWrittenSeparately(DATA_FILE_NAME) is false, so this also covers a
+    /// direct request to copy data.packed.
+    auto archived_file_requested_for_copy = [this](const NameSet & files)
+    {
+        for (const auto & file : files)
+            if (!isWrittenSeparately(file))
+                return true;
+        return false;
+    };
+
     bool need_commit = false;
     if (!to_detached && (params.copy_instead_of_hardlink
         || params.metadata_version_to_write.has_value()
-        || params.files_to_copy_instead_of_hardlinks.contains(DATA_FILE_NAME)
+        || archived_file_requested_for_copy(params.files_to_copy_instead_of_hardlinks)
         || !params.keep_metadata_version))
     {
         if (!dest_storage->transaction)
