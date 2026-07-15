@@ -83,9 +83,7 @@ bool DataPartStorageOnDiskPacked::exists() const
 
 bool DataPartStorageOnDiskPacked::existsDirectory(const std::string & file_name) const
 {
-    if (isWrittenSeparately(file_name))
-        return volume->getDisk()->existsDirectory(fs::path(root_path) / part_dir / file_name);
-    return false;
+    return volume->getDisk()->existsDirectory(fs::path(root_path) / part_dir / file_name);
 }
 
 class DataPartStorageIteratorOnDiskPacked final : public IDataPartStorageIterator
