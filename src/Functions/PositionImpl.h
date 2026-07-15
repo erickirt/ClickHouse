@@ -26,7 +26,7 @@ struct PositionCaseSensitiveASCII
     using MultiSearcherInBigHaystack = MultiVolnitsky;
 
     /// For searching single substring, that is different each time. This object is created for each row of data. It must have cheap initialization.
-    using SearcherInSmallHaystack = StdLibASCIIStringSearcher</*CaseInsensitive*/ false>;
+    using SearcherInSmallHaystack = CaseSensitiveStringSearcher;
 
     static SearcherInBigHaystack createSearcherInBigHaystack(const char * needle_data, size_t needle_size, size_t haystack_size_hint)
     {
@@ -96,7 +96,7 @@ struct PositionCaseSensitiveUTF8
 {
     using SearcherInBigHaystack = VolnitskyUTF8;
     using MultiSearcherInBigHaystack = MultiVolnitskyUTF8;
-    using SearcherInSmallHaystack = StdLibASCIIStringSearcher</*CaseInsensitive*/ false>;
+    using SearcherInSmallHaystack = CaseSensitiveStringSearcher;
 
     static SearcherInBigHaystack createSearcherInBigHaystack(const char * needle_data, size_t needle_size, size_t haystack_size_hint)
     {

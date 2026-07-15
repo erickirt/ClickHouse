@@ -39,7 +39,9 @@ class CaseSensitiveStringSearcher final
     sz_cptr_t const needle_end;
 
 public:
-    CaseSensitiveStringSearcher(const UInt8 * needle_, size_t needle_size)
+    template <typename CharT>
+    requires (sizeof(CharT) == 1)
+    CaseSensitiveStringSearcher(const CharT * needle_, size_t needle_size)
         : needle(reinterpret_cast<sz_cptr_t>(needle_))
         , needle_end(needle + needle_size)
     {
@@ -72,6 +74,25 @@ public:
         sz_cptr_t haystack_cptr = reinterpret_cast<sz_cptr_t>(haystack);
         size_t haystack_size = haystack_end - haystack;
         size_t needle_size = needle_end - needle;
+
+        /// With few candidate positions a direct scan is cheaper than the dispatched sz_find call.
+        /// Also covers needles longer than the haystack (the loop body never runs).
+        if (haystack_size < needle_size + 8)
+        {
+            for (const UInt8 * pos = haystack; pos + needle_size <= haystack_end; ++pos)
+            {
+                sz_cptr_t c = needle;
+                sz_cptr_t p = reinterpret_cast<sz_cptr_t>(pos);
+                while (c != needle_end && *c == *p)
+                {
+                    ++c;
+                    ++p;
+                }
+                if (c == needle_end)
+                    return pos;
+            }
+            return haystack_end;
+        }
 
         const char * res = sz_find(haystack_cptr, haystack_size, needle, needle_size);
 
