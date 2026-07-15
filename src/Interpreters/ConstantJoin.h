@@ -62,7 +62,7 @@ private:
     friend class ConstantJoinUnmatchedLeftRowsResult;
     friend class ConstantJoinSelectedRowResult;
     friend class ConstantJoinCartesianResult;
-    friend class ConstantJoinNotJoinedRightFiller;
+    friend class ConstantJoinUnmatchedRightRowsFiller;
 
     /// `ConstantJoin` stores whole blocks, so the selector of every `StoredBlock` is the trivial full range
     /// and serves as the row count — the columns cannot carry it when the query needs only the right-side
@@ -132,7 +132,8 @@ private:
     size_t allocated_size = 0;
     /// At least one stored block is compressed; readers then decompress every stored block.
     bool have_compressed = false;
-    /// The single right row joined by `RightRowsToJoin::SelectedRowOnly`; kept separately from the stored blocks.
+    /// The single right row joined by `RightRowsToJoin::SelectedRowOnly`; kept separately from the stored
+    /// blocks and always materialized (a replicated one-row copy would pin the source block's nested columns).
     std::optional<StoredBlock> selected_right_row;
 
     /// Value of the constant join predicate; unconditionally true for explicit cartesian joins.
