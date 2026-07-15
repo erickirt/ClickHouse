@@ -1566,7 +1566,7 @@
   },
   {
     "source": "/cloud/manage/clickstack",
-    "destination": "/products/cloud/features/sql-console-features/hyperdx"
+    "destination": "/products/cloud/features/sql-console-features/clickstack"
   },
   {
     "source": "/cloud/manage/cmek",
@@ -1578,7 +1578,7 @@
   },
   {
     "source": "/cloud/manage/hyperdx",
-    "destination": "/products/cloud/features/sql-console-features/hyperdx"
+    "destination": "/products/cloud/features/sql-console-features/clickstack"
   },
   {
     "source": "/cloud/manage/jan-2025-faq",
@@ -28223,6 +28223,10 @@
   {
     "source": "/primary-indexes",
     "destination": "/concepts/core-concepts/primary-indexes"
+  },
+  {
+    "source": "/products/cloud/features/sql-console-features/hyperdx",
+    "destination": "/products/cloud/features/sql-console-features/clickstack"
   },
   {
     "source": "/products/cloud/guides/security/cmek-migration",
