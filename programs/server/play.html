@@ -4759,10 +4759,13 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
             }
 
             /// If the error message points at a position in the query (e.g. a syntax error),
-            /// highlight that position in the editor -- unless the user has returned to the editor
-            /// since this run started, in which case this response is stale and must not repaint.
-            if (editorInteractionGen === runEditorInteraction) {
-                highlightQueryError(reply, query, queryStart);
+            /// highlight that position in the editor -- only while the launching tab is still the
+            /// active one (the shared editor shows ITS text; a background run must never paint the
+            /// foreground editor) and the user has not returned to the editor since this run
+            /// started (any interaction, including a tab switch's synthetic editor restore, bumps
+            /// the generation past this run's snapshot and makes the response stale).
+            if (tab.id === activeTabId && editorInteractionGen === tab.runEditorInteraction) {
+                highlightQueryError(reply, query, queryStart, tab);
             }
 
             return { format, reply, response_ok: false, is_table, is_raw, is_chart, is_image, is_error };
@@ -5863,6 +5866,8 @@ function tabRuntimeDefaults() {
         downloadVisible: false, /// whether the download / copy buttons apply to this tab
         copyVisible: false,
         launchQuery: undefined, /// editor text snapshotted when this tab's run was launched (see `saveHistory`)
+        runEditorInteraction: 0,  /// `editorInteractionGen` snapshot at this tab's run launch (see `beginFlight`)
+        queryErrorOwnerStart: -1, /// editor offset of the statement owning the error marker in this tab's run, or -1
         barEl: null,            /// cached tab-bar row + indicator nodes (see renderTabBar/updateTabIndicator)
         spinnerEl: null,
         checkEl: null,
@@ -6731,6 +6736,19 @@ function beginFlight(tab, launchInteractionGen) {
     /// once the bar is already shown), and in that case there is a single tab, so no background
     /// tab's spinner animation is reset by the rebuild.
     if (tab_bar_elem.hidden) renderTabBar();
+    /// New run: no statement of it has claimed the editor's error marker yet, scoping the
+    /// arbitration in `highlightQueryError` to this run. Both error-marker fields live on the
+    /// TAB, and are (re)set for a background launch too: runs execute concurrently across tabs,
+    /// and as globals whichever run began last would overwrite the others' arbitration state,
+    /// letting a background tab's late error claim — or suppress — the foreground editor's marker.
+    tab.queryErrorOwnerStart = -1;
+    /// Install the launch-time editor-interaction snapshot. A late error response is only allowed
+    /// to paint a highlight if the user has not returned to the editor since this run was launched
+    /// (a tab switch bumps the generation too, via the synthetic events of the editor restore).
+    /// The keystroke or click that triggered the run has already bumped the generation (the
+    /// textarea's own handlers run before the document-level run trigger), so it is included in
+    /// the snapshot; an edit made during the preflight await bumps past it and disarms the paint.
+    tab.runEditorInteraction = launchInteractionGen;
     if (tab.id === activeTabId) {
         document.getElementById('run').innerText = 'Stop';
         document.getElementById('run-all').style.display = 'none';
@@ -6738,15 +6756,6 @@ function beginFlight(tab, launchInteractionGen) {
         closeCompletions();
         /// Drop any previous syntax-error highlight; a fresh error (if any) will be set on failure.
         clearQueryError();
-        /// New run: no statement has claimed the error marker yet. With this reset in place, the
-        /// arbitration in `highlightQueryError` is scoped to one run (see `queryErrorOwnerStart`).
-        queryErrorOwnerStart = -1;
-        /// Install the launch-time editor-interaction snapshot. A late error response is only allowed
-        /// to paint a highlight if the user has not returned to the editor since this run was launched.
-        /// The keystroke or click that triggered the run has already bumped the generation (the
-        /// textarea's own handlers run before the document-level run trigger), so it is included in
-        /// the snapshot; an edit made during the preflight await bumps past it and disarms the paint.
-        runEditorInteraction = launchInteractionGen;
     }
 }
 
@@ -6804,7 +6813,7 @@ async function postOne()
     ++activation_num;
     const my_run = ++tab.reqNum;
     /// Snapshot the editor-interaction generation at launch: `beginFlight` (deferred until the
-    /// preflight below has found something to run) installs it into `runEditorInteraction`.
+    /// preflight below has found something to run) installs it into the tab's `runEditorInteraction`.
     const launch_interaction = editorInteractionGen;
     document.body.scrollTo(0, 0);
 
@@ -7809,23 +7818,17 @@ let queryErrorPos = -1;
 /// `;`/whitespace token that happens to start there.
 let queryErrorAtEnd = false;
 
-/// Start offset (in the textarea) of the statement whose error currently owns the marker, or -1
-/// when no statement has claimed it in the current run. Several statements of one run can fail
-/// concurrently (`postMulti` executes parallelizable groups with `Promise.all`), but the editor has
-/// a single marker; without arbitration whichever error response arrived last would win, so the
-/// highlight would depend on response timing. Instead the leftmost failing statement wins
-/// deterministically (see the arbitration in `highlightQueryError`). Reset by `beginFlight` at run
-/// start.
-let queryErrorOwnerStart = -1;
-
 /// Monotonic counter bumped whenever the user returns to the editor (refocus, typing, caret
-/// movement, or a click inside it). `beginFlight` snapshots it into `runEditorInteraction` at run
-/// start; if it advances before the error response arrives, `postImpl` suppresses the (now stale)
-/// syntax-error highlight. Without this, a late error response could repaint the marker after the
-/// user has already resumed editing, because the clear handlers only remove an already-visible
-/// marker and would not fire again on their own.
+/// movement, or a click inside it — including the synthetic events a tab switch dispatches while
+/// restoring the editor). `beginFlight` snapshots it into the launching tab's
+/// `runEditorInteraction` at run start; if it advances before the error response arrives,
+/// `postImpl` suppresses the (now stale) syntax-error highlight. Without this, a late error
+/// response could repaint the marker after the user has already resumed editing, because the
+/// clear handlers only remove an already-visible marker and would not fire again on their own.
+/// The run-launch snapshot and the error-marker owner offset (`queryErrorOwnerStart`) are
+/// PER-TAB fields (see `tabRuntimeDefaults`): runs execute concurrently across tabs, so as
+/// globals whichever run began last would overwrite the arbitration state of the others.
 let editorInteractionGen = 0;
-let runEditorInteraction = 0;
 
 /// True only while `getQueryUnderCursor` performs its internal `query_area.focus()` to run a query.
 /// That programmatic refocus happens *after* `beginFlight` has snapshotted the generation, so if it
@@ -7894,8 +7897,10 @@ function byteOffsetToCharIndex(str, byteOffset) {
 /// position in the editor. `query` is the exact text that was sent to the server; the reported
 /// position is a 1-based byte offset into it, which we map back to the full textarea contents.
 /// `queryStart` is the absolute character offset in the textarea where `query` began when the run
-/// started (the caller captured it), used to disambiguate identical statements.
-function highlightQueryError(errorText, query, queryStart) {
+/// started (the caller captured it), used to disambiguate identical statements. `tab` is the tab
+/// the run was launched in (the caller has already verified it is still the active one); it holds
+/// the per-run marker-ownership state.
+function highlightQueryError(errorText, query, queryStart, tab) {
     if (typeof errorText !== 'string' || typeof query !== 'string') return;
 
     const match = errorText.match(/failed at position (\d+)/);
@@ -7925,8 +7930,10 @@ function highlightQueryError(errorText, query, queryStart) {
     /// error responses arrive in an arbitrary order. The leftmost failing statement wins
     /// deterministically: a response may take the marker only if no statement has claimed it yet
     /// in this run, or if its statement starts earlier in the editor than the current owner's.
-    if (queryErrorOwnerStart >= 0 && base >= queryErrorOwnerStart) return;
-    queryErrorOwnerStart = base;
+    /// The owner offset lives on the launching tab (reset by `beginFlight`), so the arbitration
+    /// is scoped to that tab's run and a concurrent run in another tab cannot interfere with it.
+    if (tab.queryErrorOwnerStart >= 0 && base >= tab.queryErrorOwnerStart) return;
+    tab.queryErrorOwnerStart = base;
 
     const charIndex = byteOffsetToCharIndex(query, byteOffset);
     const absolute = base + charIndex;
