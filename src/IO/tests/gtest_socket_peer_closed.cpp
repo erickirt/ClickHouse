@@ -138,7 +138,7 @@ struct TlsPair
         handshake();
     }
 
-    void handshake()
+    void handshake() const
     {
         for (int i = 0; i < 200; ++i)
         {
