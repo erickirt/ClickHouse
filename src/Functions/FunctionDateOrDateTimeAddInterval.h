@@ -208,11 +208,12 @@ struct AddSecondsImpl
     {
         return static_cast<UInt32>(static_cast<UInt64>(t) + static_cast<UInt64>(delta));
     }
-    static NO_SANITIZE_UNDEFINED DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
+    static DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
         // use default datetime64 scale
         static_assert(DataTypeDateTime64::default_scale == 3);
-        return (time_zone.fromDayNum(ExtendedDayNum(d)) + delta) * 1000;
+        // UInt64 domain: wraps by construction (see execute(UInt32) above).
+        return static_cast<Int64>((static_cast<UInt64>(time_zone.fromDayNum(ExtendedDayNum(d))) + static_cast<UInt64>(delta)) * 1000ULL);
     }
     static NO_SANITIZE_UNDEFINED Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
@@ -222,9 +223,9 @@ struct AddSecondsImpl
     {
         return static_cast<Int64>(d + delta);
     }
-    static NO_SANITIZE_UNDEFINED UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
+    static UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt32>(time_zone.fromDayNum(DayNum(d)) + delta);
+        return static_cast<UInt32>(static_cast<UInt64>(time_zone.fromDayNum(DayNum(d))) + static_cast<UInt64>(delta));
     }
     static DateTime64 execute(std::string_view s, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl & utc_time_zone, UInt16 scale)
     {
@@ -254,11 +255,12 @@ struct AddMinutesImpl
     {
         return static_cast<UInt32>(static_cast<UInt64>(t) + static_cast<UInt64>(delta) * 60);
     }
-    static NO_SANITIZE_UNDEFINED DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
+    static DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
         // use default datetime64 scale
         static_assert(DataTypeDateTime64::default_scale == 3);
-        return (time_zone.fromDayNum(ExtendedDayNum(d)) + delta * 60) * 1000;
+        // UInt64 domain: wraps by construction (see AddSecondsImpl).
+        return static_cast<Int64>((static_cast<UInt64>(time_zone.fromDayNum(ExtendedDayNum(d))) + static_cast<UInt64>(delta) * 60) * 1000ULL);
     }
     static NO_SANITIZE_UNDEFINED Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
@@ -268,9 +270,9 @@ struct AddMinutesImpl
     {
         return static_cast<Int64>(d + delta * 60);
     }
-    static NO_SANITIZE_UNDEFINED UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
+    static UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt32>(time_zone.fromDayNum(DayNum(d)) + delta * 60);
+        return static_cast<UInt32>(static_cast<UInt64>(time_zone.fromDayNum(DayNum(d))) + static_cast<UInt64>(delta) * 60);
     }
     static DateTime64 execute(std::string_view s, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl & utc_time_zone, UInt16 scale)
     {
@@ -300,11 +302,12 @@ struct AddHoursImpl
     {
         return static_cast<UInt32>(static_cast<UInt64>(t) + static_cast<UInt64>(delta) * 3600);
     }
-    static NO_SANITIZE_UNDEFINED DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
+    static DateTime64 execute(Int32 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
         // use default datetime64 scale
         static_assert(DataTypeDateTime64::default_scale == 3);
-        return (time_zone.fromDayNum(ExtendedDayNum(d)) + delta * 3600) * 1000;
+        // UInt64 domain: wraps by construction (see AddSecondsImpl).
+        return static_cast<Int64>((static_cast<UInt64>(time_zone.fromDayNum(ExtendedDayNum(d))) + static_cast<UInt64>(delta) * 3600) * 1000ULL);
     }
     static NO_SANITIZE_UNDEFINED Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
@@ -314,9 +317,9 @@ struct AddHoursImpl
     {
         return static_cast<Int64>(d + delta * 3600);
     }
-    static NO_SANITIZE_UNDEFINED UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
+    static UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
-        return static_cast<UInt32>(time_zone.fromDayNum(DayNum(d)) + delta * 3600);
+        return static_cast<UInt32>(static_cast<UInt64>(time_zone.fromDayNum(DayNum(d))) + static_cast<UInt64>(delta) * 3600);
     }
     static DateTime64 execute(std::string_view s, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl & utc_time_zone, UInt16 scale)
     {

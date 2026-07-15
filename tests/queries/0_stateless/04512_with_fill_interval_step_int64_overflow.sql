@@ -43,3 +43,16 @@ SELECT addMonths(toDate('2000-01-01'), 9223372036854775807);
 SELECT addMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), -9223372036854775808);
 SELECT addQuarters(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
 SELECT addQuarters(toDate('2000-01-01'), 9223372036854775807);
+-- getStepFunction allows sub-day interval kinds (SECOND/MINUTE/HOUR) on Date/Date32 when the interval
+-- is at least one day in seconds, and next() invokes the step lambda with jumps_count == 1, so a single
+-- huge STEP reaches the AddSecondsImpl/AddMinutesImpl/AddHoursImpl Date (UInt16) and Date32 (Int32)
+-- overloads immediately. Those did fromDayNum(d) + delta (and Date32 (... + delta) * 1000, delta * 60,
+-- delta * 3600) in signed Int64, which is UB on overflow. They now compute in the UInt64 domain like the
+-- UInt32/DateTime64 overloads. A WITH FILL query that triggers the overflow does not terminate (saturating
+-- step stalls the fill loop), so the fixed lines are exercised directly with an Int64-overflowing delta.
+SELECT addSeconds(toDate('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
+SELECT addSeconds(toDate32('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
+SELECT addMinutes(toDate('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
+SELECT addMinutes(toDate32('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
+SELECT addHours(toDate('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
+SELECT addHours(toDate32('2000-01-01'), 9223372036854775807) SETTINGS session_timezone = 'UTC';
