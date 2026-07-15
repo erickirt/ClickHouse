@@ -355,6 +355,12 @@ NamedCollectionPtr BackupInfo::getNamedCollection(ContextPtr context) const
     if (id_arg.empty())
         return nullptr;
 
+    if (frozen_named_collection)
+    {
+        context->checkAccess(AccessType::NAMED_COLLECTION, id_arg);
+        return frozen_named_collection;
+    }
+
     /// Load named collections (both from config and SQL-defined)
     NamedCollectionFactory::instance().loadIfNot();
 
@@ -386,6 +392,18 @@ NamedCollectionPtr BackupInfo::getNamedCollection(ContextPtr context) const
     }
 
     return collection;
+}
+
+BackupInfo BackupInfo::freezeNamedCollection(ContextPtr context) const
+{
+    if (id_arg.empty() || frozen_named_collection)
+        return *this;
+
+    BackupInfo res = *this;
+    auto collection = getNamedCollection(context);
+    /// `getNamedCollection` already returns a private copy when overrides are present.
+    res.frozen_named_collection = kv_args.empty() ? collection->duplicate() : std::move(collection);
+    return res;
 }
 
 }
