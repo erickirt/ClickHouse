@@ -4940,6 +4940,11 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     const query_start = performance.now();
     const el = tab.resultEl;
     const active = () => tab.id === activeTabId;
+    /// `history_query_text` is provided exactly when the run covered only PART of the launched
+    /// editor (one statement of a multi-statement text, under the cursor or selected); with it
+    /// absent, `query` IS the whole launched text. `saveHistory` needs this to decide whether the
+    /// entry may carry `run=1` (see the full-editor requirement there).
+    const ran_full_editor = history_query_text === undefined;
 
     tab.downloadVisible = false;
     tab.copyVisible = false;
@@ -4984,6 +4989,7 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
                 data: result.reply.length > 100000 ? compactFailureSnapshot(result.reply) : result.reply,
                 elapsed_ns: 1e6 * (performance.now() - query_start),
                 params: paramValuesSnapshot,
+                fullEditor: ran_full_editor,
             }, undefined, tab);
         }
         updateTabIndicator(tab);
@@ -5041,6 +5047,7 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
         data: result.reply.length > 100000 ? null : result.reply,
         elapsed_ns: el.elapsedNs,
         params: paramValuesSnapshot,
+        fullEditor: ran_full_editor,
     }, undefined, tab);
 }
 
@@ -5053,7 +5060,10 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
 /// `paramValuesSnapshot` and `connection` are captured by the caller before the lexer preflight
 /// await (see `postSingle`); every statement group of this run uses the same snapshot, so a
 /// connection edit mid-run cannot reroute the later groups to a different server or identity.
-async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText, connection)
+/// `ranFullEditor` says whether `parsed` covers EVERY statement of the launched editor ("Run all",
+/// or a selection spanning all statements) — only then may the history entry carry `run=1`,
+/// because its URL hash is the full editor text (see `saveHistory`).
+async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText, connection, ranFullEditor)
 {
     /// Per-run start time, as in `postSingle`: concurrent tabs must not share it.
     const query_start = performance.now();
@@ -5243,6 +5253,7 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
         multi: multi,
         elapsed_ns: tab.finalStats.elapsedNs,
         params: paramValuesSnapshot,
+        fullEditor: ranFullEditor,
     }, parsed[0].query, tab);
 }
 
@@ -6518,6 +6529,15 @@ function saveHistory(stateData, titleForDoc, tab) {
     /// is the launch-time snapshot the run actually executed with (same comparison as
     /// `tabReflectsRun` uses against `result.params`).
     const params_unchanged = JSON.stringify(tab.params || {}) === JSON.stringify(stateData.params || {});
+    /// The entry may be auto-runnable only when this run executed the FULL editor content its URL
+    /// hash will carry ("Run" on a single-statement editor, "Run all", or a selection spanning
+    /// every statement). A partial run — one statement of a multi-statement editor — writes the
+    /// whole editor into the hash, and stamping `run=1` on that would make a reload of a page
+    /// opened with `run=1` execute the statements the user deliberately did NOT run (e.g. running
+    /// just `SELECT 1` out of `SELECT 1; DROP TABLE t` must not produce a URL that replays the
+    /// `DROP`). The editor-only writers already enforce this via `tabReflectsRun`, whose
+    /// `result.query` comparison fails for a partial run; this is the same rule for the run path.
+    const full_editor_run = stateData.fullEditor === true;
     tab.result = {
         ran: true,   /// marks a genuine run; the tab bar's visibility keys off this
         /// The single statement that produced this result (in multi-query mode it differs
@@ -6541,8 +6561,9 @@ function saveHistory(stateData, titleForDoc, tab) {
         /// re-runs it). Editor-only writers (`syncHistory`/`refreshCurrentHistoryEntry`) never do.
         /// When the draft diverged from the launch text OR its parameters diverged from the ones
         /// the run executed with, the entry carries an UNRUN draft, which must never be
-        /// auto-runnable (see `writeHistoryEntry` on the `run=1` invariant).
-        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged && params_unchanged);
+        /// auto-runnable (see `writeHistoryEntry` on the `run=1` invariant). A partial run of a
+        /// multi-statement editor is equally not auto-runnable (see `full_editor_run` above).
+        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged && params_unchanged && full_editor_run);
     } else {
         /// Background run finished: reflect its new result in the tab bar and persist it, without
         /// disturbing the active tab's URL/history entry.
@@ -6842,7 +6863,10 @@ async function postOne()
 
             beginFlight(tab, launch_interaction);
             if (selected.length > 1) {
-                await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text, connection);
+                /// The run covered the whole editor only when the selection spanned EVERY
+                /// statement; only such an entry may keep `run=1` (see `saveHistory`).
+                await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text, connection,
+                                /*ranFullEditor=*/ selected.length === parsed.length);
             } else {
                 await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart, connection);
             }
@@ -6911,7 +6935,7 @@ async function postAll()
 
     if (parsed.length > 1) {
         beginFlight(tab, launch_interaction);
-        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text, connection);
+        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text, connection, /*ranFullEditor=*/ true);
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
