@@ -591,6 +591,9 @@ void DataPartStorageOnDiskPacked::undoTransaction()
 
     transaction->undo();
     transaction.reset();
+    /// Release the writer as the commit paths do; otherwise beginTransaction's `transaction || writer`
+    /// guard would reject the next transaction on this same live storage after a non-precommitted undo.
+    writer.reset();
     is_precommitted = false;
 }
 #endif
