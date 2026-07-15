@@ -29,7 +29,7 @@ namespace
 
 /// An explicit cartesian join or a join without any `ON`/`USING` clause matches unconditionally.
 /// The old analyzer encodes constant-false `JOIN ON` as a keyless join that still has its `ON` expression,
-/// so everything else defaults to false. The new analyzer passes the value explicitly.
+/// so everything else defaults to false. The analyzer passes the value explicitly.
 bool computeConstantPredicateValue(const TableJoin & table_join)
 {
     if (auto join_expression_value = table_join.getJoinExpressionValue())
