@@ -1001,6 +1001,10 @@ def populate_data(port):
         print(f"populate_data: server {port} already populated, skipping")
         return
     Shell.check(f'{client} --query "CREATE DATABASE IF NOT EXISTS test"', strict=True, verbose=True)
+    # Scope: only the hits datasets are rebuilt (they back the bulk of the
+    # suite, including clickbench). The other attached datasets (tpch, tpcds,
+    # values) still read their frozen tarball parts, so write-time defaults are
+    # not yet exercised on those workloads.
     rebuild_table(port, "default.hits_10m_single", "default.hits_10m_single")
     rebuild_table(port, "default.hits_100m_single", "default.hits_100m_single")
     rebuild_table(port, "datasets.hits_v1", "test.hits")
