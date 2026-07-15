@@ -10,9 +10,9 @@ skewPop int exact	1	1	1	1
 skewPop f64 approx	1	1	1
 skewSamp int exact	1	1	1	1
 skewSamp f64 approx	1	1	1
-kurtPop int exact	0	1	0	1
+kurtPop int exact	1	1	1	1
 kurtPop f64 approx	1	1	1
-kurtSamp int exact	0	1	0	1
+kurtSamp int exact	1	1	1	1
 kurtSamp f64 approx	1	1	1
 covarPop int exact	1	1	1	1
 covarPop f64 approx	1	1	1

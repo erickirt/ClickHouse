@@ -153,18 +153,21 @@ FROM
         (SELECT skewSampIfMerge(s) FROM (SELECT skewSampIfState(vn, c) AS s FROM (SELECT number, toFloat64(cityHash64(number, 1) % 1000) / 8 AS v, toFloat64(toInt64(cityHash64(number, 2) % 1000) - 500) / 4 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r2
 );
 
+-- Unlike the other moments, kurtosis accumulates a sum of 4th powers, so the values are kept
+-- under 100: with `% 1000` the sum reaches ~1.4e16 and exceeds 2^53, making it inexact and thus
+-- dependent on summation order (block size, thread count), which is randomized across CI runs.
 SELECT 'kurtPop int exact', d0 = r0, d1 = r1, d2 = r2, d3 = r3
 FROM
 (
     SELECT
-        (SELECT kurtPop(v) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d0,
-        (SELECT kurtPopMerge(s) FROM (SELECT kurtPopState(v) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r0,
-        (SELECT kurtPopIf(v, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d1,
-        (SELECT kurtPopIfMerge(s) FROM (SELECT kurtPopIfState(v, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r1,
-        (SELECT kurtPop(vn) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d2,
-        (SELECT kurtPopMerge(s) FROM (SELECT kurtPopState(vn) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r2,
-        (SELECT kurtPopIf(vn, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d3,
-        (SELECT kurtPopIfMerge(s) FROM (SELECT kurtPopIfState(vn, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r3
+        (SELECT kurtPop(v) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d0,
+        (SELECT kurtPopMerge(s) FROM (SELECT kurtPopState(v) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r0,
+        (SELECT kurtPopIf(v, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d1,
+        (SELECT kurtPopIfMerge(s) FROM (SELECT kurtPopIfState(v, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r1,
+        (SELECT kurtPop(vn) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d2,
+        (SELECT kurtPopMerge(s) FROM (SELECT kurtPopState(vn) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r2,
+        (SELECT kurtPopIf(vn, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d3,
+        (SELECT kurtPopIfMerge(s) FROM (SELECT kurtPopIfState(vn, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r3
 );
 SELECT 'kurtPop f64 approx', abs(d0 - r0) <= 1e-9 * greatest(abs(d0), abs(r0), 1e-30), abs(d1 - r1) <= 1e-9 * greatest(abs(d1), abs(r1), 1e-30), abs(d2 - r2) <= 1e-9 * greatest(abs(d2), abs(r2), 1e-30)
 FROM
@@ -178,18 +181,19 @@ FROM
         (SELECT kurtPopIfMerge(s) FROM (SELECT kurtPopIfState(vn, c) AS s FROM (SELECT number, toFloat64(cityHash64(number, 1) % 1000) / 8 AS v, toFloat64(toInt64(cityHash64(number, 2) % 1000) - 500) / 4 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r2
 );
 
+-- Values kept under 100 so that the sum of 4th powers stays exact, see `kurtPop int exact` above.
 SELECT 'kurtSamp int exact', d0 = r0, d1 = r1, d2 = r2, d3 = r3
 FROM
 (
     SELECT
-        (SELECT kurtSamp(v) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d0,
-        (SELECT kurtSampMerge(s) FROM (SELECT kurtSampState(v) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r0,
-        (SELECT kurtSampIf(v, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d1,
-        (SELECT kurtSampIfMerge(s) FROM (SELECT kurtSampIfState(v, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r1,
-        (SELECT kurtSamp(vn) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d2,
-        (SELECT kurtSampMerge(s) FROM (SELECT kurtSampState(vn) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r2,
-        (SELECT kurtSampIf(vn, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d3,
-        (SELECT kurtSampIfMerge(s) FROM (SELECT kurtSampIfState(vn, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 1000) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r3
+        (SELECT kurtSamp(v) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d0,
+        (SELECT kurtSampMerge(s) FROM (SELECT kurtSampState(v) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r0,
+        (SELECT kurtSampIf(v, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d1,
+        (SELECT kurtSampIfMerge(s) FROM (SELECT kurtSampIfState(v, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r1,
+        (SELECT kurtSamp(vn) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d2,
+        (SELECT kurtSampMerge(s) FROM (SELECT kurtSampState(vn) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r2,
+        (SELECT kurtSampIf(vn, c) FROM (SELECT toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000))) AS d3,
+        (SELECT kurtSampIfMerge(s) FROM (SELECT kurtSampIfState(vn, c) AS s FROM (SELECT number, toUInt32(cityHash64(number, 1) % 100) AS v, toInt64(cityHash64(number, 2) % 1000) - 500 AS w, cityHash64(number, 42) % 2 = 0 AS c, if(cityHash64(number, 7) % 4 = 0, NULL, v) AS vn FROM numbers(70000)) GROUP BY cityHash64(number, 99) % 97)) AS r3
 );
 SELECT 'kurtSamp f64 approx', abs(d0 - r0) <= 1e-9 * greatest(abs(d0), abs(r0), 1e-30), abs(d1 - r1) <= 1e-9 * greatest(abs(d1), abs(r1), 1e-30), abs(d2 - r2) <= 1e-9 * greatest(abs(d2), abs(r2), 1e-30)
 FROM
