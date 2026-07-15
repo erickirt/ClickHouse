@@ -2338,7 +2338,7 @@ static void validateTableDisk(const DiskPtr & disk)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "MergeTree settings `table_disk` is not supported for non-ObjectStorage disks");
 
     const auto metadata_storage = disk->getMetadataStorage();
-    if (!metadata_storage->isPlain() && !metadata_storage->isReadOnly())
+    if (!metadata_storage->supportsTableDisk())
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "MergeTree settings `table_disk` is not supported for {}", description.toString());
 }
 

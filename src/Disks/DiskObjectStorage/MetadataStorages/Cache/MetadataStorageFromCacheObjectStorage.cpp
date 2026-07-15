@@ -179,6 +179,11 @@ bool MetadataStorageFromCacheObjectStorage::isPlain() const
     return underlying->isPlain();
 }
 
+bool MetadataStorageFromCacheObjectStorage::supportsTableDisk() const
+{
+    return underlying->supportsTableDisk();
+}
+
 bool MetadataStorageFromCacheObjectStorage::isWriteOnce() const
 {
     return underlying->isWriteOnce();

@@ -284,6 +284,15 @@ public:
         return false;
     }
 
+    /// True when the MergeTree setting `table_disk = true` is allowed: the metadata is reconstructable from the disk
+    /// with no per-server local mutable state. This is a property of the metadata kind, not of the runtime
+    /// `isReadOnly` bit: for `Local` metadata `isReadOnly` follows the filesystem, so gating on it would silently
+    /// accept a `Local` disk that uses the no-op `refresh` and can never see parts written by another server.
+    virtual bool supportsTableDisk() const
+    {
+        return false;
+    }
+
     virtual bool isWriteOnce() const
     {
         return false;

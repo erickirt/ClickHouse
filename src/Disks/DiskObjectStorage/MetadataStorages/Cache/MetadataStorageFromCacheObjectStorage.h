@@ -65,6 +65,7 @@ public:
     bool isReadOnly() const override;
     bool isTransactional() const override;
     bool isPlain() const override;
+    bool supportsTableDisk() const override;
     bool isWriteOnce() const override;
     bool supportWritingWithAppend() const override;
 
