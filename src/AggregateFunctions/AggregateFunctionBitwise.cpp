@@ -156,7 +156,7 @@ private:
             /// For wide integers only a mask built with memset is vectorized.
             for (size_t i = row_begin; i < row_end; ++i)
             {
-                T keep_mask;
+                T keep_mask; /// NOLINT(cppcoreguidelines-pro-type-member-init,hicpp-member-init) - fully assigned by the memset below
                 std::memset(&keep_mask, -static_cast<int>(!condition_map[i] == add_if_zero), sizeof(T));
                 local.updateMasked(ptr[i], keep_mask);
             }
