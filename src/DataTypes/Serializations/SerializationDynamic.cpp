@@ -26,6 +26,34 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
+namespace
+{
+
+/// Reserving `num_types` elements for a list of Dynamic's nested types read from a (possibly
+/// untrusted, e.g. Native format) stream: a corrupted `num_types` close to SIZE_MAX makes
+/// `std::vector::reserve` throw an uncaught `std::length_error` instead of a normal
+/// DB::Exception. Convert that into an informative, catchable error.
+template <typename Container>
+void reserveOrThrowTooManyTypes(Container & container, size_t reserve_count, size_t num_types_to_report)
+{
+    try
+    {
+        container.reserve(reserve_count);
+    }
+    catch (const std::length_error &)
+    {
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Dynamic column has too many types: {}", num_types_to_report);
+    }
+}
+
+template <typename Container>
+void reserveOrThrowTooManyTypes(Container & container, size_t num_types)
+{
+    reserveOrThrowTooManyTypes(container, num_types, num_types);
+}
+
+}
+
 UInt128 SerializationDynamic::getHash(size_t max_dynamic_types_, const SerializationInfoSettings & serialization_info_settings_)
 {
     SipHash hash;
@@ -352,7 +380,7 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationDynamic::deserializeD
             /// Read the flattened list of types.
             size_t num_types = 0;
             readVarUInt(num_types, *structure_stream);
-            structure_state->flattened_data_types.reserve(num_types);
+            reserveOrThrowTooManyTypes(structure_state->flattened_data_types, num_types);
             String data_type_name;
             for (size_t i = 0; i != num_types; ++i)
             {
@@ -380,7 +408,8 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationDynamic::deserializeD
             /// Read information about variants.
             DataTypes variants;
             readVarUInt(structure_state->num_dynamic_types, *structure_stream);
-            variants.reserve(structure_state->num_dynamic_types + 1); /// +1 for shared variant.
+            /// +1 for shared variant.
+            reserveOrThrowTooManyTypes(variants, structure_state->num_dynamic_types + 1, structure_state->num_dynamic_types);
             if ((settings.native_format && settings.format_settings && settings.format_settings->native.decode_types_in_binary_format) || structure_state->structure_version.value == SerializationVersion::V3)
             {
                 /// Native input carries the effective limit via format_settings; a V3 part read has none and decodes unlimited.
