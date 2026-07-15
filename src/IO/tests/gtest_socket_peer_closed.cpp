@@ -16,6 +16,8 @@
 #include <fcntl.h>
 #endif
 
+using DB::SocketState;
+using DB::getSocketState;
 using DB::isSocketPeerClosed;
 
 namespace
@@ -44,6 +46,8 @@ struct SocketPair
 TEST(SocketPeerClosed, AliveNoData)
 {
     SocketPair p;
+    EXPECT_EQ(SocketState::Idle, getSocketState(p.fds[0]));
+    EXPECT_EQ(SocketState::Idle, getSocketState(p.fds[1]));
     EXPECT_FALSE(isSocketPeerClosed(p.fds[0]));
     EXPECT_FALSE(isSocketPeerClosed(p.fds[1]));
 }
@@ -53,7 +57,9 @@ TEST(SocketPeerClosed, DataPending)
     SocketPair p;
     const char payload = 'x';
     ASSERT_EQ(1, ::send(p.fds[1], &payload, 1, 0));
-    /// Bytes are waiting on fds[0]: the connection is alive, not closed.
+    /// Bytes are waiting on fds[0]: the connection is alive, not closed, but not idle either -
+    /// a connection pool must not reuse it.
+    EXPECT_EQ(SocketState::DataPending, getSocketState(p.fds[0]));
     EXPECT_FALSE(isSocketPeerClosed(p.fds[0]));
 }
 
@@ -62,6 +68,7 @@ TEST(SocketPeerClosed, PeerClosed)
     SocketPair p;
     ::close(p.fds[1]);
     p.fds[1] = -1;
+    EXPECT_EQ(SocketState::Closed, getSocketState(p.fds[0]));
     EXPECT_TRUE(isSocketPeerClosed(p.fds[0]));
 }
 
@@ -72,22 +79,27 @@ TEST(SocketPeerClosed, ClosedWithPendingDataThenDrain)
     ASSERT_EQ(1, ::send(p.fds[1], &payload, 1, 0));
     ::close(p.fds[1]);
     p.fds[1] = -1;
-    /// Data is still buffered: a read would return it, not EOF, so report alive.
+    /// Data is still buffered: a read would return it, not EOF, so the peer does not read as
+    /// closed yet - but the pending data alone disqualifies the connection from reuse.
+    EXPECT_EQ(SocketState::DataPending, getSocketState(p.fds[0]));
     EXPECT_FALSE(isSocketPeerClosed(p.fds[0]));
     char tmp = 0;
     ASSERT_EQ(1, ::recv(p.fds[0], &tmp, 1, 0));
     /// Buffer drained, only the FIN remains, so report closed.
+    EXPECT_EQ(SocketState::Closed, getSocketState(p.fds[0]));
     EXPECT_TRUE(isSocketPeerClosed(p.fds[0]));
 }
 
 TEST(SocketPeerClosed, InvalidFd)
 {
+    EXPECT_EQ(SocketState::Closed, getSocketState(-1));
     EXPECT_TRUE(isSocketPeerClosed(-1));
 }
 
 
 #if USE_SSL
 
+using DB::getSslSocketState;
 using DB::isSslPeerClosed;
 
 namespace
@@ -168,17 +180,19 @@ struct TlsPair
 
 }
 
-/// A live secure connection with nothing (or only post-handshake tickets) pending reads as alive.
+/// A live secure connection with nothing (or only post-handshake tickets) pending reads as idle.
 TEST(SocketPeerClosed, SecureAliveIdle)
 {
     EphemeralCert cert;
     TlsPair p(cert);
+    EXPECT_EQ(SocketState::Idle, getSslSocketState(p.client));
     EXPECT_FALSE(isSslPeerClosed(p.client));
 }
 
 /// A post-handshake session ticket - the record that made the old `poll` + `available()` check
-/// misfire - must be treated as a live connection, not a closed one.
-TEST(SocketPeerClosed, SecureSessionTicketIsAlive)
+/// misfire - must be treated as a live *idle* connection: not closed, and not pending data either,
+/// so a connection pool keeps reusing it.
+TEST(SocketPeerClosed, SecureSessionTicketIsIdle)
 {
     EphemeralCert cert;
     TlsPair p(cert);
@@ -197,12 +211,15 @@ TEST(SocketPeerClosed, SecureSessionTicketIsAlive)
     char c = 0;
     const ssize_t peeked = ::recv(p.fds[1], &c, 1, MSG_PEEK | MSG_DONTWAIT);
     ASSERT_GT(peeked, 0);
-    /// ... but it is a session ticket, so the connection is alive.
+    /// ... but it is a session ticket, so the connection is alive and idle.
+    EXPECT_EQ(SocketState::Idle, getSslSocketState(p.client));
     EXPECT_FALSE(isSslPeerClosed(p.client));
 }
 
-/// Pending application data reads as alive and is not consumed by the check.
-TEST(SocketPeerClosed, SecureAppDataIsAliveAndNotConsumed)
+/// Pending application data reads as alive-but-not-idle and is not consumed by the check.
+/// For a pooled connection this means "do not reuse": the unread bytes would be misparsed by the
+/// next borrower as the response to its own request.
+TEST(SocketPeerClosed, SecureAppDataIsPendingAndNotConsumed)
 {
     EphemeralCert cert;
     TlsPair p(cert);
@@ -210,6 +227,7 @@ TEST(SocketPeerClosed, SecureAppDataIsAliveAndNotConsumed)
     const char payload = 'x';
     ASSERT_EQ(1, SSL_write(p.server, &payload, 1));
 
+    EXPECT_EQ(SocketState::DataPending, getSslSocketState(p.client));
     EXPECT_FALSE(isSslPeerClosed(p.client));
 
     /// The application byte is still there to be read.
@@ -229,8 +247,10 @@ TEST(SocketPeerClosed, SecureCloseNotifyIsClosed)
     SSL_shutdown(p.server);   /// Sends `close_notify`.
 
     /// The raw file-descriptor check misfires here (the alert looks like unread data), ...
+    EXPECT_EQ(SocketState::DataPending, getSocketState(p.fds[1]));
     EXPECT_FALSE(isSocketPeerClosed(p.fds[1]));
     /// ... while the TLS-aware check correctly reports the connection as closed.
+    EXPECT_EQ(SocketState::Closed, getSslSocketState(p.client));
     EXPECT_TRUE(isSslPeerClosed(p.client));
 }
 
@@ -243,6 +263,7 @@ TEST(SocketPeerClosed, SecureAbruptCloseIsClosed)
     ::close(p.fds[0]);
     p.fds[0] = -1;
 
+    EXPECT_EQ(SocketState::Closed, getSslSocketState(p.client));
     EXPECT_TRUE(isSslPeerClosed(p.client));
 }
 

@@ -840,8 +840,12 @@ private:
             connection.socket().setSendBufferSize(static_cast<int>(buf_sizes.sndbuf));
     }
 
-    /// Detect connections that have been silently closed by the remote end, so the next request on
-    /// this connection would fail with "No message received" (NoMessageException).
+    /// Detect connections that are not safe to hand out again: ones the remote end has silently
+    /// closed (the next request would fail with "No message received", NoMessageException), and
+    /// ones with unread data pending. An idle keep-alive connection must have nothing to read;
+    /// pending bytes are an unsolicited response (e.g. a queued `408 Request Timeout` a server
+    /// sends before closing an idle connection) that the next borrower would misparse as the
+    /// response to its own request.
     ///
     /// The previous check reported the connection stale whenever `poll(SELECT_READ, 0)` found it
     /// readable, on the assumption that an idle keep-alive connection has no data pending. On a
@@ -849,13 +853,15 @@ private:
     /// `poll` reflects the raw TCP socket, so an unread TLS post-handshake record (a session ticket
     /// or `KeyUpdate`) makes an entirely live secure connection look readable, i.e. stale, and the
     /// pool discards it and reconnects - at the cost of a fresh TLS handshake - on nearly every
-    /// borrow. `isSocketPeerClosed` is TLS-aware: it uses `SSL_peek` on a secure socket to tell a
-    /// real close (a FIN or a `close_notify`) apart from a harmless post-handshake record.
+    /// borrow. `getSocketState` is TLS-aware: it uses `SSL_peek` on a secure socket to tell real
+    /// application data (`DataPending`) and a real close (a FIN or a `close_notify`, `Closed`)
+    /// apart from a harmless post-handshake record (`Idle`). Anything but `Idle` is stale - the
+    /// same behavior as `poll` on a plain socket, without the TLS false positive.
     static bool isStale(Session & connection)
     {
         try
         {
-            return DB::isSocketPeerClosed(connection.socket());
+            return DB::getSocketState(connection.socket()) != DB::SocketState::Idle;
         }
         catch (const Poco::Exception &)
         {
