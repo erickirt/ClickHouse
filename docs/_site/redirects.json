@@ -1565,6 +1565,10 @@
     "destination": "/products/cloud/features/cloud-tiers"
   },
   {
+    "source": "/cloud/manage/clickstack",
+    "destination": "/products/cloud/features/sql-console-features/hyperdx"
+  },
+  {
     "source": "/cloud/manage/cmek",
     "destination": "/products/cloud/guides/security/cmek"
   },
@@ -40431,6 +40435,10 @@
   {
     "source": "/sql-reference/table-functions/dictionary",
     "destination": "/reference/functions/table-functions/dictionary"
+  },
+  {
+    "source": "/sql-reference/table-functions/eval",
+    "destination": "/reference/functions/table-functions/eval"
   },
   {
     "source": "/sql-reference/table-functions/file",

@@ -676,6 +676,7 @@
             "reference/functions/table-functions/deltalakeCluster",
             "reference/functions/table-functions/dictionary",
             "reference/functions/table-functions/executable",
+            "reference/functions/table-functions/eval",
             "reference/functions/table-functions/file",
             "reference/functions/table-functions/fileCluster",
             "reference/functions/table-functions/filesystem",
