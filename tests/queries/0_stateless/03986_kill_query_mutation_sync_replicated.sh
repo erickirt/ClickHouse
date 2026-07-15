@@ -10,8 +10,17 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 query_id="kill_query_mutation_sync_${CLICKHOUSE_DATABASE}_$RANDOM"
 alter_stderr="${CLICKHOUSE_TMP}/kill_query_mutation_sync_${CLICKHOUSE_DATABASE}_$RANDOM.stderr"
 
+alter_pid=""
+
 cleanup()
 {
+    # Cancel the foreground ALTER first: if a pre-kill guard failed (wait_for_query_to_start timed out,
+    # or the mutation never became in-flight) we exit before the KILL QUERY below, so kill it here and
+    # reap the background client. Otherwise a fast "exit 1" leaves the ALTER running into later tests
+    # (clickhouse-test only force-kills the test process group on timeout, and non-interactive bash does
+    # not reap background jobs on exit).
+    $CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "KILL QUERY WHERE query_id = '$query_id'" >/dev/null 2>&1 || true
+    [ -n "$alter_pid" ] && wait "$alter_pid" 2>/dev/null
     $CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "KILL MUTATION WHERE database = '${CLICKHOUSE_DATABASE}' AND table = 't_kill_mutation'" >/dev/null 2>&1 || true
     $CLICKHOUSE_CURL -sS "$CLICKHOUSE_URL" -d "DROP TABLE IF EXISTS ${CLICKHOUSE_DATABASE}.t_kill_mutation SYNC" >/dev/null 2>&1 || true
     rm -f "$alter_stderr"
