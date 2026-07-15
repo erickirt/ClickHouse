@@ -5,6 +5,7 @@
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/PreparedSets.h>
 #include <Processors/QueryPlan/CreatingSetsStep.h>
+#include <Processors/QueryPlan/DistinctStep.h>
 #include <Processors/QueryPlan/ExpressionStep.h>
 #include <Processors/QueryPlan/FilterStep.h>
 #include <Processors/QueryPlan/InputSelectorStep.h>
@@ -404,8 +405,25 @@ void optimizeLazyFinal(const Stack & stack, QueryPlan & query_plan, QueryPlan::N
     for (size_t i = stack.size() - 1; i-- > 0;)
     {
         auto * step = stack[i].node->step.get();
-        if (typeid_cast<ExpressionStep *>(step) || typeid_cast<FilterStep *>(step))
+        if (const auto * expression_step = typeid_cast<ExpressionStep *>(step))
+        {
+            /// arrayJoin changes the number of rows, a limit above it is not comparable to selected_rows.
+            if (expression_step->getExpression().hasArrayJoin())
+                break;
             continue;
+        }
+        if (const auto * filter_step_above = typeid_cast<FilterStep *>(step))
+        {
+            if (filter_step_above->getExpression().hasArrayJoin())
+                break;
+            continue;
+        }
+        /// DISTINCT stops reading as soon as its pushed-down limit hint of distinct rows is produced.
+        if (const auto * distinct_step = typeid_cast<DistinctStep *>(step))
+        {
+            limit_above_reading = distinct_step->getLimitHint();
+            break;
+        }
         if (const auto * limit_step = typeid_cast<LimitStep *>(step))
         {
             size_t limit = limit_step->getLimit();

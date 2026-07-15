@@ -4,6 +4,9 @@ read-in-order, limit:	0
 small limit:	0
 large limit:	1
 limit above full sort:	1
+distinct with limit:	0
+distinct without limit:	1
+limit above arrayJoin:	1
 0	7	updated
 1	7	updated
 2	7	updated

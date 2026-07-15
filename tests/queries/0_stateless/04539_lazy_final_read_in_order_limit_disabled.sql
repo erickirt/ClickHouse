@@ -35,6 +35,19 @@ FROM (EXPLAIN SELECT k FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 1000000);
 SELECT 'limit above full sort:', countIf(explain LIKE '%InputSelector%') > 0
 FROM (EXPLAIN SELECT k FROM t_lazy_final_gates FINAL WHERE v = 7 ORDER BY s LIMIT 10);
 
+-- DISTINCT with a pushed-down limit hint stops reading early: lazy FINAL must be disabled.
+SELECT 'distinct with limit:', countIf(explain LIKE '%InputSelector%') > 0
+FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 5);
+
+-- DISTINCT without a limit consumes the whole stream: lazy FINAL applies.
+SELECT 'distinct without limit:', countIf(explain LIKE '%InputSelector%') > 0
+FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7);
+
+-- arrayJoin changes the number of rows, so a limit above it is not comparable to the
+-- number of selected rows: lazy FINAL applies.
+SELECT 'limit above arrayJoin:', countIf(explain LIKE '%InputSelector%') > 0
+FROM (EXPLAIN SELECT arrayJoin([k, k]) FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 10);
+
 -- The results must be the same with and without the optimization.
 SELECT k, v, s FROM t_lazy_final_gates FINAL WHERE v = 7 ORDER BY k LIMIT 5;
 SELECT k, v, s FROM t_lazy_final_gates FINAL WHERE v = 7 ORDER BY k LIMIT 5
