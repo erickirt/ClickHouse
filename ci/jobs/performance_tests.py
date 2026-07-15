@@ -960,8 +960,15 @@ def rebuild_table(port, source, destination):
     # EXCHANGE TABLES is not available).
     client = _perf_client(port)
     if Shell.get_output(f'{client} --query "EXISTS TABLE {source}"').strip() != "1":
-        print(f"rebuild_table: source {source} not attached, skipping")
-        return
+        # A missing source is only expected for the cross-name rebuild
+        # (datasets.hits_v1 -> test.hits) retried after a previous run already
+        # built the destination and dropped the source. Everywhere else a
+        # missing source means the dataset failed to attach: fail closed, so the
+        # completion marker is never written for a table that was not rebuilt.
+        if source != destination and Shell.get_output(f'{client} --query "EXISTS TABLE {destination}"').strip() == "1":
+            print(f"rebuild_table: {source} already consumed into {destination}, skipping")
+            return
+        raise RuntimeError(f"rebuild_table: source {source} is not attached")
     insert_settings = "enable_filesystem_cache_on_write_operations=0, max_insert_threads=16"
     target = f"{destination}_rebuild" if source == destination else destination
     # Drop any leftover target from an interrupted previous run before rebuilding.
