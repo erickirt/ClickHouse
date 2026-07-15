@@ -41,21 +41,6 @@ bool computeConstantPredicateValue(const TableJoin & table_join)
 
 }
 
-size_t ConstantJoin::StoredBlock::allocatedBytes() const
-{
-    /// Stored columns always hold exactly `rows` rows; blocks that carry only a row count have no columns.
-    chassert(columns_info.columns.empty() || columns_info.columns.front()->size() == rows);
-
-    if (rows == 0)
-        return 0;
-
-    size_t res = 0;
-    for (const auto & column : columns_info.columns)
-        res += column->allocatedBytes();
-
-    return res;
-}
-
 ConstantJoin::ConstantJoin(std::shared_ptr<TableJoin> table_join_, SharedHeader right_sample_block_, bool any_take_last_row_)
     : table_join(std::move(table_join_))
     , tmp_data(table_join->getTempDataOnDisk())
@@ -176,7 +161,7 @@ ConstantJoin::OutputPlan ConstantJoin::makeOutputPlan(JoinKind kind, JoinStrictn
 
     /// The stored right blocks feed only the cartesian matched output and the unmatched-right padding; when
     /// neither can ever read them, store nothing. The selected-right-row modes keep their one row separately
-    /// in `selected_right_columns_info`, so beyond it only the right-side row count (`total_rows_to_join`)
+    /// in `selected_right_row`, so beyond it only the right-side row count (`total_rows_to_join`)
     /// can still affect the output.
     const bool matched_output_reads_stored_rows = constant_predicate_value
         && plan.left_rows_to_join != LeftRowsToJoin::None
@@ -228,9 +213,10 @@ bool ConstantJoin::addBlockToJoin(const Block & source_block, size_t num_rows, b
     {
         /// The selected right row lives outside the stored blocks: the first row is captured once, while
         /// `select_last_right_row` keeps replacing it with the freshest one.
-        if (plan.select_last_right_row || !selected_right_columns_info)
-            selected_right_columns_info.emplace(
-                block_to_save.cloneWithCutColumns(plan.select_last_right_row ? rows - 1 : 0, 1).getColumns());
+        if (plan.select_last_right_row || !selected_right_row)
+            selected_right_row.emplace(
+                block_to_save.cloneWithCutColumns(plan.select_last_right_row ? rows - 1 : 0, 1).getColumns(),
+                ScatteredBlock::Selector(1));
     }
 
     if (!plan.store_right_rows)
@@ -286,7 +272,7 @@ void ConstantJoin::storeRightBlock(Block block_to_save, size_t rows)
     }
 
     doDebugAsserts();
-    right_blocks.emplace_back(ColumnsInfo(block_to_save.getColumns()), rows);
+    right_blocks.emplace_back(block_to_save.getColumns(), ScatteredBlock::Selector(rows));
     allocated_size += right_blocks.back().allocatedBytes();
     in_memory_rows += rows;
     doDebugAsserts();
@@ -349,14 +335,14 @@ void ConstantJoin::shrinkStoredBlocksToFit(size_t & total_bytes_in_join)
 
         try
         {
-            for (auto & column : stored_block.columns_info.columns)
+            for (auto & column : stored_block.columns)
                 column = column->cloneResized(column->size());
 
-            stored_block.columns_info.rebuildReplicatedColumns();
+            stored_block.rebuildReplicatedColumns();
         }
         catch (...)
         {
-            stored_block.columns_info.rebuildReplicatedColumns();
+            stored_block.rebuildReplicatedColumns();
             size_t partial_new_size = stored_block.allocatedBytes();
             if (old_size >= partial_new_size)
                 allocated_size -= old_size - partial_new_size;
@@ -402,21 +388,28 @@ void ConstantJoin::shrinkStoredBlocksToFit(size_t & total_bytes_in_join)
 namespace
 {
 
-ColumnsInfo decompressColumns(const ColumnsInfo & columns_info)
+/// `ConstantJoin` stores whole blocks: the selector is always the trivial full range, so it doubles as the
+/// row count, which the columns cannot carry for the count-only blocks that have no columns.
+size_t storedBlockRows(const StoredBlock & stored_block)
 {
-    Columns new_columns;
-    new_columns.reserve(columns_info.columns.size());
-    for (const auto & column : columns_info.columns)
-        new_columns.emplace_back(column->decompress());
-
-    return ColumnsInfo(std::move(new_columns));
+    return stored_block.selector.size();
 }
 
-void insertRangeFromColumnsInfo(MutableColumns & dst_columns, size_t dst_offset, const ColumnsInfo & columns_info, size_t start, size_t rows)
+StoredBlock decompressStoredBlock(const StoredBlock & stored_block)
 {
-    for (size_t col_num = 0; col_num < columns_info.columns.size(); ++col_num)
+    Columns new_columns;
+    new_columns.reserve(stored_block.columns.size());
+    for (const auto & column : stored_block.columns)
+        new_columns.emplace_back(column->decompress());
+
+    return StoredBlock(std::move(new_columns), ScatteredBlock::Selector(storedBlockRows(stored_block)));
+}
+
+void insertRangeFromStoredBlock(MutableColumns & dst_columns, size_t dst_offset, const StoredBlock & stored_block, size_t start, size_t rows)
+{
+    for (size_t col_num = 0; col_num < stored_block.columns.size(); ++col_num)
     {
-        if (const auto * replicated_column = columns_info.replicated_columns[col_num])
+        if (const auto * replicated_column = stored_block.replicated_columns[col_num])
         {
             for (size_t row = start; row != start + rows; ++row)
                 dst_columns[dst_offset + col_num]->insertFrom(
@@ -424,7 +417,7 @@ void insertRangeFromColumnsInfo(MutableColumns & dst_columns, size_t dst_offset,
                     replicated_column->getIndexes().getIndexAt(row));
         }
         else
-            dst_columns[dst_offset + col_num]->insertRangeFrom(*columns_info.columns[col_num], start, rows);
+            dst_columns[dst_offset + col_num]->insertRangeFrom(*stored_block.columns[col_num], start, rows);
     }
 }
 
@@ -491,10 +484,10 @@ protected:
     }
 
     /// Joins the probe row at `left_row` with the given right rows.
-    void appendRightRowsForCurrentLeftRow(const ColumnsInfo & right_columns, size_t rows_right)
+    void appendRightRowsForCurrentLeftRow(const StoredBlock & right_rows, size_t rows_right)
     {
         replicateCurrentLeftRow(rows_right);
-        insertRangeFromColumnsInfo(dst_columns, src_left_columns.size(), right_columns, 0, rows_right);
+        insertRangeFromStoredBlock(dst_columns, src_left_columns.size(), right_rows, 0, rows_right);
         accountAddedRows(rows_right);
     }
 
@@ -610,8 +603,8 @@ public:
         startOutputBlock(rows_total);
 
         for (; left_row < rows_total && !outputBlockIsFull(); ++left_row)
-            if (join.selected_right_columns_info)
-                appendRightRowsForCurrentLeftRow(*join.selected_right_columns_info, 1);
+            if (join.selected_right_row)
+                appendRightRowsForCurrentLeftRow(*join.selected_right_row, 1);
 
         return finishOutputBlock();
     }
@@ -649,9 +642,9 @@ public:
 
                 const auto & stored_block = **right_block_it;
                 if (!join.have_compressed)
-                    appendRightRowsForCurrentLeftRow(stored_block.columns_info, stored_block.rows);
+                    appendRightRowsForCurrentLeftRow(stored_block, storedBlockRows(stored_block));
                 else
-                    appendRightRowsForCurrentLeftRow(decompressColumns(stored_block.columns_info), stored_block.rows);
+                    appendRightRowsForCurrentLeftRow(decompressStoredBlock(stored_block), storedBlockRows(stored_block));
             }
 
             if (*right_block_it != join.right_blocks.end())
@@ -674,7 +667,7 @@ public:
                         break;
                     }
 
-                    appendRightRowsForCurrentLeftRow(ColumnsInfo(block_right.getColumns()), block_right.rows());
+                    appendRightRowsForCurrentLeftRow(StoredBlock(block_right.getColumns()), block_right.rows());
                 }
             }
 
@@ -708,9 +701,9 @@ public:
     {
         size_t rows_added = 0;
 
-        auto insert_rows = [&](const ColumnsInfo & columns_info, size_t start, size_t rows)
+        auto insert_rows = [&](const StoredBlock & stored_rows, size_t start, size_t rows)
         {
-            insertRangeFromColumnsInfo(columns_right, 0, columns_info, start, rows);
+            insertRangeFromStoredBlock(columns_right, 0, stored_rows, start, rows);
             rows_added += rows;
         };
 
@@ -720,7 +713,7 @@ public:
         for (; *right_block_it != join.right_blocks.end() && rows_added < max_block_size; ++*right_block_it)
         {
             const auto & stored_block = **right_block_it;
-            size_t rows_available = stored_block.rows - right_block_offset;
+            size_t rows_available = storedBlockRows(stored_block) - right_block_offset;
             size_t rows_to_take = std::min<size_t>(rows_available, max_block_size - rows_added);
             if (rows_to_take == 0)
             {
@@ -729,22 +722,22 @@ public:
             }
 
             if (!join.have_compressed)
-                insert_rows(stored_block.columns_info, right_block_offset, rows_to_take);
+                insert_rows(stored_block, right_block_offset, rows_to_take);
             else
             {
                 /// A block wider than `max_block_size` is emitted in several chunks: decompress it only once.
-                if (!current_decompressed_columns_info)
-                    current_decompressed_columns_info.emplace(decompressColumns(stored_block.columns_info));
+                if (!current_decompressed_block)
+                    current_decompressed_block.emplace(decompressStoredBlock(stored_block));
 
-                insert_rows(*current_decompressed_columns_info, right_block_offset, rows_to_take);
+                insert_rows(*current_decompressed_block, right_block_offset, rows_to_take);
             }
 
             right_block_offset += rows_to_take;
-            if (right_block_offset != stored_block.rows)
+            if (right_block_offset != storedBlockRows(stored_block))
                 return rows_added;
 
             right_block_offset = 0;
-            current_decompressed_columns_info.reset();
+            current_decompressed_block.reset();
         }
 
         if (*right_block_it != join.right_blocks.end())
@@ -758,7 +751,7 @@ public:
 
         while (reader && rows_added < max_block_size)
         {
-            if (!current_spilled_columns_info)
+            if (!current_spilled_block)
             {
                 auto block_right = reader.value()->read();
                 if (block_right.empty())
@@ -767,28 +760,25 @@ public:
                     break;
                 }
 
-                current_spilled_rows = block_right.rows();
-                current_spilled_columns_info.emplace(block_right.getColumns());
+                current_spilled_block.emplace(block_right.getColumns(), ScatteredBlock::Selector(block_right.rows()));
             }
 
-            size_t rows_available = current_spilled_rows - right_block_offset;
+            size_t rows_available = storedBlockRows(*current_spilled_block) - right_block_offset;
             size_t rows_to_take = std::min<size_t>(rows_available, max_block_size - rows_added);
             if (rows_to_take == 0)
             {
-                current_spilled_columns_info.reset();
-                current_spilled_rows = 0;
+                current_spilled_block.reset();
                 right_block_offset = 0;
                 continue;
             }
 
-            insert_rows(*current_spilled_columns_info, right_block_offset, rows_to_take);
+            insert_rows(*current_spilled_block, right_block_offset, rows_to_take);
 
             right_block_offset += rows_to_take;
-            if (right_block_offset != current_spilled_rows)
+            if (right_block_offset != storedBlockRows(*current_spilled_block))
                 return rows_added;
 
-            current_spilled_columns_info.reset();
-            current_spilled_rows = 0;
+            current_spilled_block.reset();
             right_block_offset = 0;
         }
 
@@ -800,10 +790,9 @@ private:
     UInt64 max_block_size;
     std::optional<ConstantJoin::StoredBlocks::const_iterator> right_block_it;
     size_t right_block_offset = 0;
-    std::optional<ColumnsInfo> current_decompressed_columns_info;
+    std::optional<StoredBlock> current_decompressed_block;
     std::optional<TemporaryBlockStreamReaderHolder> reader;
-    std::optional<ColumnsInfo> current_spilled_columns_info;
-    size_t current_spilled_rows = 0;
+    std::optional<StoredBlock> current_spilled_block;
 };
 
 JoinResultPtr ConstantJoin::joinBlock(Block block)

@@ -7,8 +7,8 @@
 
 #include <Core/Block.h>
 #include <Core/Joins.h>
+#include <Interpreters/HashJoin/ScatteredBlock.h>
 #include <Interpreters/IJoin.h>
-#include <Interpreters/RowRefs.h>
 #include <Interpreters/TemporaryDataOnDisk.h>
 #include <Common/Logger.h>
 
@@ -64,22 +64,9 @@ private:
     friend class ConstantJoinCartesianResult;
     friend class ConstantJoinNotJoinedRightFiller;
 
-    /// A right-side block prepared for probing. `rows` can be non-zero while `columns_info` is empty
-    /// when the query needs only the right-side row count.
-    struct StoredBlock
-    {
-        ColumnsInfo columns_info;
-        size_t rows = 0;
-
-        StoredBlock(ColumnsInfo columns_info_, size_t rows_)
-            : columns_info(std::move(columns_info_))
-            , rows(rows_)
-        {
-        }
-
-        size_t allocatedBytes() const;
-    };
-
+    /// `ConstantJoin` stores whole blocks, so the selector of every `StoredBlock` is the trivial full range
+    /// and serves as the row count — the columns cannot carry it when the query needs only the right-side
+    /// row count and the block has no columns.
     using StoredBlocks = std::list<StoredBlock>;
 
     /** With a constant predicate the join kind, strictness, and predicate value fully determine how blocks are
@@ -107,7 +94,7 @@ private:
         {
             AllStoredRows,
             /// One row chosen at build time (see `select_last_right_row`), always kept in
-            /// `selected_right_columns_info`, separately from the stored blocks.
+            /// `selected_right_row`, separately from the stored blocks.
             SelectedRowOnly,
         };
 
@@ -146,7 +133,7 @@ private:
     /// At least one stored block is compressed; readers then decompress every stored block.
     bool have_compressed = false;
     /// The single right row joined by `RightRowsToJoin::SelectedRowOnly`; kept separately from the stored blocks.
-    std::optional<ColumnsInfo> selected_right_columns_info;
+    std::optional<StoredBlock> selected_right_row;
 
     /// Value of the constant join predicate; unconditionally true for explicit cartesian joins.
     const bool constant_predicate_value;
