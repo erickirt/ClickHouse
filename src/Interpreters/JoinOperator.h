@@ -25,8 +25,6 @@ struct JoinOperator
 
     /// An expression in ON/USING clause of a JOIN statement
     std::vector<JoinActionRef> expression = {};
-    /// Constant value of the ON expression, when it was folded before the physical `TableJoin` exists.
-    std::optional<bool> constant_expression_value = std::nullopt;
     /// Additional filter after join (e.g. from WHERE clause)
     /// Difference is for OUTER JOINs, where expression used to match row or return NULL
     /// but residual filter is used to filter rows after join.
