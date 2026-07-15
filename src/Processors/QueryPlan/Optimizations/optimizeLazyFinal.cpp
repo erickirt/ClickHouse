@@ -13,6 +13,7 @@
 #include <Processors/QueryPlan/LazilyUnorderedReadFromMergeTree.h>
 #include <Processors/QueryPlan/LazyFinalKeyAnalysisStep.h>
 #include <Processors/QueryPlan/LazyReadReplacingFinalStep.h>
+#include <Processors/QueryPlan/LimitStep.h>
 #include <Processors/QueryPlan/PartsSplitter.h>
 #include <Processors/QueryPlan/UnionStep.h>
 #include <Processors/Sources/LazyFinalSharedState.h>
@@ -385,9 +386,34 @@ void optimizeLazyFinal(const Stack & stack, QueryPlan & query_plan, QueryPlan::N
     if (data.merging_params.mode != MergeTreeData::MergingParams::Replacing)
         return;
 
+    /// The steps above may rely on the reading step producing rows in the order of the
+    /// sorting key, but the replacement plan does not produce rows in any particular order.
+    /// Besides, read-in-order queries can often stop early, while the set-building phase
+    /// would read all filtered rows up front.
+    if (reading_step->readsInOrder())
+        return;
+
     /// Skip if projection was applied.
     if (reading_step->getAnalyzedResult())
         return;
+
+    /// Find a LIMIT that applies directly to the reading step's output (only Expression/Filter
+    /// steps in between). Such a limit lets the query stop reading early, which the set-building
+    /// phase would defeat. Any other step consumes the whole stream and stops the search.
+    size_t limit_above_reading = 0;
+    for (size_t i = stack.size() - 1; i-- > 0;)
+    {
+        auto * step = stack[i].node->step.get();
+        if (typeid_cast<ExpressionStep *>(step) || typeid_cast<FilterStep *>(step))
+            continue;
+        if (const auto * limit_step = typeid_cast<LimitStep *>(step))
+        {
+            size_t limit = limit_step->getLimit();
+            size_t offset = limit_step->getOffset();
+            limit_above_reading = limit + offset < limit ? std::numeric_limits<size_t>::max() : limit + offset;
+        }
+        break;
+    }
 
     /// Check the immediate parent for a FilterStep or InputSelectorStep.
     FilterStep * filter_step = nullptr;
@@ -417,6 +443,10 @@ void optimizeLazyFinal(const Stack & stack, QueryPlan & query_plan, QueryPlan::N
     /// so selectRangesToRead uses the PK condition for index analysis.
     auto analyzed_result = reading_step->selectRangesToRead();
     if (reading_step->getParts().empty())
+        return;
+
+    /// A limit below the number of selected rows means the query is expected to finish early.
+    if (limit_above_reading && analyzed_result && limit_above_reading < analyzed_result->selected_rows)
         return;
 
     /// Split parts into non-intersecting (unique key ranges, no FINAL needed) and
