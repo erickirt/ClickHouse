@@ -4,25 +4,27 @@ ClickHouseProc.create_minio_log_tables (ci/jobs/scripts/clickhouse_proc.py).
 
 Background
 ----------
-`system.minio_audit_logs` and `system.minio_server_logs` are diagnostic tables
-that capture the MinIO audit/server webhook stream during a run. They are plain
-`ENGINE = MergeTree` tables, so on s3 storage runs they would inherit the
-overridden default merge_tree policy (s3_storage_policy_for_merge_tree_by_default
-.xml sets <merge_tree><storage_policy>s3</storage_policy>) and live ON S3. That is
-doubly bad for a table that records S3 activity:
+`system.minio_server_logs` is a diagnostic table that captures the MinIO server
+webhook stream during a run. It is a plain `ENGINE = MergeTree` table, so on s3
+storage runs it would inherit the overridden default merge_tree policy
+(s3_storage_policy_for_merge_tree_by_default.xml sets
+<merge_tree><storage_policy>s3</storage_policy>) and live ON S3. That is bad for
+a table that records S3 activity: every webhook insert would write parts to S3
+(generating more S3 traffic to log), and the post-run
+`select * ... into outfile` dump in dump_system_tables would read it all back
+from S3, risking the DUMP_SYSTEM_TABLE_TIMEOUT cap on the "Scraping system
+tables" step.
 
-  * every audit-event insert writes parts to S3, which generates more audit
-    events - a feedback loop that inflates the table, and
-  * the post-run `select * ... into outfile` dump in dump_system_tables reads it
-    all back from S3. On amd_tsan the JSON-typed audit table grew to ~700k rows /
-    ~1.5 GB and the dump exceeded DUMP_SYSTEM_TABLE_TIMEOUT, turning the
-    "Scraping system tables" step red (observed on master, e.g. commit 961ded3).
-
-The fix pins both tables to the local `default` policy with an explicit
+The fix pins the table to the local `default` policy with an explicit
 `SETTINGS storage_policy = 'default'`. `default` is a local policy on every
-stateless config (nothing remaps it), so the dump reads locally and the audit
-insert path no longer feeds itself over S3. This test guards against a future
-edit dropping that setting and silently putting the tables back on S3.
+stateless config (nothing remaps it), so the dump reads locally. This test
+guards against a future edit dropping that setting and silently putting the
+table back on S3.
+
+The former `system.minio_audit_logs` table (one audit event per S3 API request)
+was dropped entirely: on s3 runs it ballooned to millions of rows and is not
+needed as ClickHouse diagnostics. This test also guards against reintroducing
+it without the local storage pin.
 """
 
 import re
@@ -41,9 +43,12 @@ def _create_statements(src):
 def test_minio_log_tables_are_pinned_to_local_storage():
     src = _SRC.read_text()
     statements = _create_statements(src)
-    # Both the audit and server log tables must be created.
-    assert len(statements) == 2, (
-        f"expected 2 minio log table CREATE statements, found {len(statements)}: {statements}"
+    # Only the server log table is created; the audit log table was dropped.
+    assert len(statements) == 1, (
+        f"expected 1 minio log table CREATE statement, found {len(statements)}: {statements}"
+    )
+    assert "minio_server_logs" in statements[0], (
+        f"expected the surviving minio log table to be system.minio_server_logs; got: {statements[0]}"
     )
     for stmt in statements:
         # The captured text is a Python source fragment, so the SQL string
