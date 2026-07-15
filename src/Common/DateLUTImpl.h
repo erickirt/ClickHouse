@@ -1921,7 +1921,10 @@ public:
 
     NO_SANITIZE_UNDEFINED Time addWeeks(Time t, Int64 delta) const
     {
-        return addDays(t, delta * 7);
+        /// Compute delta * 7 in the UInt64 domain so it wraps by construction. FillingRow::doLongJump
+        /// (WITH FILL) passes deltas from the whole Int64 range and relies on the wraparound; a signed
+        /// multiply is UB on overflow even under NO_SANITIZE_UNDEFINED. Bit-identical two's complement.
+        return addDays(t, static_cast<Int64>(static_cast<UInt64>(delta) * 7ULL));
     }
 
     UInt8 saturateDayOfMonth(Int16 year, UInt8 month, UInt8 day_of_month) const
@@ -2025,7 +2028,8 @@ public:
     template <typename DateOrTime>
     auto NO_SANITIZE_UNDEFINED addQuarters(DateOrTime d, Int64 delta) const
     {
-        return addMonths(d, delta * 3);
+        /// UInt64 domain for defined wraparound (see addWeeks); addMonths itself has no further multiply.
+        return addMonths(d, static_cast<Int64>(static_cast<UInt64>(delta) * 3ULL));
     }
 
     template <typename DateOrTime>
