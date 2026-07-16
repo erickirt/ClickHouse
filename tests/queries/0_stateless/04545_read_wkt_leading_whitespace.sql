@@ -8,3 +8,10 @@ SELECT readWKT('  MULTIPOLYGON(((2 0,10 0,10 10,0 10,2 0)))');
 
 -- Consistent with the typed reader on the same whitespace-prefixed input.
 SELECT readWKT('  POINT(1 2)') = readWKTPoint('  POINT(1 2)');
+
+-- Trailing whitespace after the geometry value is also accepted (the WKT grammar
+-- skips it), consistently between readWKT and the typed readers.
+SELECT readWKT('POINT(1 2)   ');
+SELECT readWKT('LINESTRING(1 1, 2 2)\t');
+SELECT readWKT('  POINT(1 2)   ');
+SELECT readWKT('POINT(1 2)   ') = readWKTPoint('POINT(1 2)   ');
