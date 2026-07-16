@@ -49,6 +49,19 @@ SELECT addYears(toDateTime('2000-01-01 00:00:00', 'UTC'), 9223372036854775807);
 SELECT addYears(toDate('2000-01-01'), 9223372036854775807);
 SELECT addYears(toDateTime('2000-01-01 00:00:00', 'UTC'), -9223372036854775808);
 SELECT addYears(toDate('2000-01-01'), -9223372036854775808);
+-- The DateTime64/Time64 calendar overloads (addDays/addWeeks/addMonths/addQuarters/addYears) rescale the
+-- whole-seconds result back into ticks as whole * multiplier + rem. addWeeks etc. can legitimately clamp
+-- whole to the DateLUT boundary (9999-12-31, 253402214400 seconds), and for scale >= 8 that clamped value
+-- times the scale multiplier overflows Int64 (253402214400 * 10^8 > Int64::max), which was signed-overflow
+-- UB. The rescale is now done in the UInt64 domain (rescaleWholeToTicks), wrap-defined like the other
+-- carriers. Reached at jumps_count == 1 with a single huge step; deterministic result.
+SELECT addWeeks(toDateTime64('1970-01-01 00:00:00', 8, 'UTC'), 9223372036854775807);
+SELECT addWeeks(toDateTime64('1970-01-01 00:00:00', 9, 'UTC'), 9223372036854775807);
+SELECT addDays(toDateTime64('1970-01-01 00:00:00', 9, 'UTC'), 9223372036854775807);
+SELECT addMonths(toDateTime64('1970-01-01 00:00:00', 8, 'UTC'), 9223372036854775807);
+SELECT addQuarters(toDateTime64('1970-01-01 00:00:00', 9, 'UTC'), 9223372036854775807);
+SELECT addYears(toDateTime64('1970-01-01 00:00:00', 9, 'UTC'), 9223372036854775807);
+SELECT subtractWeeks(toDateTime64('1970-01-01 00:00:00', 9, 'UTC'), toInt64('-9223372036854775808'));
 -- getStepFunction allows sub-day interval kinds (SECOND/MINUTE/HOUR) on Date/Date32 when the interval
 -- is at least one day in seconds, and next() invokes the step lambda with jumps_count == 1, so a single
 -- huge STEP reaches the AddSecondsImpl/AddMinutesImpl/AddHoursImpl Date (UInt16) and Date32 (Int32)

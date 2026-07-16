@@ -36,6 +36,17 @@ namespace ErrorCodes
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
 }
 
+/// Rescale a whole-seconds calendar result back into DateTime64/Time64 ticks: whole * multiplier + rem.
+/// The calendar helpers (addDays/addWeeks/addMonths/addQuarters/addYears) can legitimately clamp `whole`
+/// to the DateLUT boundary (e.g. 9999-12-31), but for scale >= 8 that clamped value times the scale
+/// multiplier no longer fits in Int64 (253402214400 * 10^8 already exceeds Int64::max). WITH FILL passes
+/// deltas from the whole Int64 range, so this must be well-defined: compute in the UInt64 domain, which
+/// wraps by construction, and cast back. Bit-identical to the signed form for any in-range result.
+inline Int64 rescaleWholeToTicks(Int64 whole, Int64 multiplier, Int64 rem)
+{
+    return static_cast<Int64>(static_cast<UInt64>(whole) * static_cast<UInt64>(multiplier) + static_cast<UInt64>(rem));
+}
+
 /// Type of first argument of 'execute' function overload defines what INPUT DataType it is used for.
 /// Return type defines what is the OUTPUT (return) type of the CH function.
 /// Corresponding types:
@@ -338,13 +349,13 @@ struct AddDaysImpl
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addDays(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addDays(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addDays(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addDays(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -387,13 +398,13 @@ struct AddWeeksImpl
         auto d = std::div(t, multiplier);
         /// Route through addWeeks so the delta * 7 happens in the UInt64 domain (wrap by construction).
         /// WITH FILL passes deltas from the whole Int64 range; a signed delta * 7 here would be UB.
-        return time_zone.addWeeks(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addWeeks(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addWeeks(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addWeeks(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -434,13 +445,13 @@ struct AddMonthsImpl
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addMonths(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addMonths(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addMonths(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addMonths(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -479,13 +490,13 @@ struct AddQuartersImpl
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addQuarters(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addQuarters(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addQuarters(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addQuarters(d.quot, delta), multiplier, d.rem);
     }
     static UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -524,13 +535,13 @@ struct AddYearsImpl
     {
         auto multiplier = DecimalUtils::scaleMultiplier<DateTime64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addYears(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addYears(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16 scale)
     {
         auto multiplier = DecimalUtils::scaleMultiplier<Time64>(scale);
         auto d = std::div(t, multiplier);
-        return time_zone.addYears(d.quot, delta) * multiplier + d.rem;
+        return rescaleWholeToTicks(time_zone.addYears(d.quot, delta), multiplier, d.rem);
     }
     static NO_SANITIZE_UNDEFINED UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
