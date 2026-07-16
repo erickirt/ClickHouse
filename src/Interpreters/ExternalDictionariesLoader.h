@@ -27,6 +27,10 @@ public:
 
     void reloadDictionary(const std::string & dictionary_name, ContextPtr context) const;
 
+    bool unloadDictionary(const std::string & dictionary_name, ContextPtr context) const;
+
+    void unloadAllDictionaries() const;
+
     QualifiedTableName qualifyDictionaryNameWithDatabase(const std::string & dictionary_name, ContextPtr context) const;
 
     DictionaryStructure getDictionaryStructure(const std::string & dictionary_name, ContextPtr context) const;
@@ -41,6 +45,8 @@ public:
     static DictionaryStructure getDictionaryStructure(const Poco::Util::AbstractConfiguration & config, const std::string & key_in_config = "dictionary");
 
     static DictionaryStructure getDictionaryStructure(const ObjectConfig & config);
+
+    std::optional<bool> isObjectLazy(const Poco::Util::AbstractConfiguration & config, const String & key_in_config) const override;
 
     static void resetAll();
 
