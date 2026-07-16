@@ -879,6 +879,25 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
 
     VolumePtr data_part_volume = createVolumeFromReservation(reservation, volume);
 
+    /// The part directory name can be non-unique because of stale files from previous runs (an insert
+    /// interrupted or rolled back after the directory was created but before it was committed, then
+    /// retried with the same block/part name). Such a leftover must be removed BEFORE the part storage
+    /// is constructed: otherwise packed storage would seed its archive reader and snapshot the mark
+    /// layout (index_granularity_info) from the stale contents at construction, and a retry could
+    /// inherit them even though the directory is later reclaimed. The temporary-directory lock acquired
+    /// above guarantees no concurrent operation owns this name, so an existing directory can only be
+    /// such a stale leftover and is safe to remove.
+    if (may_exist)
+    {
+        auto data_part_disk = data_part_volume->getDisk();
+        auto relative_part_dir = fs::path(data.getRelativeDataPath()) / part_dir;
+        if (data_part_disk->existsDirectory(relative_part_dir))
+        {
+            LOG_WARNING(log, "Removing old temporary directory {}", (fs::path(data_part_disk->getPath()) / relative_part_dir).string());
+            data_part_disk->removeRecursive(relative_part_dir);
+        }
+    }
+
     auto new_data_part = data.getDataPartBuilder(part_name, data_part_volume, part_dir, getReadSettings(), /*part_may_exist_on_disk=*/ may_exist)
         .withPartFormat(data.choosePartFormat(expected_size, block.rows(), new_part_level, /*projection =*/nullptr))
         .withPartInfo(new_part_info)
@@ -925,21 +944,12 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeTempPartImpl(
 
     SyncGuardPtr sync_guard;
 
-    /// The name could be non-unique in case of stale files from previous runs.
-    String full_path = new_data_part->getDataPartStorage().getFullPath();
-
-    if (may_exist && new_data_part->getDataPartStorage().exists())
-    {
-        LOG_WARNING(log, "Removing old temporary directory {}", full_path);
-        data_part_storage->removeRecursive();
-    }
-
     data_part_storage->createDirectories();
 
     if ((*data_settings)[MergeTreeSetting::fsync_part_directory])
     {
         const auto disk = data_part_volume->getDisk();
-        sync_guard = disk->getDirectorySyncGuard(full_path);
+        sync_guard = disk->getDirectorySyncGuard(data_part_storage->getFullPath());
     }
 
     if (metadata_snapshot->hasRowsTTL())
