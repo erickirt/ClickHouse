@@ -226,13 +226,14 @@ struct AddSecondsImpl
         // UInt64 domain: wraps by construction (see execute(UInt32) above).
         return static_cast<Int64>((static_cast<UInt64>(time_zone.fromDayNum(ExtendedDayNum(d))) + static_cast<UInt64>(delta)) * 1000ULL);
     }
-    static NO_SANITIZE_UNDEFINED Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    /// UInt64 domain: wraps by construction (see execute(UInt32) above). Time / Time64 carriers.
+    static Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return d + delta;
+        return static_cast<Int64>(static_cast<UInt64>(d) + static_cast<UInt64>(delta));
     }
-    static NO_SANITIZE_UNDEFINED Int64 executeForTime(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static Int64 executeForTime(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<Int64>(d + delta);
+        return static_cast<Int64>(static_cast<UInt64>(d) + static_cast<UInt64>(delta));
     }
     static UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -258,9 +259,10 @@ struct AddMinutesImpl
         return DateTime64(static_cast<Int64>(
             static_cast<UInt64>(t.value) + 60 * static_cast<UInt64>(delta) * static_cast<UInt64>(DecimalUtils::scaleMultiplier<DateTime64>(scale))));
     }
-    static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
+    static Time64 execute(Time64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
     {
-        return t + 60 * delta * DecimalUtils::scaleMultiplier<Time64>(scale);
+        return Time64(static_cast<Int64>(
+            static_cast<UInt64>(t.value) + 60 * static_cast<UInt64>(delta) * static_cast<UInt64>(DecimalUtils::scaleMultiplier<Time64>(scale))));
     }
     static UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
@@ -273,13 +275,14 @@ struct AddMinutesImpl
         // UInt64 domain: wraps by construction (see AddSecondsImpl).
         return static_cast<Int64>((static_cast<UInt64>(time_zone.fromDayNum(ExtendedDayNum(d))) + static_cast<UInt64>(delta) * 60) * 1000ULL);
     }
-    static NO_SANITIZE_UNDEFINED Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    /// UInt64 domain: wraps by construction (see AddSecondsImpl). Time / Time64 carriers.
+    static Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return d + delta * 60;
+        return static_cast<Int64>(static_cast<UInt64>(d) + static_cast<UInt64>(delta) * 60);
     }
-    static NO_SANITIZE_UNDEFINED Int64 executeForTime(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static Int64 executeForTime(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<Int64>(d + delta * 60);
+        return static_cast<Int64>(static_cast<UInt64>(d) + static_cast<UInt64>(delta) * 60);
     }
     static UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {
@@ -305,9 +308,10 @@ struct AddHoursImpl
         return DateTime64(static_cast<Int64>(
             static_cast<UInt64>(t.value) + 3600 * static_cast<UInt64>(delta) * static_cast<UInt64>(DecimalUtils::scaleMultiplier<DateTime64>(scale))));
     }
-    static NO_SANITIZE_UNDEFINED Time64 execute(Time64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
+    static Time64 execute(Time64 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16 scale)
     {
-        return t + 3600 * delta * DecimalUtils::scaleMultiplier<Time64>(scale);
+        return Time64(static_cast<Int64>(
+            static_cast<UInt64>(t.value) + 3600 * static_cast<UInt64>(delta) * static_cast<UInt64>(DecimalUtils::scaleMultiplier<Time64>(scale))));
     }
     static UInt32 execute(UInt32 t, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
@@ -320,13 +324,14 @@ struct AddHoursImpl
         // UInt64 domain: wraps by construction (see AddSecondsImpl).
         return static_cast<Int64>((static_cast<UInt64>(time_zone.fromDayNum(ExtendedDayNum(d))) + static_cast<UInt64>(delta) * 3600) * 1000ULL);
     }
-    static NO_SANITIZE_UNDEFINED Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    /// UInt64 domain: wraps by construction (see AddSecondsImpl). Time / Time64 carriers.
+    static Int64 execute(Int64 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return d + delta * 3600;
+        return static_cast<Int64>(static_cast<UInt64>(d) + static_cast<UInt64>(delta) * 3600);
     }
-    static NO_SANITIZE_UNDEFINED Int64 executeForTime(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
+    static Int64 executeForTime(Int32 d, Int64 delta, const DateLUTImpl &, const DateLUTImpl &, UInt16)
     {
-        return static_cast<Int64>(d + delta * 3600);
+        return static_cast<Int64>(static_cast<UInt64>(d) + static_cast<UInt64>(delta) * 3600);
     }
     static UInt32 execute(UInt16 d, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl &, UInt16)
     {

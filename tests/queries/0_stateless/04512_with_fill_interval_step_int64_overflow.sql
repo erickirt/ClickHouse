@@ -84,3 +84,18 @@ SELECT subtractYears(toDateTime('2000-01-01 00:00:00', 'UTC'), toInt64('-9223372
 SELECT subtractYears(toDate('2000-01-01'), toInt64('-9223372036854775808'));
 SELECT subtractMonths(toDateTime('2000-01-01 00:00:00', 'UTC'), toInt64('-9223372036854775808'));
 SELECT subtractSeconds(toDate('2000-01-01'), toInt64('-9223372036854775808')) SETTINGS session_timezone = 'UTC';
+-- The Time / Time64 carriers of the sub-day helpers (addSeconds/addMinutes/addHours and their
+-- executeForTime Time overloads) did the scale + addition in signed Int64 (t + 60 * delta * multiplier,
+-- d + delta * 3600, ...), which is optimizer-visible signed-overflow UB for a large Int64 delta.
+-- FunctionDateOrDateTimeAddInterval dispatches Time and Time64 inputs to these overloads, so
+-- addMinutes(toTime64(...), big) / subtractMinutes(...) reached the UB. They now compute in the UInt64
+-- domain (wrap by construction) like the DateTime64 siblings; each result is deterministic.
+-- addSeconds on Time64 uses the overflow-checked DecimalUtils::multiplyAdd (throws DECIMAL_OVERFLOW, no UB),
+-- so the UB is in the raw signed Minutes/Hours Time64 overloads and the Time (executeForTime) overloads.
+SELECT addMinutes(toTime64('00:00:00', 9), 153722867280912930);
+SELECT addHours(toTime64('00:00:00', 9), 2562047788015215);
+SELECT addSeconds(toTime('00:00:00'), 9223372036854775807);
+SELECT addMinutes(toTime('00:00:00'), 9223372036854775807);
+SELECT addHours(toTime('00:00:00'), 9223372036854775807);
+SELECT subtractMinutes(toTime64('00:00:00', 9), toInt64('-9223372036854775808'));
+SELECT subtractHours(toTime('00:00:00'), toInt64('-9223372036854775808'));
