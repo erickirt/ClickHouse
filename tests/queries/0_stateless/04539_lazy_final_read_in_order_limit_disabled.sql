@@ -11,6 +11,7 @@ INSERT INTO t_lazy_final_gates SELECT number, if(number < 20000, 7, 999), toStri
 INSERT INTO t_lazy_final_gates SELECT number, if(number < 20000, 7, 999), 'updated' FROM numbers(100000);
 
 SET enable_analyzer = 1, query_plan_optimize_lazy_final = 1, optimize_read_in_order = 1, max_threads = 4;
+SET exact_rows_before_limit = 0;
 
 -- Filter without ORDER BY and LIMIT: lazy FINAL applies.
 SELECT 'no order, no limit:', countIf(explain LIKE '%InputSelector%') > 0
@@ -30,6 +31,10 @@ FROM (EXPLAIN SELECT k FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 10);
 -- A LIMIT not smaller than the number of selected rows cannot stop reading early: lazy FINAL applies.
 SELECT 'large limit:', countIf(explain LIKE '%InputSelector%') > 0
 FROM (EXPLAIN SELECT k FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 1000000);
+
+-- With exact_rows_before_limit the limit reads the whole stream anyway: lazy FINAL applies.
+SELECT 'limit reading till end:', countIf(explain LIKE '%InputSelector%') > 0
+FROM (EXPLAIN SELECT k FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 10 SETTINGS exact_rows_before_limit = 1);
 
 -- A LIMIT above a full sort consumes the whole stream: lazy FINAL applies.
 SELECT 'limit above full sort:', countIf(explain LIKE '%InputSelector%') > 0
