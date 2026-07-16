@@ -6103,6 +6103,13 @@ function closeTab(id) {
     if (idx === -1) return;
     const closing = tabs[idx];
     const wasActive = id === activeTabId;
+    /// Closing a tab is a genuine user action that can change `activeTabId` (when the active tab is
+    /// closed and a neighbour is activated below). During `reconcileStartup`'s await window this is
+    /// the same class of interaction that `switchToTab`/`addTab`/`openQueryInNewTab` already mark
+    /// dirty: without it, closing the URL-authoritative tab would leave `bootstrap_dirty === false`,
+    /// and the deferred URL param-restore / `run=1` auto-run would retarget the newly activated tab,
+    /// executing a different tab's query without an explicit Run.
+    markBootstrapDirty();
     /// Stop the closed tab's query and drop its panel from the DOM (freeing its result/images).
     abortTabQuery(closing);
     if (closing.panel) closing.panel.remove();
