@@ -24,6 +24,25 @@ static std::string_view normalizePath(std::string_view path)
     return path;
 }
 
+/// Reject a recursive operation whose output directory is the same as, or nested under, the input
+/// directory on the same disk. Otherwise the directory walk would descend into the files it just
+/// generated, copying output into itself indefinitely.
+static void assertOutputNotInsideInput(
+    const DiskPtr & disk_in, std::string_view input_dir, const DiskPtr & disk_out, std::string_view output_dir)
+{
+    if (disk_in->getName() != disk_out->getName())
+        return;
+
+    auto in = fs::path(normalizePath(input_dir)).lexically_normal().string();
+    auto out = fs::path(normalizePath(output_dir)).lexically_normal().string();
+    if (out == in || out.starts_with(in + "/"))
+        throw Exception(
+            ErrorCodes::INCORRECT_DATA,
+            "Output path {} is the same as or nested under the input path {} on the same disk; "
+            "the recursive operation would descend into its own generated output",
+            output_dir, input_dir);
+}
+
 ArchiveListing listPacked(const DiskPtr & disk_in, const String & input_file)
 {
     PackedFilesReader reader(disk_in, input_file, getReadSettings());
@@ -113,6 +132,8 @@ void extractPackedRecursive(const DiskPtr & disk_in, const String & input_dir, c
     if (!disk_in->existsDirectory(input_dir))
         throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Input directory {} doesn't exist", input_dir);
 
+    assertOutputNotInsideInput(disk_in, input_dir, disk_out, output_dir);
+
     auto input_dir_path = fs::path(normalizePath(input_dir));
     auto output_dir_path = output_dir / input_dir_path.filename();
 
@@ -171,6 +192,8 @@ void createPacked(const DiskPtr & disk_in, const String & input_dir, const DiskP
 
 void createPackedRecursive(const DiskPtr & disk_in, const String & input_dir, const DiskPtr & disk_out, const String & output_dir, Strings file_order_hint)
 {
+    assertOutputNotInsideInput(disk_in, input_dir, disk_out, output_dir);
+
     auto input_dir_path = fs::path(normalizePath(input_dir));
     auto output_dir_path = output_dir / input_dir_path.filename();
 

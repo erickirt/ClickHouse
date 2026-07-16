@@ -429,3 +429,28 @@ def test_packed_io_compact_file_order(started_cluster):
     proj_files_in_part = list_files_in_part(proj_path_s3).strip().split("\n")
     check_compact_part_proj_file_order(proj_files_in_part)
 
+
+
+def test_packed_io_rejects_output_inside_input(started_cluster):
+    # A recursive pack/extract whose output directory is the same as, or nested under, the input
+    # directory on the same disk must be rejected: otherwise the directory walk would descend into the
+    # files it just generated.
+    node.query(
+        "CREATE OR REPLACE TABLE t_packed_selfrec (id UInt64, s String) ENGINE = MergeTree ORDER BY id SETTINGS storage_policy = 's3', min_bytes_for_full_part_storage = '10M'"
+    )
+    node.query("INSERT INTO t_packed_selfrec SELECT number, toString(number) FROM numbers(10)")
+
+    part_path = get_relative_part_path("t_packed_selfrec", "all_1_1_0")
+    nested_output = os.path.join(part_path, "self_output")
+
+    with pytest.raises(Exception) as exc_info:
+        node.exec_in_container(
+            [
+                "bash",
+                "-c",
+                f'clickhouse disks --config /etc/clickhouse-server/config.xml --disk s3 --query "packed-io --recursive create --disk-from s3 {part_path} {nested_output}"',
+            ],
+            privileged=True,
+            user="root",
+        )
+    assert "nested under the input" in str(exc_info.value)
