@@ -18,3 +18,11 @@ limit above arrayJoin:	1
 2	7	updated
 3	7	updated
 4	7	updated
+disjoint read-in-order limit, final read:	0
+disjoint small limit, final read:	0
+disjoint lazy off, final read:	1
+7	7
+107	7
+207	7
+307	7
+407	7

@@ -268,14 +268,16 @@ struct SplitResult
 
 /// Try to split parts into non-intersecting and intersecting by primary key.
 /// If all parts are non-intersecting, replaces the plan node directly and returns fully_replaced=true.
-/// Otherwise returns a plan for non-intersecting parts (or nullptr if none), and updates
-/// the reading step's analyzed result to contain only intersecting parts.
+/// Otherwise, if allow_partial_split is set, returns a plan for non-intersecting parts (or nullptr
+/// if none), and updates the reading step's analyzed result to contain only intersecting parts;
+/// if not set, leaves the reading step untouched and returns fully_replaced=true to stop.
 static SplitResult trySplitNonIntersectingParts(
     ReadFromMergeTree * reading_step,
     ReadFromMergeTree::AnalysisResultPtr analyzed_result,
     FilterStep * filter_step,
     QueryPlan::Node * read_node,
-    QueryPlan & query_plan)
+    QueryPlan & query_plan,
+    bool allow_partial_split)
 {
     const auto & metadata_snapshot = reading_step->getStorageMetadata();
     const auto & primary_key = metadata_snapshot->getPrimaryKey();
@@ -317,6 +319,11 @@ static SplitResult trySplitNonIntersectingParts(
     /// index. Leave the reading step untouched so the query falls back to a regular FINAL read.
     /// Must come before the `non_intersecting_parts_ranges.empty()` check to cover the all-intersecting case.
     if (!reading_step->getIndexReadTasks().empty())
+        return {.non_intersecting_plan = nullptr, .fully_replaced = true};
+
+    /// For queries that can stop reading early the set-building plan is a pessimization, and the
+    /// partial split alone does not preserve the reading order; keep the regular FINAL read.
+    if (!allow_partial_split)
         return {.non_intersecting_plan = nullptr, .fully_replaced = true};
 
     if (split.non_intersecting_parts_ranges.empty())
@@ -388,11 +395,12 @@ void optimizeLazyFinal(const Stack & stack, QueryPlan & query_plan, QueryPlan::N
         return;
 
     /// The steps above may rely on the reading step producing rows in the order of the
-    /// sorting key, but the replacement plan does not produce rows in any particular order.
-    /// Besides, read-in-order queries can often stop early, while the set-building phase
-    /// would read all filtered rows up front.
-    if (reading_step->readsInOrder())
-        return;
+    /// sorting key, but the set-building replacement plan does not produce rows in any
+    /// particular order. Besides, read-in-order queries can often stop early, while the
+    /// set-building phase would read all filtered rows up front. Such queries may still
+    /// use the full non-intersecting replacement, which preserves both the order and the
+    /// early exit — the flag is checked before the partial split below.
+    const bool reading_in_order = reading_step->readsInOrder();
 
     /// Skip if projection was applied.
     if (reading_step->getAnalyzedResult())
@@ -466,15 +474,16 @@ void optimizeLazyFinal(const Stack & stack, QueryPlan & query_plan, QueryPlan::N
         return;
 
     /// A limit below the number of selected rows means the query is expected to finish early.
-    if (limit_above_reading && analyzed_result && limit_above_reading < analyzed_result->selected_rows)
-        return;
+    const bool stops_reading_early = reading_in_order
+        || (limit_above_reading && analyzed_result && limit_above_reading < analyzed_result->selected_rows);
 
     /// Split parts into non-intersecting (unique key ranges, no FINAL needed) and
     /// intersecting (overlapping, need FINAL). This avoids running the expensive
     /// aggregation-based FINAL on parts that have no duplicates.
     /// When all parts are non-intersecting, replaceNodeWithPlan is called inside
     /// and fully_replaced is set — in that case we're done.
-    auto split_result = trySplitNonIntersectingParts(reading_step, analyzed_result, filter_step, read_node, query_plan);
+    auto split_result = trySplitNonIntersectingParts(
+        reading_step, analyzed_result, filter_step, read_node, query_plan, /*allow_partial_split=*/ !stops_reading_early);
 
     if (split_result.fully_replaced)
         return;

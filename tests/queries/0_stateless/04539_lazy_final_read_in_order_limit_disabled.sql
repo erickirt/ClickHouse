@@ -58,4 +58,29 @@ SELECT k, v, s FROM t_lazy_final_gates FINAL WHERE v = 7 ORDER BY k LIMIT 5;
 SELECT k, v, s FROM t_lazy_final_gates FINAL WHERE v = 7 ORDER BY k LIMIT 5
 SETTINGS query_plan_optimize_lazy_final = 0;
 
+-- When all selected parts do not intersect by the primary key, the whole FINAL read is
+-- replaced by a plain read. The replacement preserves the reading order and the early
+-- exit, so it must stay enabled for read-in-order and small-limit queries.
+-- Parts collapsed on insert get a non-zero level; unmerged level-0 parts are conservatively
+-- treated as intersecting (they may contain duplicate keys inside), so pin the setting.
+SET optimize_on_insert = 1;
+DROP TABLE IF EXISTS t_lazy_final_gates_disjoint;
+CREATE TABLE t_lazy_final_gates_disjoint (k UInt64, v UInt64, s String) ENGINE = ReplacingMergeTree ORDER BY k;
+SYSTEM STOP MERGES t_lazy_final_gates_disjoint;
+INSERT INTO t_lazy_final_gates_disjoint SELECT number, number % 100, toString(number) FROM numbers(100000);
+INSERT INTO t_lazy_final_gates_disjoint SELECT number + 100000, number % 100, toString(number + 100000) FROM numbers(100000);
+
+SELECT 'disjoint read-in-order limit, final read:', countIf(explain LIKE '%FINAL: 1%') > 0
+FROM (EXPLAIN SELECT k FROM t_lazy_final_gates_disjoint FINAL WHERE v = 7 ORDER BY k LIMIT 10);
+
+SELECT 'disjoint small limit, final read:', countIf(explain LIKE '%FINAL: 1%') > 0
+FROM (EXPLAIN SELECT k FROM t_lazy_final_gates_disjoint FINAL WHERE v = 7 LIMIT 10);
+
+-- Control for the assertion above: with the optimization disabled the FINAL read stays.
+SELECT 'disjoint lazy off, final read:', countIf(explain LIKE '%FINAL: 1%') > 0
+FROM (EXPLAIN SELECT k FROM t_lazy_final_gates_disjoint FINAL WHERE v = 7 ORDER BY k LIMIT 10 SETTINGS query_plan_optimize_lazy_final = 0);
+
+SELECT k, v FROM t_lazy_final_gates_disjoint FINAL WHERE v = 7 ORDER BY k LIMIT 5;
+
 DROP TABLE t_lazy_final_gates;
+DROP TABLE t_lazy_final_gates_disjoint;
