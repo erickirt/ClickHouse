@@ -1,9 +1,21 @@
 # docker build -t clickhouse/fasttest .
 FROM ubuntu:24.04
 
-# ARG for quick switch to a given ubuntu mirror
-ARG apt_archive="http://archive.ubuntu.com"
-RUN sed -i -e "s|http://archive.ubuntu.com|$apt_archive|g" -e "s|https://archive.ubuntu.com|$apt_archive|g" /etc/apt/sources.list
+# ARG for quick switch to a given ubuntu mirror.
+# amd64 base images use archive.ubuntu.com, arm64 uses ports.ubuntu.com; rewrite
+# both so ARM builds are redirected too. Default to the in-region AWS mirrors,
+# which are reachable from CI runners (Canonical's mirrors are frequently
+# unreachable over IPv4 and have no IPv6 route from the runners). On 24.04 the
+# sources live in the deb822 file /etc/apt/sources.list.d/ubuntu.sources, so
+# rewrite every apt source file. Also retry transient apt failures.
+ARG apt_archive="http://us-east-1.ec2.archive.ubuntu.com"
+ARG apt_ports_archive="http://us-east-1.ec2.ports.ubuntu.com"
+RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0 | xargs -0 -r sed -i \
+        -e "s|http://archive.ubuntu.com|$apt_archive|g" \
+        -e "s|https://archive.ubuntu.com|$apt_archive|g" \
+        -e "s|http://ports.ubuntu.com|$apt_ports_archive|g" \
+        -e "s|https://ports.ubuntu.com|$apt_ports_archive|g" \
+    && printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/99-clickhouse-ci
 ARG LLVM_APT_VERSION="1:21.1.5~"
 
 ENV DEBIAN_FRONTEND=noninteractive LLVM_VERSION=21
