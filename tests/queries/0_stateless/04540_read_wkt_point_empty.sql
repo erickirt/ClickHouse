@@ -7,6 +7,9 @@ SELECT readWKTPoint('point empty'); -- { serverError CANNOT_PARSE_TEXT }
 SELECT readWKTPoint('POINT   EMPTY'); -- { serverError CANNOT_PARSE_TEXT }
 SELECT readWKTPoint(' POINT EMPTY '); -- { serverError CANNOT_PARSE_TEXT }
 SELECT readWKT('POINT EMPTY'); -- { serverError CANNOT_PARSE_TEXT }
+-- The generic readWKT dispatch must also reject leading-whitespace / case variants of POINT EMPTY.
+SELECT readWKT(' POINT EMPTY '); -- { serverError CANNOT_PARSE_TEXT }
+SELECT readWKT('point   empty'); -- { serverError CANNOT_PARSE_TEXT }
 
 -- Valid points are unaffected.
 SELECT readWKTPoint('POINT (1.2 3.4)');

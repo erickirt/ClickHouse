@@ -168,6 +168,9 @@ public:
         auto try_deserialize_type = [&] (const std::function<void()> & deserialize_func, const String & data, const String & target_prefix, WKTTypes type) -> bool
         {
             auto lower_data = boost::to_lower_copy(data);
+            /// Trim leading whitespace so the type dispatch matches inputs like " POINT EMPTY ";
+            /// otherwise such rows fall through to BAD_ARGUMENTS and skip the empty-point rejection.
+            boost::trim_left(lower_data);
             if (lower_data.starts_with(target_prefix))
             {
                 deserialize_func();
