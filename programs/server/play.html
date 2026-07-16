@@ -9042,6 +9042,14 @@ async function updateQueryParams()
             /// above, and syncing on those would spam history / fight the restore.
             if (!e.isTrusted) return;
             markBootstrapDirty(e);   /// user edited a parameter before reconciliation
+            /// While a restore is rebuilding these inputs for a just-activated tab (see
+            /// `params_restore_pending_token` in `restoreEditor`), the DOM elements here still
+            /// hold the tab being LEFT — `updateQueryParams`'s rebuild has not landed yet. Writing
+            /// them into `getActiveTab().params` now would attribute the previous tab's values to
+            /// the newly active tab (and drop the values the new tab was actually restoring).
+            /// `captureActiveTab` applies the same guard for the same reason; the restore's own
+            /// commit sets `tab.params` correctly once it resolves.
+            if (params_restore_pending_token !== null) return;
             /// Parameters are tab-owned: persist edited values into the active tab, and keep
             /// the URL/history entry in sync (replaceState, since the query is unchanged) so a
             /// reload's URL params are never stale relative to the saved tab.
