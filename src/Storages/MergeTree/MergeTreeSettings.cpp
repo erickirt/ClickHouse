@@ -844,7 +844,7 @@ table can have a superset of the source table's indices and projections.
     DECLARE(MergeSelectorAlgorithm, merge_selector_algorithm, MergeSelectorAlgorithm::SIMPLE, R"(
 The algorithm to select parts for merges assignment
 )", EXPERIMENTAL) \
-    DECLARE(Bool, merge_selector_enable_heuristic_to_lower_max_parts_to_merge_at_once, false, R"(
+    DECLARE(Bool, merge_selector_enable_heuristic_to_lower_max_parts_to_merge_at_once, true, R"(
 Enable heuristic for simple merge selector which will lower maximum limit for merge choice.
 By doing so number of concurrent merges will increase which can help with TOO_MANY_PARTS
 errors but at the same time this will increase the write amplification.
