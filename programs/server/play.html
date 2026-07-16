@@ -5309,16 +5309,20 @@ function restoreErrorSnapshot(el, data)
 /// `matToken` (a snapshot of `tab.reqNum`) guards the awaited chart/graph loaders: a superseding
 /// run/re-materialization/close of the tab bails before touching the DOM, and a loader failure
 /// (e.g. a blocked CDN) is shown as an error for that statement rather than throwing out.
+/// Returns false when such a restore-time failure turned a saved-successful statement into an
+/// error panel, so the caller can fold it into the tab outcome (a persisted failure is already
+/// accounted for by `snap.ok`); true otherwise, including when superseded (the caller re-checks
+/// `matToken` and bails without using the value).
 async function renderSnapshotIntoElement(el, snap, tab, matToken) {
     el.queryText = snap.query;
-    if (!snap.data) return;
+    if (!snap.data) return true;
     const format = snap.format;
 
     if (!snap.ok) {
         /// Replay any rows that streamed before a mid-stream exception, as the live path
         /// leaves them; the replayed table gets the same transpose pass as the success path.
         if (restoreErrorSnapshot(el, snap.data)) el.transposeIfNeeded();
-        return;
+        return true;
     }
 
     let is_table = false;
@@ -5331,16 +5335,16 @@ async function renderSnapshotIntoElement(el, snap, tab, matToken) {
         }
         el.flushFragment(fragment);
     } else if (format == 'JSONCompactColumns') {
-        if (matToken !== tab.reqNum) return;
+        if (matToken !== tab.reqNum) return true;
         try {
             await el.renderChart(JSON.parse(snap.data), () => matToken === tab.reqNum);
         } catch (e) {
-            if (matToken !== tab.reqNum) return;
+            if (matToken !== tab.reqNum) return true;
             console.log(e);
             el.renderError(e.toString());
-            return;
+            return false;
         }
-        if (matToken !== tab.reqNum) return;
+        if (matToken !== tab.reqNum) return true;
     } else {
         el.updateRaw(snap.data);
     }
@@ -5349,12 +5353,12 @@ async function renderSnapshotIntoElement(el, snap, tab, matToken) {
         try {
             await el.renderGraph(() => matToken === tab.reqNum);
         } catch (e) {
-            if (matToken !== tab.reqNum) return;
+            if (matToken !== tab.reqNum) return true;
             console.log(e);
             el.renderError(e.toString());
-            return;
+            return false;
         }
-        if (matToken !== tab.reqNum) return;
+        if (matToken !== tab.reqNum) return true;
     } else {
         /// Render totals before coloring, so the totals row (which `_colorTargetRows`
         /// includes) is colored on the first paint too.
@@ -5362,6 +5366,7 @@ async function renderSnapshotIntoElement(el, snap, tab, matToken) {
         el.applyColumnColors();
         if (is_table) el.transposeIfNeeded();
     }
+    return true;
 }
 
 /// Persist the per-column color coding modes so reloads, shares, and Back/Forward keep them.
@@ -5420,9 +5425,11 @@ async function restoreMultiQuery(snapshot, tab, matToken) {
         elements.push(el);
     }
 
+    let any_restore_failed = false;
     for (let i = 0; i < snapshot.multi.length; ++i) {
-        await renderSnapshotIntoElement(elements[i], snapshot.multi[i], tab, matToken);
+        const rendered_ok = await renderSnapshotIntoElement(elements[i], snapshot.multi[i], tab, matToken);
         if (matToken !== tab.reqNum) return;
+        if (!rendered_ok) any_restore_failed = true;
     }
 
     let total_rows = 0;
@@ -5436,7 +5443,10 @@ async function restoreMultiQuery(snapshot, tab, matToken) {
 
     /// The logo returns only for a fully successful run, matching the live `postMulti` path.
     /// Recorded on the tab; `syncActiveTabChrome` applies it to the shared logo/progress bar.
-    tab.logoVisible = !snapshot.multi.some(s => !s.ok);
+    /// A statement that failed to re-render (a chart/graph loader failure during restore) shows
+    /// an error panel, so it counts as failed too — matching the single-query restore path in
+    /// `materializeResult`, which flips the tab to `'error'` for the same loader failures.
+    tab.logoVisible = !snapshot.multi.some(s => !s.ok) && !any_restore_failed;
     tab.failed = !tab.logoVisible;
     /// Restore the same phase the live run recorded (`postMulti`): a failed "Run all" is `'error'`,
     /// so reopening it does not paint the shared success check-mark over a failed tab.
