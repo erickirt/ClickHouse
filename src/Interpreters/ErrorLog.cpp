@@ -133,14 +133,18 @@ void ErrorLog::stepFunction(TimePoint current_time)
     for (ErrorCodes::ErrorCode code = 0, end = ErrorCodes::end(); code < end; ++code)
     {
         const auto & error = ErrorCodes::values[code].get();
-        if (error.local.count != previous_values.at(code).local)
+        /// Read the guarded previous values into locals so the guarded access stays in this scope;
+        /// thread-safety analysis cannot see the mutex through the add() callback.
+        const auto previous_local = previous_values.at(code).local;
+        const auto previous_remote = previous_values.at(code).remote;
+        if (error.local.count != previous_local)
         {
             this->add([&](ErrorLogElement & element)
             {
                 element = ErrorLogElement {
                     .event_time=event_time,
                     .code=code,
-                    .value=error.local.count - previous_values.at(code).local,
+                    .value=error.local.count - previous_local,
                     .remote=false,
                     .last_error_time=(error.local.error_time_ms / 1000),
                     .last_error_message=error.local.message,
@@ -150,14 +154,14 @@ void ErrorLog::stepFunction(TimePoint current_time)
             });
             previous_values[code].local = error.local.count;
         }
-        if (error.remote.count != previous_values.at(code).remote)
+        if (error.remote.count != previous_remote)
         {
             add([&](ErrorLogElement & element)
             {
                 element = ErrorLogElement {
                     .event_time=event_time,
                     .code=code,
-                    .value=error.remote.count - previous_values.at(code).remote,
+                    .value=error.remote.count - previous_remote,
                     .remote=true,
                     .last_error_time=(error.remote.error_time_ms / 1000),
                     .last_error_message=error.remote.message,

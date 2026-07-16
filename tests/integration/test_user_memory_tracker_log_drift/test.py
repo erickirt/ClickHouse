@@ -83,6 +83,7 @@ def user_tracker_floor(user, log_settings):
         )
     finally:
         node.query(f"KILL QUERY WHERE user = '{user}' SYNC")
+        sleeper.get_answer_and_error()
     return floor
 
 
