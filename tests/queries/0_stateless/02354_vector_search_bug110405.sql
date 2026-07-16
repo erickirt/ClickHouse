@@ -35,5 +35,3 @@ SELECT trimLeft(explain) FROM (
     LIMIT 3 WITH TIES
 )
 WHERE explain LIKE '%vector_similarity%';
-
-DROP TABLE tab;
