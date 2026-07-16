@@ -156,7 +156,7 @@ protected:
         writer.finalizeToStorage();
 
         auto handle = openSSTReaderFromPath(storage->getFullPath() + "/" + SSTIndexWriter::FILE_NAME);
-        if (!handle.valid)
+        if (!handle.reader)
             return nullptr;
         auto bitmap = std::make_shared<DeleteBitmap>();
         for (UInt64 r : dead_rows)
@@ -317,7 +317,7 @@ TEST_F(UniqueKeyProbeTest, CorruptValueSizeFailsClosed)
     ASSERT_TRUE(writeSSTRawValue(path, encodeKey(1), String(5, '\0'))); /// 5-byte value
 
     auto handle = openSSTReaderFromPath(path);
-    ASSERT_TRUE(handle.valid);
+    ASSERT_TRUE(handle.reader != nullptr);
     SSTProbeTargetPart target(/*part=*/nullptr, std::make_shared<DeleteBitmap>(), std::move(handle));
 
     const String e = encodeKey(1);
@@ -399,7 +399,7 @@ TEST_F(UniqueKeyProbeTest, DecodedRowOutOfPartBoundsThrows)
     ASSERT_TRUE(writeSSTRawValue(sst_path, encodeKey(42), out_of_range_value));
 
     auto handle = openSSTReaderFromPath(sst_path);
-    ASSERT_TRUE(handle.valid);
+    ASSERT_TRUE(handle.reader != nullptr);
     SSTProbeTargetPart target(part.get(), std::make_shared<DeleteBitmap>(), std::move(handle));
 
     const String e = encodeKey(42);

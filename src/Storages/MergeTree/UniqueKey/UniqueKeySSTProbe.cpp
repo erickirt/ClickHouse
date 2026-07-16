@@ -1,5 +1,11 @@
 #include <Storages/MergeTree/UniqueKey/UniqueKeySSTProbe.h>
 
+#include "config.h"
+
+/// This whole translation unit is RocksDB-only (see the header): the SST backend
+/// is unavailable without RocksDB, and its only caller is guarded.
+#if USE_ROCKSDB
+
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
 #include <Storages/MergeTree/UniqueKey/DeleteBitmap.h>
 #include <Storages/MergeTree/UniqueKey/SSTIndexWriter.h>
@@ -8,9 +14,6 @@
 
 #include <base/unaligned.h>
 
-#include "config.h"
-
-#if USE_ROCKSDB
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/iterator.h>
 #include <rocksdb/options.h>
@@ -18,7 +21,6 @@
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/status.h>
 #include <rocksdb/table.h>
-#endif
 
 namespace DB
 {
@@ -30,7 +32,6 @@ namespace ErrorCodes
     extern const int CORRUPTED_DATA;
 }
 
-#if USE_ROCKSDB
 namespace
 {
     /// Decode the 4-byte big-endian row number written by `SSTIndexWriter`
@@ -45,14 +46,11 @@ namespace
         return unalignedLoadBigEndian<UInt32>(data);
     }
 }
-#endif
 
 SSTReaderHandle openSSTReaderFromPath(const String & sst_path)
 {
     SSTReaderHandle out;
-    out.valid = false;
 
-#if USE_ROCKSDB
     rocksdb::Options options;
     rocksdb::BlockBasedTableOptions block_based;
     block_based.filter_policy.reset(
@@ -66,11 +64,6 @@ SSTReaderHandle openSSTReaderFromPath(const String & sst_path)
             "Failed to open UNIQUE KEY SST `{}`: {}", sst_path, status.ToString());
 
     out.reader = std::move(reader);
-    out.valid = true;
-#else
-    (void)sst_path;
-#endif
-
     return out;
 }
 
@@ -92,11 +85,10 @@ void SSTProbeTargetPart::findRowIndexBatch(
 
     /// Fail closed: `NOT_FOUND` must mean "no active part holds the key", never
     /// "could not read this part" — a silent miss could let a duplicate through.
-    if (!handle.valid)
+    if (!handle.reader)
         throw Exception(ErrorCodes::CANNOT_OPEN_FILE,
             "UNIQUE KEY SST probe target has no readable index (invalid reader handle)");
 
-#if USE_ROCKSDB
     /// Fresh iterator per call: the target is shared as `shared_ptr<const>`, so a
     /// cached iterator would race across concurrent probes. `Seek` lands at >= key,
     /// so the exact-equality compare is required.
@@ -130,7 +122,6 @@ void SSTProbeTargetPart::findRowIndexBatch(
                 "SSTProbeTargetPart: error seeking UNIQUE KEY SST: {}", it->status().ToString());
         }
     }
-#endif
 }
 
 bool SSTProbeTargetPart::isRowDead(UInt64 row_number) const
@@ -139,3 +130,5 @@ bool SSTProbeTargetPart::isRowDead(UInt64 row_number) const
 }
 
 }
+
+#endif

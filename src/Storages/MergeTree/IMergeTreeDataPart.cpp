@@ -1592,19 +1592,13 @@ NameSet IMergeTreeDataPart::getFileNamesWithoutChecksums() const
     if (getDataPartStorage().existsFile(COLUMNS_SUBSTREAMS_FILE_NAME))
         result.emplace(COLUMNS_SUBSTREAMS_FILE_NAME);
 
-    /// UNIQUE KEY per-part SST. Enumerate so `MergeTreeData::backupParts`
-    /// and `DataPartsExchange::sendPart` transfer it — both build the
-    /// transferred file set from `checksums ∪ getFileNamesWithoutChecksums()`,
-    /// not by globbing the part directory. Gated on `hasUniqueKey()` so a
-    /// stray SST on a plain-MT table (legacy / restore residue) is not
-    /// transferred — the orphan sweep deletes such strays at ATTACH but
-    /// BACKUP may race ATTACH.
-    {
-        auto uk_metadata = storage.getInMemoryMetadataPtr(storage.getContext(), /*bypass_metadata_cache=*/false);
-        const bool table_has_uk = uk_metadata && uk_metadata->hasUniqueKey();
-        if (table_has_uk && getDataPartStorage().existsFile(SSTIndexWriter::FILE_NAME))
-            result.emplace(SSTIndexWriter::FILE_NAME);
-    }
+    /// UNIQUE KEY per-part SST. Enumerated based on the part's own on-disk
+    /// presence (a part property), not table metadata, so `MergeTreeData::backupParts`
+    /// and `DataPartsExchange::sendPart` transfer it — both build the transferred
+    /// file set from `checksums ∪ getFileNamesWithoutChecksums()`, not by globbing
+    /// the part directory.
+    if (getDataPartStorage().existsFile(SSTIndexWriter::FILE_NAME))
+        result.emplace(SSTIndexWriter::FILE_NAME);
 
     return result;
 }

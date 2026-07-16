@@ -2753,7 +2753,7 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks, std::optional<std::un
     MutableDataPartsVector active_uk_parts_to_rebuild;
     if (!is_static_storage && !all_disks_are_readonly && !is_table_readonly)
     {
-        sweepUniqueKeyDenseIndexOrphans(part_lock);
+        unique_key_dense_index_ops->sweepOrphans(part_lock);
 
         auto metadata_snapshot_for_rebuild = getInMemoryMetadataPtr(getContext(), /*bypass_metadata_cache=*/false);
         if (metadata_snapshot_for_rebuild && metadata_snapshot_for_rebuild->hasUniqueKey())
@@ -2779,7 +2779,7 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks, std::optional<std::un
     {
         try
         {
-            ensureUniqueKeyIndexOnLoad(p);
+            unique_key_dense_index_ops->rebuildIfMissing(p);
         }
         catch (...)
         {
@@ -3061,24 +3061,6 @@ catch (...)
 }
 
 MergeTreeData::~MergeTreeData() = default;
-
-void MergeTreeData::sweepUniqueKeyDenseIndexOrphans(const DataPartsLock & part_lock)
-{
-    if (unique_key_dense_index_ops)
-        unique_key_dense_index_ops->sweepOrphans(part_lock);
-}
-
-void MergeTreeData::ensureUniqueKeyIndexOnLoad(MutableDataPartPtr & part) const
-{
-    if (unique_key_dense_index_ops)
-        unique_key_dense_index_ops->rebuildIfMissing(part);
-}
-
-void MergeTreeData::onPartAttachUniqueKey(MutableDataPartPtr & part) const
-{
-    if (unique_key_dense_index_ops)
-        unique_key_dense_index_ops->onPartAttach(part);
-}
 
 void MergeTreeData::loadUnexpectedDataParts()
 try
@@ -4690,17 +4672,6 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
                 backQuoteIfNeed(command.column_name),
                 uk_list_str());
         }
-
-        /// Block ALTERs that derive a data-rewriting mutation (CLEAR COLUMN,
-        /// converting MODIFY, ...): the mutation rewrites the part without
-        /// rebuilding the dense index. TODO(unique-key): rebuild it, then relax.
-        auto uk_mutation_commands = commands.getMutationCommands(
-            new_metadata, settings[Setting::materialize_ttl_after_modify], local_context);
-        if (!uk_mutation_commands.empty())
-            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
-                "Mutations are not yet supported on tables with UNIQUE KEY: ALTER '{}' "
-                "would rewrite part data without rebuilding the dense index.",
-                uk_mutation_commands.ast()->formatForErrorMessage());
     }
 
     removeImplicitStatistics(new_metadata.columns);
@@ -5284,8 +5255,9 @@ void MergeTreeData::checkMutationIsPossible(const MutationCommands & commands, c
         if (!disk->supportsHardLinks())
             throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "Mutations are not supported for immutable disk '{}'", disk->getName());
 
-    /// UNIQUE KEY tables reject all mutations for now: a mutation rewrites the
-    /// part without rebuilding the dense index. TODO(unique-key): rebuild it.
+    /// Reject mutations that bypass UK dedup: DELETE/UPDATE rewrite rows;
+    /// MATERIALIZE COLUMN / CLEAR COLUMN (the latter serialized as
+    /// `DROP_COLUMN` with `clear=true`) rewrite stored bytes.
     if (auto uk_metadata = getInMemoryMetadataPtr(getContext(), false); uk_metadata->hasUniqueKey())
     {
         const auto & uk_column_names = uk_metadata->getUniqueKeyColumns();
@@ -5322,17 +5294,25 @@ void MergeTreeData::checkMutationIsPossible(const MutationCommands & commands, c
                     "producing duplicate live keys. UNIQUE KEY columns: ({}).",
                     command.column_name, fmt::join(uk_column_names, ", "));
 
-            /// EMPTY / ALTER_WITHOUT_MUTATION don't rewrite parts; everything else does.
-            /// This broad interim guard is a strict superset of master's destructive-rewrite
-            /// family (REWRITE_PARTS / APPLY_DELETED_MASK / APPLY_PATCHES / MATERIALIZE
-            /// INDEX|STATISTICS|PROJECTION): all of those rewrite parts and are already
-            /// rejected here, without rebuilding the dense index.
-            if (command.type != MutationCommand::EMPTY
-                && command.type != MutationCommand::ALTER_WITHOUT_MUTATION)
+            /// These commands rebuild whole parts (the full read+rewrite mutation path) and
+            /// drop the delete_bitmap_*.rbm sidecars, silently resurrecting deleted rows once
+            /// DELETE lands. MATERIALIZE INDEX/STATISTICS/PROJECTION reach the same path via
+            /// MutateAllPartColumnsTask for compact or non-full parts (which only hardlinks
+            /// checksummed entries, not the sidecars). Reject the whole destructive-rewrite family.
+            if (command.type == MutationCommand::REWRITE_PARTS
+                || command.type == MutationCommand::APPLY_DELETED_MASK
+                || command.type == MutationCommand::APPLY_PATCHES
+                || command.type == MutationCommand::MATERIALIZE_INDEX
+                || command.type == MutationCommand::MATERIALIZE_STATISTICS
+                || command.type == MutationCommand::MATERIALIZE_PROJECTION)
                 throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
-                    "Mutations are not yet supported on tables with UNIQUE KEY: they would "
-                    "rewrite the part without rebuilding its dense index. UNIQUE KEY columns: ({}).",
-                    fmt::join(uk_column_names, ", "));
+                    "ALTER TABLE ... {} is not supported on tables with UNIQUE KEY",
+                    command.type == MutationCommand::REWRITE_PARTS ? "REWRITE PARTS"
+                        : command.type == MutationCommand::APPLY_DELETED_MASK ? "APPLY DELETED MASK"
+                        : command.type == MutationCommand::APPLY_PATCHES ? "APPLY PATCHES"
+                        : command.type == MutationCommand::MATERIALIZE_INDEX ? "MATERIALIZE INDEX"
+                        : command.type == MutationCommand::MATERIALIZE_STATISTICS ? "MATERIALIZE STATISTICS"
+                        : "MATERIALIZE PROJECTION");
         }
     }
 
@@ -6941,7 +6921,7 @@ void MergeTreeData::loadPartAndFixMetadataImpl(MergeTreeData::MutableDataPartPtr
     part->removeVersionMetadata();
 
     /// UNIQUE KEY — per-part ATTACH hook: `.sst.tmp` cleanup + rebuild.
-    onPartAttachUniqueKey(part);
+    unique_key_dense_index_ops->onPartAttach(part);
 }
 
 void MergeTreeData::unregisterFromMergeSelection(const MergeTreeSettingsPtr & settings)
@@ -7935,7 +7915,7 @@ MergeTreeData::MutableDataPartPtr MergeTreeData::loadPartRestoredFromBackup(cons
         /// (older backup, or one taken before UK). Build it here so the part is
         /// usable; a failure throws and routes the part to `mark_broken` below
         /// (detached), matching the fail-closed contract on every other load path.
-        onPartAttachUniqueKey(part);
+        unique_key_dense_index_ops->onPartAttach(part);
     };
 
     /// Broken parts can appear in a backup sometimes.

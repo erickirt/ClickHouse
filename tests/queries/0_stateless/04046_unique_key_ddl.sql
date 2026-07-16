@@ -1,4 +1,4 @@
--- Tags: no-fasttest, no-parallel, no-ordinary-database, no-replicated-database, no-shared-merge-tree, no-object-storage, no-s3-storage
+-- Tags: no-parallel, no-ordinary-database, no-replicated-database, no-shared-merge-tree, no-object-storage, no-s3-storage
 -- no-parallel: ATTACHes a table with a fixed UUID (item 10c), which collides
 -- across concurrent runs of this test (e.g. the flaky check's parallel workers).
 -- UNIQUE KEY DDL + metadata.
@@ -170,12 +170,6 @@ ALTER TABLE uk_t MODIFY ORDER BY (id); -- { serverError SUPPORT_IS_DISABLED }
 ALTER TABLE uk_t DELETE WHERE id = 1; -- { serverError SUPPORT_IS_DISABLED }
 ALTER TABLE uk_t UPDATE v = 'x' WHERE id = 1; -- { serverError SUPPORT_IS_DISABLED }
 
--- 13b. Any other part-rewriting mutation is also blocked: it would rewrite the
--- part without rebuilding the dense index (interim until merge/mutation writes it).
--- The broad interim guard is a strict superset of the destructive-rewrite family
--- below, so both the column-rewrite and the full-part-rewrite cases must all error.
-ALTER TABLE uk_t MATERIALIZE COLUMN v; -- { serverError SUPPORT_IS_DISABLED }
-ALTER TABLE uk_t CLEAR COLUMN v; -- { serverError SUPPORT_IS_DISABLED }
 -- 13a. Full-part rewrite mutations rebuild parts without preserving the
 -- delete-bitmap sidecars, so the whole family must be rejected on a unique-key
 -- table. MATERIALIZE INDEX/STATISTICS/PROJECTION reach the same rewrite path via

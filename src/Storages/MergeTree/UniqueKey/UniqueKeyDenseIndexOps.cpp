@@ -3,16 +3,17 @@
 #include <Core/Settings.h>
 #include <Interpreters/Context.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
-#include <QueryPipeline/Pipe.h>
-#include <QueryPipeline/QueryPipeline.h>
+#include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
+#include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
+#include <Processors/QueryPlan/QueryPlan.h>
+#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/MergeTree/IMergeTreeDataPart.h>
 #include <Storages/MergeTree/MergeTreeData.h>
-#include <Storages/MergeTree/MergeTreeSequentialSource.h>
-#include <Storages/MergeTree/RangesInDataPart.h>
+#include <Storages/MergeTree/StorageFromMergeTreeDataPart.h>
 #include <Storages/MergeTree/UniqueKey/SSTIndexWriter.h>
+#include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageInMemoryMetadata.h>
 #include <Storages/StorageSnapshot.h>
-#include <Storages/MergeTree/AlterConversions.h>
 
 #include <Common/Exception.h>
 #include <Common/ProfileEvents.h>
@@ -37,6 +38,7 @@ namespace ErrorCodes
 
 namespace Setting
 {
+    extern const SettingsNonZeroUInt64 max_block_size;
     extern const SettingsUInt64 unique_key_max_encoded_size;
 }
 
@@ -223,25 +225,34 @@ Block UniqueKeyDenseIndexOps::readUniqueKeyColumns(
     const StorageMetadataPtr & metadata_snapshot,
     const Names & uk_names) const
 {
-    RangesInDataPart ranges(part);
-    auto storage_snapshot = std::make_shared<StorageSnapshot>(data, metadata_snapshot);
-    auto empty_alter_conversions = std::make_shared<const AlterConversions>();
+    /// Read the part's UK columns through a single-part storage view — the same
+    /// `StorageFromMergeTreeDataPart` path projection materialization and MutateTask
+    /// use. An empty mutations snapshot applies no on-fly mutations and no
+    /// lightweight-delete mask, so every stored row is read (no deleted-mask
+    /// application), matching the rebuild's semantics.
+    auto context = data.getContext();
+    auto mutations_snapshot = data.getMutationsSnapshot({});
+    auto storage_from_part = std::make_shared<StorageFromMergeTreeDataPart>(
+        std::const_pointer_cast<const IMergeTreeDataPart>(part), mutations_snapshot);
 
-    auto pipe = createMergeTreeSequentialSource(
-        MergeTreeSequentialSourceType::Mutation,
-        data,
-        storage_snapshot,
-        std::move(ranges),
-        empty_alter_conversions,
-        /*merged_part_offsets=*/nullptr,
-        uk_names,
-        /*mark_ranges=*/std::nullopt,
-        /*filtered_rows_count=*/nullptr,
-        /*apply_deleted_mask=*/false,
-        /*read_with_direct_io=*/false,
-        /*prefetch=*/false);
+    auto storage_snapshot = storage_from_part->getStorageSnapshot(metadata_snapshot, context);
 
-    QueryPipeline pipeline(std::move(pipe));
+    QueryPlan plan;
+    SelectQueryInfo query_info;
+    const size_t max_block_size = context->getSettingsRef()[Setting::max_block_size];
+    storage_from_part->read(
+        plan, uk_names, storage_snapshot, query_info, context,
+        QueryProcessingStage::FetchColumns, max_block_size, /*num_streams=*/1);
+
+    /// An uninitialized plan means the storage produced no reader (nothing to
+    /// read). Return an empty block; the caller fails closed on a non-empty part.
+    if (!plan.isInitialized())
+        return storage_snapshot->getSampleBlockForColumns(uk_names).cloneEmpty();
+
+    auto builder = plan.buildQueryPipeline(
+        QueryPlanOptimizationSettings(context), BuildQueryPipelineSettings(context));
+    auto pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
+
     /// Snapshot the header before binding to the executor — once bound, the
     /// pipeline transitions out of the state `getHeader()` asserts on.
     const auto pipeline_header = pipeline.getHeader();

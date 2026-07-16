@@ -1981,17 +1981,6 @@ protected:
     void loadUnexpectedDataParts();
     void loadUnexpectedDataPart(UnexpectedPartLoadState & state);
 
-    /// UNIQUE KEY — SST sidecar sweep over Active parts. Runs once from
-    /// `loadDataParts` after active parts are registered.
-    void sweepUniqueKeyDenseIndexOrphans(const DataPartsLock & part_lock);
-
-    /// UNIQUE KEY — load-time SST rebuild. Per-part hook from
-    /// `loadDataParts`; non-mutating to table state.
-    void ensureUniqueKeyIndexOnLoad(MutableDataPartPtr & part) const;
-
-    /// UNIQUE KEY — per-part ATTACH hook: `.sst.tmp` cleanup + rebuild.
-    void onPartAttachUniqueKey(MutableDataPartPtr & part) const;
-
     /// This has to be "true" by default, because in case of empty table or absence of Outdated parts
     /// it is automatically finished.
     std::atomic_bool outdated_data_parts_loading_finished = true;

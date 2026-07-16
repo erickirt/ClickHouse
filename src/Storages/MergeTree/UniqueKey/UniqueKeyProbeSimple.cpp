@@ -4,10 +4,25 @@
 
 #include <Core/Block.h>
 
+#include <Common/Exception.h>
+
 #include <string_view>
 
 namespace DB
 {
+
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
+
+/// Debug builds validate the "a live key lives in <= 1 part" invariant by probing
+/// every part for every key; release builds early-skip a key once it resolves live.
+#ifndef NDEBUG
+static constexpr bool probe_validates_single_live_part = true;
+#else
+static constexpr bool probe_validates_single_live_part = false;
+#endif
 
 UniqueKeyProbeSimple::UniqueKeyProbeSimple(
     ProbeTargetsSupplier supplier_,
@@ -63,14 +78,29 @@ std::vector<ProbeResult> UniqueKeyProbeSimple::probeBatch(const Block & keys, co
 
         for (size_t i = 0; i < n; ++i)
         {
-            if (resolved[i])
+            /// Release: a resolved key is already live in a newer part, so no older
+            /// part can override it — skip it to shrink later lookups. Debug: do not
+            /// skip, so a second live hit below trips the invariant check.
+            if (resolved[i] && !probe_validates_single_live_part)
                 continue;
+
             const auto & row_opt = batch_out[i];
             if (!row_opt.has_value())
                 continue;
 
             if (!target->isRowDead(*row_opt))
             {
+                if (resolved[i])
+                {
+                    /// Reached only when validating (debug): release skips resolved
+                    /// keys above. A second LIVE hit means the same key is live in
+                    /// more than one part, violating the "a live key lives in <= 1
+                    /// part" invariant that INSERT-time dedup is meant to guarantee.
+                    throw Exception(ErrorCodes::LOGICAL_ERROR,
+                        "UNIQUE KEY probe invariant violated: key at batch row {} is live in more "
+                        "than one part (partition '{}')", i, partition_id);
+                }
+
                 results[i].outcome = ProbeOutcome::FOUND_LIVE;
                 results[i].part = underlying;
                 results[i].row_number = *row_opt;

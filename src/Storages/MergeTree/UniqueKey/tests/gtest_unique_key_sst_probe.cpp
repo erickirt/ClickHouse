@@ -196,11 +196,11 @@ TEST_F(SSTFixture, RoundTrip10K)
     /// Link-time guard for the load-time rebuild instrumentation
     /// (`rebuildIfMissing`): the ProfileEvent slots must exist and increment.
     const size_t count_before
-        = ProfileEvents::global_counters[ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount].load();
+        = ProfileEvents::global_counters[ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount];
     ProfileEvents::increment(ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount);
     ProfileEvents::increment(ProfileEvents::UniqueKeyLoadTimeSSTRebuildMicroseconds, 1);
     EXPECT_EQ(
-        ProfileEvents::global_counters[ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount].load(),
+        ProfileEvents::global_counters[ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount],
         count_before + 1u);
 }
 

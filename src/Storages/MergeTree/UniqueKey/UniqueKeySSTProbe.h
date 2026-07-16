@@ -12,12 +12,14 @@
 #include <string_view>
 #include <vector>
 
+/// This whole translation unit is RocksDB-only: the SST backend is unavailable
+/// without RocksDB, and its only caller (the probe factory / gtests) is guarded.
 #if USE_ROCKSDB
+
 namespace rocksdb
 {
     class SstFileReader;
 }
-#endif
 
 namespace DB
 {
@@ -27,16 +29,13 @@ class DeleteBitmap;
 
 /// Opened-reader handle for a part's `unique_key_index.sst` sidecar. Owns the
 /// `SstFileReader` shared_ptr so the file descriptor outlives the open call.
-/// `valid == false` means RocksDB is disabled in this build.
+/// A null `reader` denotes an invalid handle (a negative open).
 ///
 /// TODO: route handles through a reader cache so a part's reader is opened once
 /// and shared across probes/queries instead of per use.
 struct SSTReaderHandle
 {
-#if USE_ROCKSDB
     std::shared_ptr<rocksdb::SstFileReader> reader;
-#endif
-    bool valid = false;
 };
 
 /// Open an SST sidecar directly by local filesystem path. SST-only: knows
@@ -77,7 +76,7 @@ public:
 
     /// True if the handle holds a valid reader. Exposed for tests + callers
     /// that want to fail fast on a negative open.
-    bool hasValidReader() const { return handle.valid; }
+    bool hasValidReader() const { return handle.reader != nullptr; }
 
 private:
     const IMergeTreeDataPart * part;
@@ -86,3 +85,5 @@ private:
 };
 
 }
+
+#endif
