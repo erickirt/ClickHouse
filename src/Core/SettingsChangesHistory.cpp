@@ -87,6 +87,7 @@ const VersionToSettingsChangesMap & getSettingsChangesHistory()
             {"show_remote_databases_in_system_tables", true, true, "New setting to control whether `MySQL` and `PostgreSQL` databases are shown in `system.tables`, `system.columns` and `system.completions`."},
             {"use_constant_folding_in_index_analysis", false, false, "New setting to fold partition-level constants into the filter predicate per part during MergeTree index analysis, improving pruning for filters whose branches depend on partition values."},
             {"join_runtime_filter_size_from_hash_table_stats", false, true, "Use hash table size statistics collected from previous executions to size the JOIN runtime filter. When disabled, fall back to the fixed `join_runtime_bloom_filter_bytes`."},
+            {"unique_key_probe_implementation", "auto", "auto", "New setting: selects the UNIQUE KEY probe implementation (currently only the simple baseline exists)"},
         });
 
         addSettingsChanges(settings_changes_history, "26.6",
@@ -112,7 +113,6 @@ const VersionToSettingsChangesMap & getSettingsChangesHistory()
             {"optimize_injective_functions_in_limit_by", false, true, "New setting that replaces injective functions by their arguments in the LIMIT BY keys."},
             {"optimize_rewrite_has_to_in", false, true, "New setting"},
             {"unique_key_max_encoded_size", 256, 256, "New setting: maximum size (bytes) of the order-preserving binary encoding of a single UNIQUE KEY row"},
-            {"unique_key_probe_implementation", "auto", "auto", "New setting: selects the UNIQUE KEY probe implementation (currently only the simple baseline exists)"},
             {"query_plan_push_limit_by_into_sort", false, true, "New setting that pushes a per-stream LIMIT BY into the sort pipeline when LIMIT BY's columns are a prefix of ORDER BY, reducing rows flowing through the final merge."},
             {"input_format_geojson_unsupported_geometry_handling", "throw", "throw", "New setting that controls handling of GeoJSON geometry types that cannot be represented in the Geometry type (GeometryCollection, MultiPoint)"},
             {"enable_identifier_resolve_cache", false, true, "New setting to control the identifier resolution cache in the query analyzer"},
