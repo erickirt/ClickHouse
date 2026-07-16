@@ -48,3 +48,6 @@ ${CLICKHOUSE_CURL} -sS -I "${BASE_URL}/play" | grep -oF 'Vary: Accept-Encoding'
 
 echo "--- test 13: pre-encoded response does not advertise Vary: Accept-Encoding ---"
 ${CLICKHOUSE_CURL} -sS -I "${BASE_URL}/clickstack" | grep -oF 'Vary: Accept-Encoding' || echo "no Vary (expected)"
+
+echo "--- test 14: Accept-Encoding: zstd on / with Mozilla UA ---"
+${CLICKHOUSE_CURL} -sS -I -H "Accept-Encoding: zstd" -H "User-Agent: Mozilla/5.0" "${BASE_URL}/" | grep -oF 'Content-Encoding: zstd'

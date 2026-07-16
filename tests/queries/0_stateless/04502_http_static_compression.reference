@@ -24,3 +24,5 @@ Vary: Accept-Encoding
 Vary: Accept-Encoding
 --- test 13: pre-encoded response does not advertise Vary: Accept-Encoding ---
 no Vary (expected)
+--- test 14: Accept-Encoding: zstd on / with Mozilla UA ---
+Content-Encoding: zstd
