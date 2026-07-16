@@ -7,7 +7,9 @@ FROM ubuntu:22.04
 # which are reachable from CI runners (Canonical's mirrors are frequently
 # unreachable over IPv4 and have no IPv6 route from the runners). Sources live in
 # /etc/apt/sources.list on 22.04 and in *.sources (deb822) on 24.04, so rewrite
-# every apt source file. Also retry transient apt failures.
+# every apt source file. The runners have no IPv6 egress, so force IPv4 to avoid
+# hanging on IPv6 connect attempts (this is a CI-only image, never pulled by end
+# users, so forcing IPv4 here is safe). Also retry transient apt failures.
 ARG apt_archive="http://us-east-1.ec2.archive.ubuntu.com"
 ARG apt_ports_archive="http://us-east-1.ec2.ports.ubuntu.com"
 RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0 | xargs -0 -r sed -i \
@@ -15,7 +17,7 @@ RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0 | xa
         -e "s|https://archive.ubuntu.com|$apt_archive|g" \
         -e "s|http://ports.ubuntu.com|$apt_ports_archive|g" \
         -e "s|https://ports.ubuntu.com|$apt_ports_archive|g" \
-    && printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/99-clickhouse-ci
+    && printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "5";\n' > /etc/apt/apt.conf.d/99-clickhouse-ci
 ARG LLVM_APT_VERSION="1:21.1.5~"
 
 ENV DEBIAN_FRONTEND=noninteractive LLVM_VERSION=21
