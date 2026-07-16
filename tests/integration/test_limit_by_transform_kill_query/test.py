@@ -38,6 +38,8 @@ def started_cluster():
 
 HASHMAP_FAULT_NAME = "limit_by_transform_pause"
 SORTED_FAULT_NAME = "limit_by_sorted_stream_transform_pause"
+HASHMAP_AFTER_LOOP_FAULT_NAME = "limit_by_transform_after_loop_pause"
+SORTED_AFTER_LOOP_FAULT_NAME = "limit_by_sorted_stream_transform_after_loop_pause"
 
 
 def run_kill_query_failpoint_test(query, fault_name, query_id=None):
@@ -92,4 +94,62 @@ def test_sorted_kill_query(started_cluster):
     run_kill_query_failpoint_test(
         SORTED_QUERY,
         SORTED_FAULT_NAME,
+    )
+
+
+def run_kill_query_failpoint_after_loop_test(query, fault_name, expected_log_message, query_id=None):
+    if query_id is None:
+        query_id = str(uuid.uuid4())
+
+    node1.query(f"SYSTEM ENABLE FAILPOINT {fault_name}")
+
+    thread_error = [None]
+
+    def execute_query():
+        try:
+            _, error = node1.query_and_get_answer_with_error(
+                query,
+                query_id=query_id,
+            )
+            assert "DB::Exception: Query was cancelled" in error
+        except Exception as e:
+            thread_error[0] = e
+
+    query_thread = threading.Thread(target=execute_query)
+    query_thread.start()
+
+    node1.query(f"SYSTEM WAIT FAILPOINT {fault_name} PAUSE")
+
+    node1.http_query(f"KILL QUERY WHERE query_id='{query_id}'")
+
+    node1.query(f"SYSTEM DISABLE FAILPOINT {fault_name}")
+
+    query_thread.join()
+    if thread_error[0] is not None:
+        raise thread_error[0]
+
+    result = node1.query(
+        f"SELECT count(*) FROM system.processes WHERE query_id='{query_id}'"
+    )
+    assert int(result.strip()) == 0
+
+    cancel_log = node1.grep_in_log(query_id)
+    assert "QUERY_WAS_CANCELLED" in cancel_log
+    assert expected_log_message in cancel_log
+    assert "Cancelled during row processing" not in cancel_log
+
+
+def test_hashmap_kill_query_after_loop(started_cluster):
+    run_kill_query_failpoint_after_loop_test(
+        HASHMAP_QUERY,
+        HASHMAP_AFTER_LOOP_FAULT_NAME,
+        "Cancelled after processing chunk",
+    )
+
+
+def test_sorted_kill_query_after_loop(started_cluster):
+    run_kill_query_failpoint_after_loop_test(
+        SORTED_QUERY,
+        SORTED_AFTER_LOOP_FAULT_NAME,
+        "Cancelled after processing runs",
     )

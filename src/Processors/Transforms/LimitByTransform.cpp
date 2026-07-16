@@ -27,6 +27,8 @@ namespace FailPoints
 {
 extern const char limit_by_sorted_stream_transform_pause[];
 extern const char limit_by_transform_pause[];
+extern const char limit_by_sorted_stream_transform_after_loop_pause[];
+extern const char limit_by_transform_after_loop_pause[];
 }
 
 namespace
@@ -333,8 +335,11 @@ void LimitByTransform::transform(Chunk & chunk)
         }
     }
 
+    FailPointInjection::pauseFailPoint(FailPoints::limit_by_transform_after_loop_pause);
+
     if (isCancelled())
     {
+        LOG_TEST(getLogger("LimitByTransform"), "Cancelled after processing chunk");
         stopReading();
         return;
     }
@@ -463,8 +468,11 @@ void LimitBySortedStreamTransform::transform(Chunk & chunk)
     /// keys this is a no-op (nothing to remember).
     rememberLastGroupingKey(normalized_grouping_key_columns, row_count - 1);
 
+    FailPointInjection::pauseFailPoint(FailPoints::limit_by_sorted_stream_transform_after_loop_pause);
+
     if (isCancelled())
     {
+        LOG_TEST(getLogger("LimitBySortedStreamTransform"), "Cancelled after processing runs");
         stopReading();
         return;
     }
