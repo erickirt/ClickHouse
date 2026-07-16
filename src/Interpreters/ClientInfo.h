@@ -1,15 +1,16 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <time.h>
 #include <base/types.h>
 #include <Common/HTTPFieldLess.h>
 #include <Common/OpenTelemetryTracingContext.h>
+#include <Poco/Net/SocketAddress.h>
 
 namespace Poco::Net
 {
     class HTTPRequest;
-    class SocketAddress;
 }
 
 namespace DB
@@ -61,12 +62,12 @@ public:
 
     QueryKind query_kind = QueryKind::NO_QUERY;
 
-    std::shared_ptr<Poco::Net::SocketAddress> connection_address;
+    std::optional<Poco::Net::SocketAddress> connection_address;
 
     /// Current values are not serialized, because it is passed separately.
     String current_user;
     String current_query_id;
-    std::shared_ptr<Poco::Net::SocketAddress> current_address;
+    std::optional<Poco::Net::SocketAddress> current_address;
 
     /// For IMPERSONATEd session, stores the original authenticated user
     String authenticated_user;
@@ -74,7 +75,7 @@ public:
     /// When query_kind == INITIAL_QUERY, these values are equal to current.
     String initial_user;
     String initial_query_id;
-    std::shared_ptr<Poco::Net::SocketAddress> initial_address;
+    std::optional<Poco::Net::SocketAddress> initial_address;
     time_t initial_query_start_time{};
     Decimal64 initial_query_start_time_microseconds{};
 

@@ -1699,9 +1699,9 @@ void ObjectStorageQueueSource::appendLogElement(
     const auto & file_path = file_metadata_->getPath();
     const auto & file_status = *file_metadata_->getFileStatus();
 
-    ObjectStorageQueueLogElement elem{};
+    system_queue_log->add([&](ObjectStorageQueueLogElement & element)
     {
-        elem = ObjectStorageQueueLogElement
+        element = ObjectStorageQueueLogElement
         {
             .event_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()),
             .database = storage_id.database_name,
@@ -1718,8 +1718,7 @@ void ObjectStorageQueueSource::appendLogElement(
             .transaction_start_time = transaction_start_time_,
             .get_object_time_ms = file_status.get_object_time_ms,
         };
-    }
-    system_queue_log->add(std::move(elem));
+    });
 }
 
 }
