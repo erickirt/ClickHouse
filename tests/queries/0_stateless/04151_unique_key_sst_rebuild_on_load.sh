@@ -31,7 +31,7 @@ ${CLICKHOUSE_CLIENT} --query "
     SETTINGS min_rows_for_wide_part = 1, min_bytes_for_wide_part = 1;
 "
 
-${CLICKHOUSE_CLIENT} --query "INSERT INTO uk_rebuild_load VALUES (10, 'a'), (20, 'b'), (30, 'c')"
+echo "INSERT INTO uk_rebuild_load VALUES (10, 'a'), (20, 'b'), (30, 'c')" | ${CLICKHOUSE_CLIENT}
 
 DATA_PATH=$(${CLICKHOUSE_CLIENT} --query "SELECT path FROM system.parts WHERE database = currentDatabase() AND table = 'uk_rebuild_load' AND active")
 

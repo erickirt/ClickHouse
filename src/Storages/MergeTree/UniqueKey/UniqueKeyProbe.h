@@ -75,8 +75,8 @@ public:
     /// Whether the row at `row_number` is bitmap-dead in this part.
     virtual bool isRowDead(UInt64 row_number) const = 0;
 
-    /// The underlying part, surfaced through `ProbeResult::part`. Test fakes
-    /// return nullptr; production targets return the real part pointer.
+    /// The underlying part, surfaced through `ProbeResult::part`. Production
+    /// targets return the part; may be nullptr when the part is unknown.
     virtual const IMergeTreeDataPart * getUnderlyingPart() const = 0;
 };
 

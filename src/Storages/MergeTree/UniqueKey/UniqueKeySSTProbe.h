@@ -31,33 +31,24 @@ class DeleteBitmap;
 /// `SstFileReader` shared_ptr so the file descriptor outlives the open call.
 /// A null `reader` denotes an invalid handle (a negative open).
 ///
-/// TODO: route handles through a reader cache so a part's reader is opened once
-/// and shared across probes/queries instead of per use.
+/// TODO(unique-key): route handles through a reader cache (open once, share across probes).
 struct SSTReaderHandle
 {
     std::shared_ptr<rocksdb::SstFileReader> reader;
 };
 
 /// Open an SST sidecar directly by local filesystem path. SST-only: knows
-/// nothing about caching, parts, or the dense-index block cache. Returns an
-/// throws (`CANNOT_OPEN_FILE`) if RocksDB cannot open the path.
+/// nothing about caching, parts, or the dense-index block cache. Throws
+/// `CANNOT_OPEN_FILE` if RocksDB cannot open the path.
 ///
-/// TODO: a part-aware opener (resolve the sidecar path from the part + a
-/// version-file gate) once parts carry an attached/loadable sidecar.
-/// TODO: wire a dense-index block cache into the open options.
+/// TODO(unique-key): part-aware opener + dense-index block cache in the open options.
 SSTReaderHandle openSSTReaderFromPath(const String & sst_path);
 
 /// UNIQUE KEY `IProbeTargetPart` backed by an opened `unique_key_index.sst`.
+/// The driver owns encoding and hands over encoded bytes; the SST's embedded
+/// bloom filter short-circuits absent keys inside RocksDB.
 ///
-/// Pure SST backend, no caching: the caller supplies an already-opened
-/// `SSTReaderHandle`. `findRowIndexBatch` `Seek`s the SST for each
-/// driver-encoded key (the embedded bloom filter short-circuits absent keys
-/// inside RocksDB) and decodes the 4-byte big-endian row number. `isRowDead`
-/// consults the pinned `DeleteBitmap`. The target does not encode — the driver
-/// owns encoding and hands over encoded bytes.
-///
-/// TODO: a per-batch `MultiGet` path and `keyRangeIntersects` range-pruning can
-/// land with the parallel/batched driver — the simple driver `Seek`s key-by-key.
+/// TODO(unique-key): per-batch `MultiGet` + `keyRangeIntersects` range-pruning with the parallel driver.
 class SSTProbeTargetPart : public IProbeTargetPart
 {
 public:
@@ -73,10 +64,6 @@ public:
         std::vector<std::optional<UInt64>> & out) const override;
     bool isRowDead(UInt64 row_number) const override;
     const IMergeTreeDataPart * getUnderlyingPart() const override { return part; }
-
-    /// True if the handle holds a valid reader. Exposed for tests + callers
-    /// that want to fail fast on a negative open.
-    bool hasValidReader() const { return handle.reader != nullptr; }
 
 private:
     const IMergeTreeDataPart * part;

@@ -227,10 +227,11 @@ Block UniqueKeyDenseIndexOps::readUniqueKeyColumns(
 {
     /// Read the part's UK columns through a single-part storage view — the same
     /// `StorageFromMergeTreeDataPart` path projection materialization and MutateTask
-    /// use. An empty mutations snapshot applies no on-fly mutations and no
-    /// lightweight-delete mask, so every stored row is read (no deleted-mask
-    /// application), matching the rebuild's semantics.
-    auto context = data.getContext();
+    /// use. Force an unmasked read: the dense index must map every physical row's
+    /// `_part_offset`, so `apply_deleted_mask=false` keeps the `_row_exists`
+    /// lightweight-delete filter out (deadness is tracked by the DeleteBitmap).
+    auto context = Context::createCopy(data.getContext());
+    context->setSetting("apply_deleted_mask", false);
     auto mutations_snapshot = data.getMutationsSnapshot({});
     auto storage_from_part = std::make_shared<StorageFromMergeTreeDataPart>(
         std::const_pointer_cast<const IMergeTreeDataPart>(part), mutations_snapshot);

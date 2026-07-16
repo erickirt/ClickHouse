@@ -70,17 +70,12 @@ std::vector<ProbeResult> UniqueKeyProbeSimple::probeBatch(const Block & keys, co
         if (!target)
             continue;
 
-        /// Look up the full batch against this target. (Skipping already-resolved
-        /// keys to shrink the lookup is an early-termination optimization deferred
-        /// to the parallel/perf layer; correctness here does not need it.)
         target->findRowIndexBatch(views, batch_out);
         const IMergeTreeDataPart * underlying = target->getUnderlyingPart();
 
         for (size_t i = 0; i < n; ++i)
         {
-            /// Release: a resolved key is already live in a newer part, so no older
-            /// part can override it — skip it to shrink later lookups. Debug: do not
-            /// skip, so a second live hit below trips the invariant check.
+            /// See `probe_validates_single_live_part`: release skips, debug does not.
             if (resolved[i] && !probe_validates_single_live_part)
                 continue;
 
@@ -92,10 +87,7 @@ std::vector<ProbeResult> UniqueKeyProbeSimple::probeBatch(const Block & keys, co
             {
                 if (resolved[i])
                 {
-                    /// Reached only when validating (debug): release skips resolved
-                    /// keys above. A second LIVE hit means the same key is live in
-                    /// more than one part, violating the "a live key lives in <= 1
-                    /// part" invariant that INSERT-time dedup is meant to guarantee.
+                    /// Debug-only: a second live hit violates the single-live-part invariant.
                     throw Exception(ErrorCodes::LOGICAL_ERROR,
                         "UNIQUE KEY probe invariant violated: key at batch row {} is live in more "
                         "than one part (partition '{}')", i, partition_id);
