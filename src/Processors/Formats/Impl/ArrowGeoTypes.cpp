@@ -236,6 +236,7 @@ inline MultiPolygon<CartesianPoint> parseWKTMultiPolygon(ReadBuffer & in_buffer,
 GeometricObject parseWKTFormat(ReadBuffer & in_buffer, bool precise_float_parsing)
 {
     std::string type;
+    bool seen_type_char = false;
     while (true)
     {
         char current_symbol = 0;
@@ -243,6 +244,13 @@ GeometricObject parseWKTFormat(ReadBuffer & in_buffer, bool precise_float_parsin
             break;
         if (current_symbol == '(')
             break;
+        /// Skip leading whitespace before the type keyword, consistent with the WKT grammar and readWKT.
+        if (!seen_type_char && (current_symbol == ' ' || current_symbol == '\t' || current_symbol == '\n' || current_symbol == '\r'))
+        {
+            in_buffer.ignore();
+            continue;
+        }
+        seen_type_char = true;
         type.push_back(current_symbol);
         in_buffer.ignore();
     }
