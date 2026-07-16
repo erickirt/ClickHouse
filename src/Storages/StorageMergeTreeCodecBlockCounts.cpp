@@ -299,7 +299,9 @@ StorageMergeTreeCodecBlockCounts::StorageMergeTreeCodecBlockCounts(
         throw Exception(
             ErrorCodes::BAD_ARGUMENTS, "Storage MergeTreeCodecBlockCounts expected MergeTree table, got: {}", source_table->getName());
 
-    data_parts = merge_tree->getDataPartsVectorForInternalUsage();
+    /// `system.parts_columns` lists patch parts, so this function does too.
+    data_parts = merge_tree->getDataPartsVectorForInternalUsage(
+        {MergeTreeData::DataPartState::Active}, {MergeTreeData::DataPartKind::Regular, MergeTreeData::DataPartKind::Patch});
     std::erase_if(data_parts, [](const MergeTreeData::DataPartPtr & part) { return part->isEmpty(); });
 
     StorageInMemoryMetadata storage_metadata;
