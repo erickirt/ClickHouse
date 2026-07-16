@@ -1,8 +1,7 @@
 -- Tags: no-fasttest, no-ordinary-database
 -- Regression test for https://github.com/ClickHouse/ClickHouse/issues/110405
 -- LIMIT ... WITH TIES should skip vector search optimization.
--- Vectors [0.0,1.0], [1.0,0.0], [2.0,1.0], [1.0,2.0] all have L2Distance=1.0 from [1.0,1.0],
--- so LIMIT 3 WITH TIES returns 4 rows (the tie extends the result set).
+
 SET explain_query_plan_default = 'legacy';
 
 SET parallel_replicas_local_plan = 1;
@@ -35,3 +34,5 @@ SELECT trimLeft(explain) FROM (
     LIMIT 3 WITH TIES
 )
 WHERE explain LIKE '%vector_similarity%';
+
+DROP TABLE tab;
