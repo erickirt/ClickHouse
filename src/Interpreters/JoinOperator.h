@@ -5,8 +5,6 @@
 
 #include <QueryPipeline/SizeLimits.h>
 
-#include <optional>
-
 namespace DB
 {
 

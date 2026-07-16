@@ -92,7 +92,6 @@ void restoreLowCardinalityInplace(Block & block, const Names & lowcard_keys);
 ColumnRawPtrs extractKeysForJoin(const Block & block_keys, const Names & key_names_right);
 
 Int64 getCurrentQueryMemoryUsage();
-Block filterColumnsPresentInSampleBlock(const Block & block, const Block & sample_block);
 Block materializeColumnsFromRightBlock(Block block, const Block & sample_block);
 
 /// Throw an exception if join condition column is not UIint8

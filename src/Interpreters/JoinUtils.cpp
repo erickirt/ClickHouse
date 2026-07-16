@@ -115,14 +115,6 @@ Int64 getCurrentQueryMemoryUsage()
     return 0;
 }
 
-Block filterColumnsPresentInSampleBlock(const Block & block, const Block & sample_block)
-{
-    Block filtered_block;
-    for (const auto & sample_column : sample_block.getColumnsWithTypeAndName())
-        filtered_block.insert(block.getByName(sample_column.name));
-    return filtered_block;
-}
-
 Block materializeColumnsFromRightBlock(Block block, const Block & sample_block)
 {
     std::unordered_map<std::string_view, std::vector<ColumnWithTypeAndName *>> block_index;

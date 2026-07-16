@@ -67,6 +67,19 @@ size_t getMinBytesForPrefetchInJoin()
     return result;
 }
 
+namespace
+{
+
+Block filterColumnsPresentInSampleBlock(const Block & block, const Block & sample_block)
+{
+    Block filtered_block;
+    for (const auto & sample_column : sample_block.getColumnsWithTypeAndName())
+        filtered_block.insert(block.getByName(sample_column.name));
+    return filtered_block;
+}
+
+}
+
 static void correctNullabilityInplace(ColumnWithTypeAndName & column, bool nullable)
 {
     if (nullable)
@@ -147,6 +160,9 @@ HashJoin::HashJoin(
 {
     if (isCrossOrComma(kind))
         throw Exception(ErrorCodes::LOGICAL_ERROR, "HashJoin cannot execute {}", kind);
+
+    if (table_join->getClauses().empty() || table_join->isJoinWithConstant())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "HashJoin cannot execute JOIN without keys or with constant keys");
 
     if (joined_block_split_single_row && max_joined_block_rows == 0)
     {
@@ -235,7 +251,7 @@ HashJoin::HashJoin(
             /// Therefore, add it back in such that it can be extracted appropriately from the full stored
             /// key_columns and key_sizes
             auto & asof_key_sizes = key_sizes.emplace_back();
-            set_join_method(chooseMethod(key_columns, asof_key_sizes, use_two_level_maps));
+            selected_join_method = chooseMethod(key_columns, asof_key_sizes, use_two_level_maps);
             asof_key_sizes.push_back(asof_size);
         }
         else
@@ -610,7 +626,7 @@ Block HashJoin::materializeColumnsFromRightBlock(Block block) const
 Block HashJoin::prepareRightBlock(const Block & block, const Block & saved_block_sample_)
 {
     Block prepared_block = JoinCommon::materializeColumnsFromRightBlock(block, saved_block_sample_);
-    return JoinCommon::filterColumnsPresentInSampleBlock(prepared_block, saved_block_sample_);
+    return filterColumnsPresentInSampleBlock(prepared_block, saved_block_sample_);
 }
 
 Block HashJoin::prepareRightBlock(const Block & block) const
@@ -691,7 +707,7 @@ bool HashJoin::addBlockToJoin(const Block & block, ScatteredBlock::Selector sele
         all_key_columns[column_name] = prepared_key_column;
     }
 
-    Block block_to_save = JoinCommon::filterColumnsPresentInSampleBlock(block, savedBlockSample());
+    Block block_to_save = filterColumnsPresentInSampleBlock(block, savedBlockSample());
     if (shrink_blocks)
         block_to_save = block_to_save.shrinkToFit();
 

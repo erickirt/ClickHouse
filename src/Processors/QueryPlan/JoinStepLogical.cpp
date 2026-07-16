@@ -304,7 +304,7 @@ std::vector<std::pair<String, String>> JoinStepLogical::describeJoinProperties()
     description.emplace_back("Type", toString(join_operator.kind));
     description.emplace_back("Strictness", toString(join_operator.strictness));
     description.emplace_back("Locality", toString(join_operator.locality));
-        description.emplace_back("Expression", formatJoinCondition(join_operator.expression));
+    description.emplace_back("Expression", formatJoinCondition(join_operator.expression));
     return description;
 }
 
@@ -1634,12 +1634,6 @@ void JoinStepLogical::serializeSettings(QueryPlanSerializationSettings & setting
     sorting_settings.updatePlanSettings(settings);
 }
 
-enum class JoinStepLogicalSerializationFlags : UInt8
-{
-    HasConstantExpressionValue = 1 << 0,
-    ConstantExpressionValue = 1 << 1,
-};
-
 static void serializeNodeList(
     WriteBuffer & out,
     const std::unordered_map<const ActionsDAG::Node *, size_t> & node_to_id,
@@ -1695,11 +1689,6 @@ QueryPlanStepPtr JoinStepLogical::deserialize(Deserialization & ctx)
 
     UInt8 flags = 0;
     readIntBinary(flags, ctx.in);
-    static constexpr UInt8 known_flags =
-        static_cast<UInt8>(JoinStepLogicalSerializationFlags::HasConstantExpressionValue)
-        | static_cast<UInt8>(JoinStepLogicalSerializationFlags::ConstantExpressionValue);
-    if (flags & ~known_flags)
-        throw Exception(ErrorCodes::INCORRECT_DATA, "Unknown JoinStepLogical flags: {}", static_cast<UInt16>(flags));
 
     ActionsDAG actions_dag;
     {
