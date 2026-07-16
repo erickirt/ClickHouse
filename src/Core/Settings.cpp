@@ -9158,7 +9158,7 @@ NameToNameMap readQueryParameters(ReadBuffer & in)
         String value;
         ReadBufferFromOwnString buf(BaseSettingsHelpers::readString(in));
         readQuoted(value, buf);
-        parameters.emplace(std::move(name), std::move(value));
+        parameters.insert_or_assign(std::move(name), std::move(value));
     }
     return parameters;
 }
