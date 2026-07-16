@@ -1,6 +1,7 @@
 #include <Storages/StorageMergeTreeCodecBlockCounts.h>
 
 #include <Access/Common/AccessFlags.h>
+#include <Access/EnabledRowPolicies.h>
 #include <Columns/ColumnConst.h>
 #include <Columns/ColumnString.h>
 #include <Columns/IColumn.h>
@@ -27,6 +28,7 @@ namespace DB
 
 namespace ErrorCodes
 {
+extern const int ACCESS_DENIED;
 extern const int BAD_ARGUMENTS;
 }
 
@@ -322,22 +324,32 @@ void StorageMergeTreeCodecBlockCounts::read(
     storage_snapshot->check(column_names);
 
     const auto source_metadata = source_table->getInMemoryMetadataPtr(context, false);
-    context->checkAccess(AccessType::SELECT, source_table->getStorageID(), source_metadata->getColumns().getNamesOfPhysical());
+    const auto source_storage_id = source_table->getStorageID();
+    context->checkAccess(AccessType::SELECT, source_storage_id, source_metadata->getColumns().getNamesOfPhysical());
 
     auto sample_block = std::make_shared<const Block>(storage_snapshot->getSampleBlockForColumns(column_names));
+
+    /// A row policy denies only `codec_block_counts`, whose counts aggregate all rows of a part, including rows the policy should hide.
+    /// The other columns are metadata that `system.parts_columns` reports regardless of row policies.
+    if (sample_block->has(CODEC_BLOCK_COUNTS_COLUMN))
+    {
+        auto row_policy_filter = context->getRowPolicyFilter(
+            source_storage_id.getDatabaseName(), source_storage_id.getTableName(), RowPolicyFilterType::SELECT_FILTER);
+        if (row_policy_filter && !row_policy_filter->isAlwaysTrue())
+            throw Exception(
+                ErrorCodes::ACCESS_DENIED,
+                "Cannot read column `{}` from `mergeTreeCodecBlockCounts` because a row policy is applied on table {}. "
+                "The counts would cover rows the policy hides",
+                CODEC_BLOCK_COUNTS_COLUMN,
+                source_storage_id.getNameForLogs());
+    }
 
     /// The parts reference the source table's MergeTreeData without owning it.
     query_plan.addStorageHolder(source_table);
 
     query_plan.addStep(
         std::make_unique<ReadFromMergeTreeCodecBlockCounts>(
-            column_names,
-            query_info,
-            storage_snapshot,
-            std::move(context),
-            std::move(sample_block),
-            data_parts,
-            source_table->getStorageID()));
+            column_names, query_info, storage_snapshot, std::move(context), std::move(sample_block), data_parts, source_storage_id));
 }
 
 }
