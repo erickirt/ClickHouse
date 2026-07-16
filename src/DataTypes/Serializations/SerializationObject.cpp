@@ -28,6 +28,41 @@ namespace ErrorCodes
     extern const int TOO_LARGE_ARRAY_SIZE;
 }
 
+namespace
+{
+
+/// The number of paths in a `JSON` / `Object` column is read from a (possibly untrusted, e.g.
+/// `Native` format) stream. A corrupted count close to `SIZE_MAX` makes `std::vector::resize`
+/// (or a hash table `reserve`) throw an uncaught `std::length_error` instead of a normal
+/// `DB::Exception`. Convert that into an informative, catchable `INCORRECT_DATA` error.
+template <typename Container>
+void resizeOrThrowTooManyPaths(Container & container, size_t num_paths)
+{
+    try
+    {
+        container.resize(num_paths);
+    }
+    catch (const std::length_error &)
+    {
+        throw Exception(ErrorCodes::INCORRECT_DATA, "JSON/Object column has too many paths: {}", num_paths);
+    }
+}
+
+template <typename Container>
+void reserveOrThrowTooManyPaths(Container & container, size_t num_paths)
+{
+    try
+    {
+        container.reserve(num_paths);
+    }
+    catch (const std::length_error &)
+    {
+        throw Exception(ErrorCodes::INCORRECT_DATA, "JSON/Object column has too many paths: {}", num_paths);
+    }
+}
+
+}
+
 SerializationObject::SerializationObject(
     const std::unordered_map<String, DataTypePtr> & typed_paths_types_,
     const std::unordered_map<String, SerializationPtr> & typed_paths_serializations_,
@@ -692,7 +727,7 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationObject::deserializeOb
             /// Read the list of flattened paths.
             size_t paths_size = 0;
             readVarUInt(paths_size, *structure_stream);
-            structure_state->flattened_paths.resize(paths_size);
+            resizeOrThrowTooManyPaths(structure_state->flattened_paths, paths_size);
             for (size_t i = 0; i != paths_size; ++i)
                 readStringBinary(structure_state->flattened_paths[i], *structure_stream);
         }
@@ -713,7 +748,7 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationObject::deserializeOb
             size_t dynamic_paths_size = 0;
             readVarUInt(dynamic_paths_size, *structure_stream);
             structure_state->sorted_dynamic_paths = std::make_shared<VectorWithMemoryTracking<String>>();
-            structure_state->sorted_dynamic_paths->resize(dynamic_paths_size);
+            resizeOrThrowTooManyPaths(*structure_state->sorted_dynamic_paths, dynamic_paths_size);
             for (size_t i = 0; i != dynamic_paths_size; ++i)
                 readStringBinary((*structure_state->sorted_dynamic_paths)[i], *structure_stream);
             structure_state->dynamic_paths.insert(structure_state->sorted_dynamic_paths->begin(), structure_state->sorted_dynamic_paths->end());
@@ -750,7 +785,7 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationObject::deserializeOb
                     /// Second, read shared data paths statistics.
                     size_t size = 0;
                     readVarUInt(size, *structure_stream);
-                    statistics.shared_data_paths_statistics.reserve(size);
+                    reserveOrThrowTooManyPaths(statistics.shared_data_paths_statistics, size);
                     String path;
                     for (size_t i = 0; i != size; ++i)
                     {

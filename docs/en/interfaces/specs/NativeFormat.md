@@ -1334,6 +1334,10 @@ The discriminator width is the smallest unsigned integer that can index `num_typ
 
 The state prefix (version + type list) is read at the start of every block with rows > 0; header and empty blocks emit nothing.
 
+:::note Malformed counts
+`num_types` is read from the stream before any type names. A decoder must treat it as untrusted: a corrupted count (for example close to `SIZE_MAX`) must not be used to size an allocation directly, since that can overflow intermediate arithmetic or trigger a huge allocation. Validate it — against the type limit (`ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT` in ClickHouse) and/or the remaining stream length — and reject an out-of-range value as corruption. ClickHouse rejects such input with `INCORRECT_DATA` ("`Dynamic` column has too many types"). The same rule applies to the `num_dynamic_types` count in the non-flat `V1`/`V2`/`V3` prefixes.
+:::
+
 :::note
 Runtime types whose serialization is stateful (`LowCardinality`, `Variant`, `Dynamic`, `JSON`) carry nested state prefixes after the type-name list.
 :::
@@ -1377,6 +1381,10 @@ In FLATTENED mode there is **no shared-data column** (that overflow store belong
 ```
 
 Note the two-phase shape: **all** path state prefixes come first, then **all** path data. A dynamic path's `Dynamic` prefix (in the prefix phase) is therefore separated from its data (in the data phase). The state prefix is read at the start of every block with rows > 0, and every path column (typed or dynamic) holds exactly `num_rows` values. Row `r`'s object is assembled by reading each path's value at index `r`; a dynamic path whose `Dynamic` discriminator is NULL for that row contributes no key.
+
+:::note Malformed counts
+`num_dynamic_paths` (and, in the non-flat `V1`/`V2`/`V3` encodings, the flattened-paths and dynamic-paths counts) is read from the stream before the path names. As with [`Dynamic`](#dynamic), a decoder must treat these counts as untrusted and reject an implausibly large value as corruption instead of sizing an allocation on it directly. ClickHouse rejects such input with `INCORRECT_DATA` ("JSON/Object column has too many paths").
+:::
 
 `JSON` value `{"a": 42, "b": "hi"}` (one row, both paths dynamic). A JSON integer is inferred as `Int64`:
 
