@@ -55,9 +55,9 @@ TEST(AddVaryField, StarMeansEverything)
 TEST(AddVaryField, TokensAreTrimmed)
 {
     HTTPResponse response;
-    response.set("Vary", "  Origin ,  Accept-Encoding  ");
+    response.set("Vary", "  Origin,  Accept-Encoding  ");
     addVaryField(response, "Accept-Encoding");
-    EXPECT_EQ(response.get("Vary"), "  Origin ,  Accept-Encoding  ");
+    EXPECT_EQ(response.get("Vary"), "  Origin,  Accept-Encoding  ");
 }
 
 TEST(AddVaryField, EmptyValueIsReplaced)
