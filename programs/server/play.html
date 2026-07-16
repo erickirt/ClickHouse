@@ -6616,6 +6616,21 @@ function resolveTabForState(state) {
 window.onpopstate = function(event) {
     if (!event.state) return;
     captureActiveTab();
+    /// `buildHistoryParams` serializes the `url`/`user` in effect when this entry was written
+    /// (omitted when they equal the defaults below) into the query string, not into `event.state`
+    /// itself. The browser has already updated `location.href` to this entry's URL by the time
+    /// `popstate` fires, so read the connection back from there and restore it — otherwise the
+    /// live connection inputs stay on whatever server/user was active before the Back/Forward,
+    /// and a Run launched from this "restored" entry would execute against the wrong target.
+    const popped_url = new URL(location.href);
+    const target_server = popped_url.searchParams.get('url')
+        || (opened_locally ? 'http://localhost:8123/' : location.origin);
+    const target_user = popped_url.searchParams.get('user') || '';
+    if (url_elem.value !== target_server || user_elem.value !== target_user) {
+        url_elem.value = target_server;
+        user_elem.value = target_user;
+        resetConnectionScopedState();
+    }
     const tab = resolveTabForState(event.state);
     /// Keep this history entry's identity in sync with the tab it actually resolves to, restamping
     /// BOTH the state's `tabId`/`tabName` and the URL's `tab=` key. Two cases need it:
