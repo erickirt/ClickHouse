@@ -83,7 +83,14 @@ bool DataPartStorageOnDiskPacked::exists() const
 
 bool DataPartStorageOnDiskPacked::existsDirectory(const std::string & file_name) const
 {
-    return volume->getDisk()->existsDirectory(fs::path(root_path) / part_dir / file_name);
+    /// Only probe the real filesystem for files that are actually written as separate on-disk entries
+    /// (projections and the handful of separate metadata files). Logical files packed inside data.packed
+    /// have no filesystem entry of their own, and some of them (e.g. a column with a very long name)
+    /// exceed the OS filename limit, so probing them would throw ENAMETOOLONG instead of returning false
+    /// and wrongly mark the part broken during checkConsistency.
+    if (isWrittenSeparately(file_name))
+        return volume->getDisk()->existsDirectory(fs::path(root_path) / part_dir / file_name);
+    return false;
 }
 
 class DataPartStorageIteratorOnDiskPacked final : public IDataPartStorageIterator
