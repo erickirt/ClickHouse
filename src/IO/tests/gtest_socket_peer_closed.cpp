@@ -254,6 +254,43 @@ TEST(SocketPeerClosed, SecureCloseNotifyIsClosed)
     EXPECT_TRUE(isSslPeerClosed(p.client));
 }
 
+/// Only part of a TLS record has arrived: `SSL_peek` cannot decrypt it yet and returns
+/// `SSL_ERROR_WANT_READ`, exactly like it does for a truly idle connection. Treating that as idle
+/// would let a later borrower read the rest of this same record - once it finishes arriving - as
+/// the response to its own unrelated request.
+TEST(SocketPeerClosed, SecurePartialRecordIsPendingNotIdle)
+{
+    EphemeralCert cert;
+    TlsPair p(cert);
+
+    /// Redirect the server's I/O to memory BIOs so the test can control, byte by byte, how much of
+    /// the ciphertext record reaches the client's socket. This replaces both the read and write BIO
+    /// in one call, so the shared socket BIO installed by `SSL_set_fd` is released cleanly.
+    BIO * server_rbio = BIO_new(BIO_s_mem());
+    BIO * server_wbio = BIO_new(BIO_s_mem());
+    ASSERT_TRUE(server_rbio);
+    ASSERT_TRUE(server_wbio);
+    SSL_set_bio(p.server, server_rbio, server_wbio);
+
+    const char payload = 'x';
+    ASSERT_EQ(1, SSL_write(p.server, &payload, 1));
+    char record[256];
+    const int record_len = BIO_read(server_wbio, record, sizeof(record));
+    ASSERT_GT(record_len, 1);
+
+    /// Deliver only the first byte of the record onto the real socket.
+    ASSERT_EQ(1, ::send(p.fds[0], record, 1, 0));
+    EXPECT_EQ(SocketState::DataPending, getSslSocketState(p.client));
+    EXPECT_FALSE(isSslPeerClosed(p.client));
+
+    /// Deliver the rest: the record is now complete and decryptable.
+    ASSERT_EQ(record_len - 1, ::send(p.fds[0], record + 1, static_cast<size_t>(record_len - 1), 0));
+    EXPECT_EQ(SocketState::DataPending, getSslSocketState(p.client));
+    char got = 0;
+    ASSERT_EQ(1, SSL_read(p.client, &got, 1));
+    EXPECT_EQ('x', got);
+}
+
 /// An abrupt close (FIN without `close_notify`) reads as closed.
 TEST(SocketPeerClosed, SecureAbruptCloseIsClosed)
 {

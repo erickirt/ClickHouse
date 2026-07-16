@@ -57,9 +57,14 @@ SocketState getSslSocketState(ssl_st * ssl)
     {
         case SSL_ERROR_WANT_READ:  [[fallthrough]];
         case SSL_ERROR_WANT_WRITE:
-            /// No application data is pending. Any session ticket / `KeyUpdate` on the wire was
-            /// processed by `SSL_peek` without surfacing as data: a healthy idle connection.
-            return SocketState::Idle;
+            /// `SSL_peek` found no complete application-data record, but that alone does not prove
+            /// the connection is idle: the bytes of a record that has only partially arrived (e.g.
+            /// the first fragment of a queued response) are buffered inside the SSL object too, and
+            /// look identical from here - both end in `SSL_ERROR_WANT_READ`. `SSL_has_pending`
+            /// reports on that internal buffer regardless of whether the record is complete, so a
+            /// session ticket / `KeyUpdate` that was fully consumed reads as idle (nothing left
+            /// buffered), while a partial record correctly reads as pending.
+            return SSL_has_pending(ssl) ? SocketState::DataPending : SocketState::Idle;
         case SSL_ERROR_ZERO_RETURN:
             return SocketState::Closed;     /// The peer sent `close_notify`: an orderly TLS shutdown.
         default:
