@@ -2020,14 +2020,18 @@ class QueryResultElement extends HTMLElement
 
                 /* Icon at the left side of a column header to pin/unpin the column. Pinning is only
                    meaningful when the table is wider than the viewport (i.e. it can be scrolled
-                   horizontally), so the icon is shown only then: applyPinnedColumns marks the
-                   table with the has-hscroll class when it overflows. Within such a table it
-                   behaves like the colorize toggle - revealed while the header is hovered on
-                   hover-capable devices - and additionally a pinned column keeps it visible as the
-                   pinned indicator. Sits at the left so it does not crowd the colorize icon. */
+                   horizontally), so the toggle is disabled (in JS, via _updatePinAvailability) and
+                   thus excluded from the tab order whenever the table does not scroll. Within a
+                   scrollable table it stays out of the way like the colorize toggle - invisible
+                   until the header is hovered - but, unlike the colorize toggle, it is a real
+                   <button> that must stay in the tab order even while invisible so keyboard users
+                   can reach it, so hiding it here uses opacity/pointer-events rather than display,
+                   and it reappears on keyboard focus (:focus-visible) as well as on hover; an
+                   already-pinned column keeps it visible as the pinned indicator. Sits at the left
+                   so it does not crowd the colorize icon. */
                 .pin-toggle
                 {
-                    display: none;
+                    display: inline-block;
                     position: absolute;
                     top: 50%;
                     left: 0.35rem;
@@ -2036,27 +2040,42 @@ class QueryResultElement extends HTMLElement
                     font-size: 0.9em;
                     line-height: 1;
                     user-select: none;
-                    opacity: 0.55;
+                    opacity: 0;
+                    pointer-events: none;
+                    /* Reset the <button> chrome so it reads as a plain icon, like the emoji it once
+                       was as a <span>; the focus outline itself is left to the browser default. */
+                    background: none;
+                    border: none;
+                    padding: 0;
+                    margin: 0;
+                    font-family: inherit;
+                    color: inherit;
                 }
 
-                /* Reveal the icon only when the table can scroll horizontally: on header hover,
-                   and always for an already-pinned column (as its indicator). */
+                /* Reveal the icon only when the table can scroll horizontally: on header hover or
+                   keyboard focus of the toggle itself. */
                 #data-table.has-hscroll th:hover .pin-toggle,
-                #data-table.has-hscroll th.pinned-column .pin-toggle
+                #data-table.has-hscroll th .pin-toggle:focus-visible
                 {
-                    display: inline-block;
+                    opacity: 0.55;
+                    pointer-events: auto;
+                }
+
+                /* A faint extra emphasis while the icon itself (not just its header) is hovered;
+                   placed after the rule above so it wins the tie in specificity. */
+                #data-table.has-hscroll th .pin-toggle:hover
+                {
+                    opacity: 0.85;
+                    pointer-events: auto;
                 }
 
                 /* A pinned column shows its icon at full strength, so it is clear which columns
-                   are pinned (the display itself is gated on has-hscroll above). */
-                th.pinned-column .pin-toggle
+                   are pinned; placed last so it wins over the hover rules above regardless of
+                   whether the pinned icon is also being hovered or focused. */
+                #data-table.has-hscroll th.pinned-column .pin-toggle
                 {
                     opacity: 1;
-                }
-
-                .pin-toggle:hover
-                {
-                    opacity: 0.85;
+                    pointer-events: auto;
                 }
 
                 /* Touch / coarse-pointer devices have no hover, so keep the pin icon tappable -
@@ -2065,8 +2084,17 @@ class QueryResultElement extends HTMLElement
                 {
                     #data-table.has-hscroll .pin-toggle
                     {
-                        display: inline-block;
+                        opacity: 0.55;
+                        pointer-events: auto;
                     }
+                }
+
+                /* A disabled toggle (table not scrollable) is excluded from the tab order by the
+                   browser; also make it fully transparent and non-interactive defensively. */
+                .pin-toggle:disabled
+                {
+                    opacity: 0;
+                    pointer-events: none;
                 }
 
                 /* Per-column color coding compares values across rows; with no more than a single
@@ -2631,11 +2659,17 @@ class QueryResultElement extends HTMLElement
         }
     }
 
-    /// Add the icon at the left of a column header that pins/unpins the column.
+    /// Add the icon at the left of a column header that pins/unpins the column. A real <button>,
+    /// so it is keyboard-reachable (Tab) and keyboard-activatable (Enter/Space) for free, unlike
+    /// the plain <span> icons used elsewhere on the header; see the .pin-toggle CSS for why. It
+    /// starts disabled - and so out of the tab order - until _updatePinAvailability finds the
+    /// table actually scrolls horizontally, since pinning is meaningless otherwise.
     _appendPinToggle(th, name)
     {
-        const toggle = document.createElement('span');
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
         toggle.className = 'pin-toggle';
+        toggle.disabled = true;
         /// A pushpin emoji, conveying "pin this column".
         toggle.textContent = '\u{1F4CC}';
         this._updatePinToggle(toggle, name);
@@ -2650,9 +2684,15 @@ class QueryResultElement extends HTMLElement
 
     _updatePinToggle(toggle, name)
     {
-        toggle.title = pinned_columns[name]
+        const label = pinned_columns[name]
             ? 'Unpin column (currently kept visible during horizontal scroll)'
             : 'Pin column (keep it visible during horizontal scroll)';
+        toggle.title = label;
+        /// aria-label instead of relying on the title attribute, which screen readers announce
+        /// inconsistently; aria-pressed exposes the toggle's own state, since a screen reader
+        /// cannot see the pinned-column styling that conveys it visually.
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('aria-pressed', pinned_columns[name] ? 'true' : 'false');
     }
 
     /// The rows whose data cells participate in pinning: the body rows and the totals row, but
@@ -2768,15 +2808,24 @@ class QueryResultElement extends HTMLElement
 
     /// Reflect whether this table can be scrolled horizontally onto the `has-hscroll` class, which
     /// gates the visibility of the pin toggles: pinning only makes sense when the table is wider
-    /// than the space available to it. Called from `applyPinnedColumns` (every layout pass) and on
-    /// window resize. The table overflows when its rendered width exceeds the host element's width
-    /// (the host is a block box constrained to the scroll container, so a wider table overflows it
-    /// and produces the horizontal scrollbar rather than stretching the host).
+    /// than the space available to it. Also enables/disables the toggle buttons themselves to
+    /// match: a disabled <button> is excluded from the tab order, so pinning stays unreachable by
+    /// keyboard too while it is meaningless. Called from `applyPinnedColumns` (every layout pass)
+    /// and on window resize. The table overflows when its rendered width exceeds the host
+    /// element's width (the host is a block box constrained to the scroll container, so a wider
+    /// table overflows it and produces the horizontal scrollbar rather than stretching the host).
     _updatePinAvailability()
     {
         if (!this._dataTable) { return; }
         const overflows = this._dataTable.offsetWidth > this.clientWidth + 1;
         this._dataTable.classList.toggle('has-hscroll', overflows);
+        if (this._dataTable.tHead)
+        {
+            for (const toggle of this._dataTable.tHead.querySelectorAll('.pin-toggle'))
+            {
+                toggle.disabled = !overflows;
+            }
+        }
     }
 
     /// Whether any column of this table is currently pinned. On resize this decides whether the
