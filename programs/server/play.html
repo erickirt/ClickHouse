@@ -4993,7 +4993,6 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
                 elapsed_ns: 1e6 * (performance.now() - query_start),
                 params: paramValuesSnapshot,
                 fullEditor: ran_full_editor,
-                connection: connection,
             }, undefined, tab);
         }
         updateTabIndicator(tab);
@@ -5052,7 +5051,6 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
         elapsed_ns: el.elapsedNs,
         params: paramValuesSnapshot,
         fullEditor: ran_full_editor,
-        connection: connection,
     }, undefined, tab);
 }
 
@@ -5259,7 +5257,6 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
         elapsed_ns: tab.finalStats.elapsedNs,
         params: paramValuesSnapshot,
         fullEditor: ranFullEditor,
-        connection: connection,
     }, parsed[0].query, tab);
 }
 
@@ -6401,11 +6398,7 @@ function buildHistoryParams(params, tabName, fromRun, colorModes) {
     /// snapshotted — an image or oversized result — stays reproducible across a tab switch or
     /// rename), but dropping it the moment the editor diverges from the produced result. An
     /// unrun edit must never keep `run=1`: reloading would auto-execute it (e.g. a
-    /// `DROP`/`INSERT`), because startup treats a `run=1` URL as authoritative. The same
-    /// contract covers the `user`/`url` values serialized just above: both `fromRun` sources
-    /// require the current inputs to still name the connection that produced the result
-    /// (`connectionMatchesInputs`), so a `run=1` entry never reruns its SQL against a
-    /// different server or identity than the one whose result it is showing.
+    /// `DROP`/`INSERT`), because startup treats a `run=1` URL as authoritative.
     if (run_immediately && fromRun) out.push('run=1');
     if (server_address != location.origin) out.push('url=' + encodeURIComponent(server_address));
     for (const [name, value] of Object.entries(params || {})) {
@@ -6475,23 +6468,8 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
     scheduleSave();
 }
 
-/// True when the shared connection inputs (server URL + user) still name the given producing
-/// connection (a `{ server, user }` snapshot). `buildHistoryParams` serializes the CURRENT
-/// inputs into the entry's `url`/`user` params, so `run=1` may be kept only while they still
-/// point at the connection that produced the result — otherwise a reload would rerun the SQL
-/// against a different server or identity than the result being shown. The password is
-/// deliberately not part of the identity: it is never persisted or serialized into URLs, and a
-/// rotated password does not change WHERE a rerun would execute. A missing snapshot (a result
-/// persisted before connections were recorded) conservatively reports false.
-function connectionMatchesInputs(connection) {
-    return !!(connection
-        && connection.server === url_elem.value
-        && connection.user === user_elem.value);
-}
-
 /// True when the tab's editor (query + params) still exactly matches the query/params that
-/// produced its current result AND the shared connection inputs still name the connection it
-/// ran against, i.e. re-running the editor would reproduce what is shown. The
+/// produced its current result, i.e. re-running the editor would reproduce what is shown. The
 /// editor-only history writers use it to decide whether to keep `run=1` on the entry: a shared
 /// `run=1` link whose result is not snapshotted (an image or an oversized result) must stay
 /// re-runnable across a tab switch or rename, but the marker must be dropped the moment the
@@ -6500,14 +6478,11 @@ function connectionMatchesInputs(connection) {
 /// (both store the editor into `tab.query` and into the snapshot), so the two are equal while
 /// the tab is clean; a "Run selected" result stores only the selected statement, so it compares
 /// unequal to the full editor and conservatively drops the marker (its URL hash is the whole
-/// editor and could not reproduce that single-statement result anyway). Editing the connection
-/// after the run equally drops the marker (`connectionMatchesInputs`): the entry would carry the
-/// NEW `url`/`user` and auto-rerun the shown result's SQL against a target that never produced it.
+/// editor and could not reproduce that single-statement result anyway).
 function tabReflectsRun(tab) {
     return !!(tab && tab.result && tab.result.ran
         && tab.query === tab.result.query
-        && JSON.stringify(tab.params || {}) === JSON.stringify(tab.result.params || {})
-        && connectionMatchesInputs(tab.result.connection));
+        && JSON.stringify(tab.params || {}) === JSON.stringify(tab.result.params || {}));
 }
 
 /// Refresh the current browser-history entry in place from the given tab's captured editor
@@ -6568,27 +6543,12 @@ function saveHistory(stateData, titleForDoc, tab) {
     /// `DROP`). The editor-only writers already enforce this via `tabReflectsRun`, whose
     /// `result.query` comparison fails for a partial run; this is the same rule for the run path.
     const full_editor_run = stateData.fullEditor === true;
-    /// The third leg of the reproducibility check: the run executed against a launch-time
-    /// connection snapshot (see `postOne`/`postAll`), while `buildHistoryParams` serializes the
-    /// CURRENT shared `url`/`user` inputs. When the connection was edited while the run was in
-    /// flight, the entry would name a different server or identity than the one that produced the
-    /// result, so `run=1` on it would make a reload/shared link rerun the SQL against that other
-    /// target. Compare against the inputs the entry will actually carry.
-    const connection_unchanged = connectionMatchesInputs(stateData.connection);
     tab.result = {
         ran: true,   /// marks a genuine run; the tab bar's visibility keys off this
         /// The single statement that produced this result (in multi-query mode it differs
         /// from the editor text in tab.query); used for rendering/graph-detection/downloads.
         query: stateData.resultQuery ?? stateData.query,
         params: stateData.params,    /// the params that produced this result
-        /// The connection that produced this result — server and user ONLY, the password is
-        /// never persisted (the snapshot travels into browser history state and IndexedDB).
-        /// `tabReflectsRun` compares it against the shared inputs so the editor-only history
-        /// writers drop `run=1` once the connection is edited away from the producing one, and
-        /// the download path targets it rather than whatever the inputs hold by then.
-        connection: stateData.connection
-            ? { server: stateData.connection.server, user: stateData.connection.user }
-            : null,
         format: stateData.format,
         ok: stateData.ok,
         data: stateData.data,
@@ -6607,10 +6567,8 @@ function saveHistory(stateData, titleForDoc, tab) {
         /// When the draft diverged from the launch text OR its parameters diverged from the ones
         /// the run executed with, the entry carries an UNRUN draft, which must never be
         /// auto-runnable (see `writeHistoryEntry` on the `run=1` invariant). A partial run of a
-        /// multi-statement editor is equally not auto-runnable (see `full_editor_run` above), and
-        /// so is an entry whose serialized connection no longer names the run's target
-        /// (see `connection_unchanged` above).
-        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged && params_unchanged && full_editor_run && connection_unchanged);
+        /// multi-statement editor is equally not auto-runnable (see `full_editor_run` above).
+        writeHistoryEntry(tab, titleForDoc, /*forceReplace=*/ false, /*fromRun=*/ query_unchanged && params_unchanged && full_editor_run);
     } else {
         /// Background run finished: reflect its new result in the tab bar and persist it, without
         /// disturbing the active tab's URL/history entry.
