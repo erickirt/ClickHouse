@@ -6056,6 +6056,12 @@ async function activateTab(id, guard_paste = false) {
 /// target, and push a browser-history entry so Back/Forward moves between tabs.
 async function switchToTab(id) {
     if (id === activeTabId) return;
+    /// `reconcileStartup`'s deferred auto-run and URL-driven parameter restore act on
+    /// `getActiveTab()`/`activeTabId` AFTER awaiting (`updateQueryParams`, the lexer preflight in
+    /// `postAll`); a tab switch during one of those awaits would otherwise silently retarget them
+    /// at the newly active tab instead of the URL-authoritative one. Bootstrap-dirty makes
+    /// reconciliation yield to it, same as any other genuine interaction during the load window.
+    markBootstrapDirty();
     captureActiveTab();
     /// Fold the captured editor state of the tab we are leaving back into its own history
     /// entry, so a later Back/Forward to it restores the latest edit rather than the stale
