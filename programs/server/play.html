@@ -8317,7 +8317,16 @@ function resetConnectionScopedState() {
     if (databases_toggle.dataset['opened']) closeDatabases();
 }
 
-[url_elem, user_elem, password_elem].forEach(el => el.addEventListener('input', resetConnectionScopedState));
+[url_elem, user_elem, password_elem].forEach(el => el.addEventListener('input', (e) => {
+    /// A genuine connection edit during the startup window must gate the deferred URL restore and
+    /// `run=1` auto-run the same way query/parameter edits and tab switches do: `postAll` snapshots
+    /// these same inputs at launch, so a deferred auto-run started after the user changed the
+    /// server/identity would execute against the edited target without an explicit Run. Trusted edits
+    /// only — reconciliation's own programmatic changes dispatch `isTrusted === false` events, which
+    /// `markBootstrapDirty` ignores.
+    markBootstrapDirty(e);
+    resetConnectionScopedState();
+}));
 
 /// Lower-bound binary search for the first word whose lowercased form is >= `key`.
 function completionLowerBound(key) {
