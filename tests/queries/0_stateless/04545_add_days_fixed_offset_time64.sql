@@ -19,10 +19,10 @@ SELECT 'non-fixed offset';
 -- Santiago started DST on 1969-11-23, within the `Time64` range around the Unix epoch.
 -- The calendar shifts below are therefore 23 and 167 hours, respectively.
 SELECT
-    reinterpretAsInt64(addDays(start_time, delta)),
-    reinterpretAsInt64(addWeeks(start_time, delta)),
-    reinterpretAsInt64(subtractDays(day_end, delta)),
-    reinterpretAsInt64(subtractWeeks(week_end, delta))
+    toInt64(addDays(start_time, delta)),
+    toInt64(addWeeks(start_time, delta)),
+    toInt64(subtractDays(day_end, delta)),
+    toInt64(subtractWeeks(week_end, delta))
 FROM
 (
     SELECT
