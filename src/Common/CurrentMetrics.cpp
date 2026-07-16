@@ -33,6 +33,8 @@
     M(BackgroundDistributedSchedulePoolSize, "Limit on number of tasks in BackgroundDistributedSchedulePool") \
     M(BackgroundMessageBrokerSchedulePoolTask, "Number of active tasks in BackgroundMessageBrokerSchedulePool for message streaming") \
     M(BackgroundMessageBrokerSchedulePoolSize, "Limit on number of tasks in BackgroundMessageBrokerSchedulePool for message streaming") \
+    M(BackgroundStreamingSchedulePoolTask, "Number of active tasks in BackgroundStreamingSchedulePool for streaming queries tasks") \
+    M(BackgroundStreamingSchedulePoolSize, "Limit on number of tasks in BackgroundStreamingSchedulePool for streaming queries tasks") \
     M(CacheDictionaryUpdateQueueBatches, "Number of 'batches' (a set of keys) in update queue in CacheDictionaries.") \
     M(CacheDictionaryUpdateQueueKeys, "Exact number of keys in update queue in CacheDictionaries.") \
     M(DiskSpaceReservedForMerge, "Disk space reserved for currently running background merges. It is slightly more than the total size of currently merging parts.") \
@@ -345,6 +347,8 @@
     M(AsyncInsertCacheSize, "Number of async insert hash id in cache") \
     M(IcebergMetadataFilesCacheBytes, "Size of the Iceberg metadata cache in bytes") \
     M(IcebergMetadataFilesCacheFiles, "Number of cached files in the Iceberg metadata cache") \
+    M(PaimonMetadataFilesCacheBytes, "Size of the Paimon metadata cache in bytes") \
+    M(PaimonMetadataFilesCacheFiles, "Number of cached files in the Paimon metadata cache") \
     M(ParquetMetadataCacheBytes, "Size of the Parquet metadata cache in bytes") \
     M(ParquetMetadataCacheFiles, "Number of cached files in the Parquet metadata cache") \
     M(AvroSchemaCacheBytes, "Size of the Avro schema cache in bytes") \
@@ -392,6 +396,8 @@
     M(QueryCacheEntries, "Total number of entries in the query cache") \
     M(QueryConditionCacheBytes, "Total size of the query condition cache in bytes") \
     M(QueryConditionCacheEntries, "Total number of entries in the query condition cache") \
+    M(EncryptionHeaderCacheBytes, "Total size of the encryption header cache in bytes") \
+    M(EncryptionHeaderCacheEntries, "Total number of entries in the encryption header cache") \
     M(CompiledExpressionCacheBytes, "Reserved page-block capacity (rounded up to whole pages with a 2x over-provisioning factor) held by `JITModuleMemoryManager` for executable/data sections of cached JIT-compiled functions. NOT the actual bytes of machine code in use (that's smaller). Allocated via `posix_memalign`, which is intercepted into jemalloc, so this is accounted within the dedicated JIT arena and is a subset of `jemalloc.jit_arena.active_bytes`.") \
     M(CompiledExpressionCacheCount, "Total entries in the cache of JIT-compiled machine code.") \
     M(SerializationCacheBytesInMemoryAllocated, "Total size of the serialization cache in bytes including keys and overhead from empty slots") \
