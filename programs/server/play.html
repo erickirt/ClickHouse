@@ -5016,10 +5016,6 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     tab.copyVisible = result.is_raw;
     tab.downloadQuery = query;
     tab.downloadParams = paramValuesSnapshot;
-    /// The full launch connection snapshot (including the password, in memory only): a later
-    /// download must fetch from the server/identity that produced THIS result, not from
-    /// whatever the shared connection inputs hold by the time the button is clicked.
-    tab.downloadConnection = connection;
 
     if (result.is_raw || result.is_image) {
         el.elapsedNs = 1e6 * (performance.now() - query_start);
@@ -5538,9 +5534,6 @@ async function materializeResult(tab) {
     tab.copyVisible = false;
     tab.downloadQuery = result.query || '';
     tab.downloadParams = result.params || {};
-    /// The persisted producing connection ({ server, user }, no password — see `saveHistory`),
-    /// so a download from a restored snapshot still targets the result's own server/identity.
-    tab.downloadConnection = result.connection || null;
     /// Graph detection keys off the producing query, so a snapshot still renders as a graph
     /// even if the editor query was changed without rerunning.
     el.queryText = result.query ?? tab.query;
@@ -5873,11 +5866,6 @@ function tabRuntimeDefaults() {
         colorModes: {},         /// per-column color modes for this tab's result (shared with its element)
         downloadQuery: '',      /// query the download button should re-run for this tab
         downloadParams: {},
-        /// Connection the download should re-run against: the one that PRODUCED the shown result.
-        /// From a live run it is the full launch snapshot ({ server, user, password }, held in
-        /// memory only, never persisted); from a restored snapshot it is the persisted
-        /// { server, user } (no password). Null for legacy results with no recorded connection.
-        downloadConnection: null,
         downloadVisible: false, /// whether the download / copy buttons apply to this tab
         copyVisible: false,
         launchQuery: undefined, /// editor text snapshotted when this tab's run was launched (see `saveHistory`)
@@ -5949,7 +5937,6 @@ function paintDownloadCopy(tab) {
     document.getElementById('copy-div').style.display = tab.copyVisible ? 'block' : 'none';
     last_query_for_download = tab.downloadQuery || '';
     last_params_for_download = tab.downloadParams || {};
-    last_connection_for_download = tab.downloadConnection || null;
 }
 
 /// Repaint the shared chrome (Run/Stop button, favicon, progress bar, logo, download/copy) from
@@ -9517,8 +9504,6 @@ document.getElementById('copy-div').addEventListener('click', function() {
 // Download functionality
 let last_query_for_download = '';
 let last_params_for_download = {};
-/// The connection that produced the currently shown result (see `tab.downloadConnection`).
-let last_connection_for_download = null;
 
 // Toggle download dropdown
 document.getElementById('download-div').addEventListener('click', function(e) {
@@ -9641,22 +9626,10 @@ document.getElementById('download-button').addEventListener('click', async funct
 
     const extension = formatExtensions[format] || format.toLowerCase();
 
-    /// Download re-executes the query, so it must target the connection that PRODUCED the shown
-    /// result, not whatever the shared connection inputs hold now: the user may have switched
-    /// server or identity since the run, and silently downloading a fresh result from the new
-    /// target would not match the result on screen. While the inputs still name the producing
-    /// connection, take the live password (the freshest credential for that identity); once they
-    /// diverge, fall back to the launch-time password held in memory for this session's runs. A
-    /// restored snapshot carries no password (never persisted), so after a connection change its
-    /// download is sent without one — an explicit authentication failure rather than a silent
-    /// download from the wrong target. Legacy results with no recorded connection keep the old
-    /// behavior (current inputs).
-    const producing = last_connection_for_download;
-    const server_address = producing ? producing.server : url_elem.value;
-    const user = producing ? producing.user : user_elem.value;
-    const password = (!producing || connectionMatchesInputs(producing))
-        ? password_elem.value
-        : (typeof producing.password === 'string' ? producing.password : '');
+    // Get current values
+    const user = user_elem.value;
+    const password = password_elem.value;
+    const server_address = url_elem.value;
     const query = last_query_for_download;
 
     if (!query) {
