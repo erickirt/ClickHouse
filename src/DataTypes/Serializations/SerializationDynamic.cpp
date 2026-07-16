@@ -34,22 +34,16 @@ namespace
 /// `std::vector::reserve` throw an uncaught `std::length_error` instead of a normal
 /// DB::Exception. Convert that into an informative, catchable error.
 template <typename Container>
-void reserveOrThrowTooManyTypes(Container & container, size_t reserve_count, size_t num_types_to_report)
+void reserveOrThrowTooManyTypes(Container & container, size_t num_types)
 {
     try
     {
-        container.reserve(reserve_count);
+        container.reserve(num_types);
     }
     catch (const std::length_error &)
     {
-        throw Exception(ErrorCodes::INCORRECT_DATA, "Dynamic column has too many types: {}", num_types_to_report);
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Dynamic column has too many types: {}", num_types);
     }
-}
-
-template <typename Container>
-void reserveOrThrowTooManyTypes(Container & container, size_t num_types)
-{
-    reserveOrThrowTooManyTypes(container, num_types, num_types);
 }
 
 }
@@ -408,8 +402,13 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationDynamic::deserializeD
             /// Read information about variants.
             DataTypes variants;
             readVarUInt(structure_state->num_dynamic_types, *structure_stream);
+            /// A `Dynamic` column can have at most `ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT` regular variants.
+            /// Check this before doing the `+ 1` below: for a corrupted count equal to `SIZE_MAX`,
+            /// `num_dynamic_types + 1` would wrap around to `0` and defeat the check entirely.
+            if (structure_state->num_dynamic_types > ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT)
+                throw Exception(ErrorCodes::INCORRECT_DATA, "Dynamic column has too many types: {}", structure_state->num_dynamic_types);
             /// +1 for shared variant.
-            reserveOrThrowTooManyTypes(variants, structure_state->num_dynamic_types + 1, structure_state->num_dynamic_types);
+            variants.reserve(structure_state->num_dynamic_types + 1);
             if ((settings.native_format && settings.format_settings && settings.format_settings->native.decode_types_in_binary_format) || structure_state->structure_version.value == SerializationVersion::V3)
             {
                 /// Native input carries the effective limit via format_settings; a V3 part read has none and decodes unlimited.
