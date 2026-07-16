@@ -8,3 +8,9 @@ fox the
 brown end fox here quick
 4. multiIf(token IN (tuple)): CASE spelling drops the same tokens
 brown end fox here quick
+5. FixedString index column: IN-filter drops the same stop words
+brown end fox here quick
+6. MATERIALIZED String index column: value computed, then IN-filter drops stop words
+brown end fox here quick
+2
+0
