@@ -16,6 +16,7 @@ namespace DB
 {
 
 class TextIndexAnalyzer;
+class MergeTreeIndexConditionText;
 
 class PostingListCursor;
 using PostingListCursorPtr = std::shared_ptr<PostingListCursor>;
@@ -99,6 +100,7 @@ private:
     using TextIndexGranulePtr = std::shared_ptr<const MergeTreeIndexGranuleText>;
 
     MergeTreeIndexWithCondition index;
+    const MergeTreeIndexConditionText * condition_text = nullptr;
     TextIndexGranulePtr granule;
     PostingsBlocksMap postings_blocks;
 
