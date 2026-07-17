@@ -1,6 +1,7 @@
 DROP TABLE IF EXISTS t_row_policy;
 
-CREATE TABLE t_row_policy (a UInt64, b UInt64)
+-- Explicit codecs, CI randomises the server-level default compression codec.
+CREATE TABLE t_row_policy (a UInt64 CODEC(LZ4), b UInt64 CODEC(LZ4))
 ENGINE = MergeTree ORDER BY tuple()
 SETTINGS min_bytes_for_wide_part = 0;
 
@@ -21,12 +22,13 @@ DROP ROW POLICY 04509_policy ON t_row_policy;
 SELECT 'row policy dropped';
 SELECT DISTINCT mapKeys(codec_block_counts) FROM mergeTreeCodecBlockCounts(currentDatabase(), t_row_policy);
 
-CREATE ROW POLICY 04509_policy_none ON t_row_policy FOR SELECT USING a < 100 TO NONE;
+-- A matched policy whose condition is literally true hides nothing, so nothing is denied.
+CREATE ROW POLICY 04509_policy_true ON t_row_policy FOR SELECT USING 1 TO CURRENT_USER;
 
-SELECT 'row policy targeting nobody';
+SELECT 'row policy with always-true condition';
 SELECT DISTINCT mapKeys(codec_block_counts) FROM mergeTreeCodecBlockCounts(currentDatabase(), t_row_policy);
 SELECT count() FROM t_row_policy;
 
-DROP ROW POLICY 04509_policy_none ON t_row_policy;
+DROP ROW POLICY 04509_policy_true ON t_row_policy;
 
 DROP TABLE t_row_policy;
