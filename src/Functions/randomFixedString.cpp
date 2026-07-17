@@ -25,11 +25,15 @@ namespace
 {
 
 /* Generate random fixed string with fully random bytes (including zero). */
-template <typename RandImpl>
-class FunctionRandomFixedStringImpl : public IFunction
+class FunctionRandomFixedString : public IFunction
 {
 public:
     static constexpr auto name = "randomFixedString";
+
+    static FunctionPtr create(ContextPtr)
+    {
+        return std::make_shared<FunctionRandomFixedString>();
+    }
 
     String getName() const override { return name; }
 
@@ -76,34 +80,6 @@ public:
     }
 };
 
-class FunctionRandomFixedString final : public FunctionRandomFixedStringImpl<TargetSpecific::Default::RandImpl>
-{
-public:
-    explicit FunctionRandomFixedString(ContextPtr context) : selector(context)
-    {
-        selector.registerImplementation<TargetArch::Default,
-            FunctionRandomFixedStringImpl<TargetSpecific::Default::RandImpl>>();
-
-    #if USE_MULTITARGET_CODE
-        selector.registerImplementation<TargetArch::x86_64_v3,
-            FunctionRandomFixedStringImpl<TargetSpecific::x86_64_v3::RandImpl>>();
-    #endif
-    }
-
-    ColumnPtr executeImpl(const ColumnsWithTypeAndName & arguments, const DataTypePtr & result_type, size_t input_rows_count) const override
-    {
-        return selector.selectAndExecute(arguments, result_type, input_rows_count);
-    }
-
-    static FunctionPtr create(ContextPtr context)
-    {
-        return std::make_shared<FunctionRandomFixedString>(context);
-    }
-
-private:
-    ImplementationSelector<IFunction> selector;
-};
-
 }
 
 REGISTER_FUNCTION(RandomFixedString)
@@ -119,9 +95,9 @@ The returned characters are not necessarily ASCII characters, i.e. they may not 
     FunctionDocumentation::ReturnedValue returned_value = {"Returns a string filled with random bytes.", {"FixedString"}};
     FunctionDocumentation::Examples examples = {
         {"Usage example", "SELECT randomFixedString(13) AS rnd, toTypeName(rnd)", R"(
-┌─rnd──────┬─toTypeName(randomFixedString(13))─┐
-│ j▒h㋖HɨZ'▒ │ FixedString(13)                 │
-└──────────┴───────────────────────────────────┘
+┌─rnd────────┬─toTypeName(randomFixedString(13))─┐
+│ j▒h㋖HɨZ'▒ │ FixedString(13)                   │
+└────────────┴───────────────────────────────────┘
         )"}
     };
     FunctionDocumentation::IntroducedIn introduced_in = {20, 5};
