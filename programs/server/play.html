@@ -6675,6 +6675,27 @@ window.onpopstate = function(event) {
     /// newer entry that `writeHistoryEntry` last recorded, not at this one).
     tab.lastSavedQuery = event.state.query;
     if (event.state.params) tab.params = event.state.params;
+    /// Does this entry carry a genuine result snapshot (modern nested or legacy flat)? An entry
+    /// written while its tab was mid-run does NOT: a run nulls `tab.result` at launch and only
+    /// reinstalls it on completion, and a background run that finishes in another tab reinstalls
+    /// the result only in memory — it never rewrites the null entry it left behind (leaving the
+    /// active tab's history/URL alone). So the entry a tab was switched away from mid-run holds
+    /// `result: null` even after that run has produced a result.
+    const entry_has_result = !!(event.state.result
+        || event.state.data != null || (event.state.multi && event.state.multi.length));
+    /// Such a degenerate null entry must not be time-travelled over the tab's newer live state:
+    /// aborting a still-running query and clobbering the (possibly just-completed) result would
+    /// blank a tab that a normal switch would show streaming or finished. When the entry has no
+    /// snapshot but the tab is still running or already holds a result, navigate to it like a
+    /// plain tab switch — `activateTab` neither materializes an in-flight tab nor aborts it, so
+    /// the live stream keeps rendering into its own panel and a completed result stays shown. A
+    /// genuinely result-less entry whose tab also has no result falls through to the plain
+    /// time-travel below, and an entry that DOES carry a snapshot keeps the documented
+    /// abort-and-re-render behavior.
+    if (!entry_has_result && (tab.inFlight || tab.result)) {
+        activateTab(tab.id).then(scheduleSave);
+        return;
+    }
     /// Adopt the entry's result snapshot (its own producing query/params), or clear it. This
     /// avoids leaving a stale snapshot attached to a different query. Modern entries nest the
     /// snapshot under `result`; legacy flat entries (predating per-tab state) store the produced
