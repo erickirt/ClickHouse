@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tags: no-parallel-replicas
+# Tags: no-fasttest, no-parallel-replicas
 # A query scoped with SET ROLE must have that scope honored on remote nodes too. Otherwise a remote
 # node reading over an interserver-secret cluster falls back to the user's default roles and evaluates
 # row policies against them, which for permissive policies can expose rows outside the active role.
