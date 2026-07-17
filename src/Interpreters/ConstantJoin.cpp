@@ -6,6 +6,7 @@
 
 #include <base/arithmeticOverflow.h>
 
+#include <Columns/ColumnCompressed.h>
 #include <Columns/ColumnReplicated.h>
 #include <Common/Exception.h>
 #include <Common/formatReadable.h>
@@ -354,8 +355,10 @@ void ConstantJoin::shrinkStoredBlocksToFit(size_t & total_bytes_in_join)
 
         try
         {
+            /// A compressed column is already stored in its most compact form (and does not support `cloneResized`).
             for (auto & column : stored_block.columns)
-                column = column->cloneResized(column->size());
+                if (!typeid_cast<const ColumnCompressed *>(column.get()))
+                    column = column->cloneResized(column->size());
 
             stored_block.rebuildReplicatedColumns();
         }
@@ -802,20 +805,23 @@ public:
         if (*right_block_it != join.right_blocks.end())
             return rows_added;
 
-        if (!join.tmp_stream)
+        if (!join.tmp_stream || spilled_blocks_exhausted)
             return rows_added;
 
         if (!reader)
             reader = join.tmp_stream->getReadStream();
 
-        while (reader && rows_added < max_block_size)
+        while (rows_added < max_block_size)
         {
             if (!current_spilled_block)
             {
                 auto block_right = reader.value()->read();
                 if (block_right.empty())
                 {
+                    /// The spilled rows are emitted exactly once: a re-created read stream would start over
+                    /// from the beginning, so remember that the spill has been fully read.
                     reader.reset();
+                    spilled_blocks_exhausted = true;
                     break;
                 }
 
@@ -852,6 +858,8 @@ private:
     std::optional<StoredBlock> current_decompressed_block;
     std::optional<TemporaryBlockStreamReaderHolder> reader;
     std::optional<StoredBlock> current_spilled_block;
+    /// Set when the spilled rows have been fully emitted; the read stream must not be re-created after that.
+    bool spilled_blocks_exhausted = false;
 };
 
 JoinResultPtr ConstantJoin::joinBlock(Block block)
