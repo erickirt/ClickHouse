@@ -77,6 +77,7 @@ def run_kill_query_failpoint_test(query, fault_name, query_id=None):
             pool.shutdown(wait=False, cancel_futures=True)
             assert False, f"Failpoint {fault_name} not triggered within 60 s"
         pool.shutdown(wait=False)
+        wait_future.result()
 
         node1.http_query(f"KILL QUERY WHERE query_id='{query_id}'")
     finally:
@@ -142,6 +143,7 @@ def run_kill_query_failpoint_after_loop_test(query, fault_name, expected_log_mes
             pool.shutdown(wait=False, cancel_futures=True)
             assert False, f"Failpoint {fault_name} not triggered within 60 s"
         pool.shutdown(wait=False)
+        wait_future.result()
 
         node1.http_query(f"KILL QUERY WHERE query_id='{query_id}'")
     finally:
