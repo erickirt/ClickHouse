@@ -1335,7 +1335,9 @@ The discriminator width is the smallest unsigned integer that can index `num_typ
 The state prefix (version + type list) is read at the start of every block with rows > 0; header and empty blocks emit nothing.
 
 :::note Malformed counts
-`num_types` is read from the stream before any type names. A decoder must treat it as untrusted: a corrupted count (for example close to `SIZE_MAX`) must not be used to size an allocation directly, since that can overflow intermediate arithmetic or trigger a huge allocation. Validate it — against the type limit (`ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT` in ClickHouse) and/or the remaining stream length — and reject an out-of-range value as corruption. ClickHouse rejects such input with `INCORRECT_DATA` ("`Dynamic` column has too many types"). The same rule applies to the `num_dynamic_types` count in the non-flat `V1`/`V2`/`V3` prefixes.
+`num_types` is read from the stream before any type names. A decoder must treat it as untrusted: a corrupted count (for example close to `SIZE_MAX`) must not be used to size an allocation directly, since that can overflow intermediate arithmetic or trigger a huge allocation. Reject a count that cannot be backed by the remaining stream length as corruption; ClickHouse rejects such input with `INCORRECT_DATA` ("`Dynamic` column has too many types").
+
+Do **not**, however, bound the **flattened** `num_types` by `ColumnDynamic::MAX_DYNAMIC_TYPES_LIMIT` (`254` in ClickHouse): the flattened type list carries *every* distinct runtime type, including those that had overflowed into the shared variant, so a valid flattened block can legitimately list far more than that. The `MAX_DYNAMIC_TYPES_LIMIT` bound applies only to the `num_dynamic_types` count in the non-flat `V1`/`V2`/`V3` prefixes, which counts regular-variant slots and is capped by the limit (ClickHouse validates it there before the `+ 1` for the shared variant).
 :::
 
 :::note
