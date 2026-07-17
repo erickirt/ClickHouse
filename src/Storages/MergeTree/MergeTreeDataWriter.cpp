@@ -1081,6 +1081,24 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeProjectionPartImpl(
     MergeTreeData::reserveSpace(expected_size, parent_part->getDataPartStorage());
     part_type = data.choosePartFormat(expected_size, block.rows(), parent_part->info.level, &projection).part_type;
 
+    /// The projection temp directory name is deterministic (<projection>.tmp_proj), so a retried
+    /// materialization can hit a leftover directory from a failed earlier attempt. Remove it BEFORE
+    /// constructing the projection storage: getProjectionPartBuilder builds through the initializing
+    /// getProjection, which would seed a packed archive reader and snapshot the mark layout
+    /// (index_granularity_info) from the stale contents, and the subsequent write would proceed with
+    /// that stale layout. getProjectionNoInitialize gives a storage handle that does not seed the reader,
+    /// so removing through it is safe. Mirrors the base-part reclaim in writeTempPartImpl.
+    {
+        const char * projection_extension = is_temp ? ".tmp_proj" : ".proj";
+        auto stale_projection_storage = parent_part->getDataPartStorage().getProjectionNoInitialize(
+            part_name + projection_extension, /*use_parent_transaction=*/ false);
+        if (stale_projection_storage->exists())
+        {
+            LOG_WARNING(log, "Removing old temporary projection directory {}", stale_projection_storage->getFullPath());
+            stale_projection_storage->removeRecursive();
+        }
+    }
+
     auto new_data_part = parent_part->getProjectionPartBuilder(part_name, &projection, is_temp).withPartType(part_type).build();
     auto projection_part_storage = new_data_part->getDataPartStoragePtr();
     auto data_settings = data.getSettings(&projection.settings_changes);
@@ -1106,13 +1124,6 @@ MergeTreeTemporaryPartPtr MergeTreeDataWriter::writeProjectionPartImpl(
     infos.add(block);
 
     new_data_part->setColumns(columns, infos, metadata_snapshot->getMetadataVersion());
-
-    /// The name could be non-unique in case of stale files from previous runs.
-    if (projection_part_storage->exists())
-    {
-        LOG_WARNING(log, "Removing old temporary directory {}", projection_part_storage->getFullPath());
-        projection_part_storage->removeRecursive();
-    }
 
     projection_part_storage->createDirectories();
 
