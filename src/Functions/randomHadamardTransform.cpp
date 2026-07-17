@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <numbers>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -52,7 +53,11 @@
   *   variable CLICKHOUSE_RHT_KERNEL = "scalar" | "neon" (default: neon on AArch64, scalar elsewhere).
   * - When the length is 2^k * m with m in {12, 20} (orders with a Hadamard matrix), the transform
   *   is the exact Kronecker product H_(2^k) (x) H_m applied without padding, so the output keeps the
-  *   input dimension. H_m is built once via the Paley construction. See hadamardOrderFor / kronecker*.
+  *   input dimension. H_m is built once via the Paley construction. See kroneckerFactorFor / kronecker*.
+  * - Order 9 has no +-1 Hadamard matrix (those exist only for orders 1, 2, and multiples of 4), so for
+  *   the length 2^k * 9 family (e.g. 1152 = 128 * 9) the small factor is a real orthogonal Discrete
+  *   Hartley Transform matrix C_9 applied with float multiplies: the exact Kronecker product
+  *   H_(2^k) (x) C_9, again without padding. See buildHartleyMatrix / kroneckerHartleyScalar.
   */
 namespace DB
 {
@@ -122,21 +127,41 @@ void fwhtScalar(T * a, size_t m)
 constexpr size_t max_hadamard_block = 64;
 
 /// A dimension d = 2^k * m can be transformed exactly (no zero-padding) as the Kronecker product
-/// H_{2^k} (x) H_m when m has a Hadamard matrix. Hadamard matrices exist for orders that are
-/// multiples of 4; we support m in {12, 20}, which covers the common embedding dimensions
-/// (384, 768, 1536, 3072 = 2^k * 12; 2560 = 2^7 * 20). Returns m and the number of blocks 2^k,
-/// or {0, 0} when d is not of that form (then we fall back to zero-padding to a power of two).
+/// H_{2^k} (x) B_m, where B_m is a real orthogonal m x m matrix and 2^k = blocks. The small factor
+/// B_m is one of two kinds:
+///  - Hadamard: a +-1 Hadamard matrix, applied with sign-bit flips (fast, no multiplies). These
+///    exist only for orders that are multiples of 4; we support m in {12, 20}, which covers common
+///    embedding dimensions (384, 768, 1536, 3072 = 2^k * 12; 2560 = 2^7 * 20).
+///  - Hartley: a real orthogonal Discrete Hartley Transform matrix, applied with float multiplies,
+///    used for orders that have no +-1 Hadamard matrix. We support m = 9, covering the 2^k * 9
+///    family (e.g. 1152 = 128 * 9, 2304 = 256 * 9).
+/// kroneckerFactorFor returns m, the number of blocks 2^k, and the kind, or {0, 0, None} when d is
+/// not of a supported form (then we fall back to zero-padding to a power of two).
+enum class SmallFactorKind
+{
+    None,
+    Hadamard,
+    Hartley,
+};
+
 struct KroneckerFactor
 {
     size_t m = 0;
     size_t blocks = 0;
+    SmallFactorKind kind = SmallFactorKind::None;
 };
 
-inline KroneckerFactor hadamardOrderFor(size_t length)
+inline KroneckerFactor kroneckerFactorFor(size_t length)
 {
+    /// Orders with a +-1 Hadamard matrix (Paley type I): fast sign-flip small factor.
     for (size_t m : {static_cast<size_t>(12), static_cast<size_t>(20)})
         if (length % m == 0 && std::has_single_bit(length / m))
-            return {m, length / m};
+            return {m, length / m, SmallFactorKind::Hadamard};
+
+    /// Order 9 has no +-1 Hadamard matrix, so use a dense real orthogonal DHT matrix instead.
+    if (length % 9 == 0 && std::has_single_bit(length / 9))
+        return {static_cast<size_t>(9), length / 9, SmallFactorKind::Hartley};
+
     return {};
 }
 
@@ -237,6 +262,64 @@ void kroneckerScalar(Compute * a, size_t blocks, size_t m, const HmMasks<Compute
 {
     for (size_t p = 0; p < blocks; ++p)
         applyHmScalar<Compute>(a + p * m, m, hm.row.data());
+    fwhtBlocksScalar<Compute>(a, blocks, m);
+}
+
+/// A dense real orthogonal m x m matrix (a Discrete Hartley Transform), stored row-major and
+/// UNnormalized so that C^T C = m * I -- i.e. applying it scales a vector's norm by sqrt(m), exactly
+/// like the unnormalized +-1 Hadamard block above. Used for orders that have no +-1 Hadamard matrix
+/// (m = 9). The caller caches the result per order m.
+template <typename Compute>
+struct HartleyMatrix
+{
+    size_t order = 0;
+    PaddedPODArray<Compute> coef;  /// row-major: coef[i * m + j]
+};
+
+/// Build the m x m Discrete Hartley Transform matrix C[i][j] = cas(2*pi*i*j/m), where
+/// cas(x) = cos(x) + sin(x). The DHT matrix is real, symmetric, and self-inverse up to scale
+/// (C * C = m * I), so it is orthogonal up to the 1/sqrt(m) factor that the caller's final 1/sqrt(k)
+/// scaling supplies -- matching the unnormalized +-1 Hadamard convention.
+template <typename Compute>
+void buildHartleyMatrix(HartleyMatrix<Compute> & out, size_t m)
+{
+    out.order = m;
+    out.coef.resize(m * m);
+    for (size_t i = 0; i < m; ++i)
+        for (size_t j = 0; j < m; ++j)
+        {
+            const double angle
+                = 2.0 * std::numbers::pi * static_cast<double>(i) * static_cast<double>(j) / static_cast<double>(m);
+            out.coef[i * m + j] = static_cast<Compute>(std::cos(angle) + std::sin(angle));
+        }
+}
+
+/// Apply a dense m x m matrix (row-major float coefficients) to one block of m elements, in place,
+/// accumulating over j in a fixed order (the I (x) C_m part). Scalar-only, used for the DHT factor.
+template <typename Compute>
+void applyHartleyScalar(Compute * block, size_t m, const Compute * coef)
+{
+    Compute z[max_hadamard_block];
+    for (size_t i = 0; i < m; ++i)
+    {
+        Compute acc = 0;
+        for (size_t j = 0; j < m; ++j)
+            acc += coef[i * m + j] * block[j];
+        z[i] = acc;
+    }
+    for (size_t i = 0; i < m; ++i)
+        block[i] = z[i];
+}
+
+/// Exact Kronecker transform H_{2^k} (x) C_m on `blocks` * m elements, where C_m is the dense DHT
+/// matrix. Scalar-only: the cross-block FWHT uses the scalar kernel because m need not be a multiple
+/// of 4 (the NEON block kernel requires that). Both parts are deterministic, so the result does not
+/// depend on the selected kernel.
+template <typename Compute>
+void kroneckerHartleyScalar(Compute * a, size_t blocks, size_t m, const HartleyMatrix<Compute> & hc)
+{
+    for (size_t p = 0; p < blocks; ++p)
+        applyHartleyScalar<Compute>(a + p * m, m, hc.coef.data());
     fwhtBlocksScalar<Compute>(a, blocks, m);
 }
 
@@ -491,6 +574,7 @@ private:
         PaddedPODArray<Mask> sign_masks;
         size_t sign_dim = 0;
         HmMasks<Compute> hm;
+        HartleyMatrix<Compute> hc;
         PaddedPODArray<Compute> buffer;
         size_t written = 0;
         size_t start = 0;
@@ -500,10 +584,11 @@ private:
             const size_t length = offsets[row] - start;
             if (length != 0)
             {
-                /// Exact Kronecker transform for length = 2^k * m (m in {12, 20}); otherwise zero-pad
-                /// to the next power of two. The working dimension is the input length in the exact
-                /// case and the padded length otherwise.
-                const auto [kron_m, kron_blocks] = hadamardOrderFor(length);
+                /// Exact Kronecker transform for length = 2^k * m (m in {12, 20} via a +-1 Hadamard
+                /// factor, or m = 9 via a DHT factor); otherwise zero-pad to the next power of two.
+                /// The working dimension is the input length in the exact case and the padded length
+                /// otherwise.
+                const auto [kron_m, kron_blocks, kron_kind] = kroneckerFactorFor(length);
                 const size_t working_dim = kron_m ? length : std::bit_ceil(length);
                 const size_t k = fixed_out_dims ? fixed_out_dims : working_dim;
                 if (k > working_dim)
@@ -532,7 +617,14 @@ private:
 
                 /// Core transform via the selected kernel: an exact Kronecker product for the
                 /// supported non-power-of-two dimensions, or a fast Walsh-Hadamard transform otherwise.
-                if (kron_m)
+                if (kron_kind == SmallFactorKind::Hartley)
+                {
+                    /// Dense DHT small factor (m = 9): scalar-only, so kernel-independent.
+                    if (hc.order != kron_m)
+                        buildHartleyMatrix<Compute>(hc, kron_m);
+                    kroneckerHartleyScalar<Compute>(buffer.data(), kron_blocks, kron_m, hc);
+                }
+                else if (kron_m)
                 {
                     if (hm.order != kron_m)
                         buildHmMasks<Compute>(hm, kron_m);
@@ -598,8 +690,14 @@ truncated -- as a Johnson-Lindenstrauss / subsampled-randomized-Hadamard (SRHT) 
 When the input length is `2^k * m` with `m` in `{12, 20}` (orders that have a Hadamard matrix, e.g.
 `768 = 64 * 12`, `1536 = 128 * 12`, `3072 = 256 * 12`, `2560 = 128 * 20`), an exact Kronecker
 transform `H_(2^k) (x) H_m` is used instead of padding, so the output keeps the input dimension
-rather than growing to the next power of two. All other lengths are zero-padded to `m`, the next
-power of two.
+rather than growing to the next power of two.
+
+Order `9` has no `+/-1` Hadamard matrix (those exist only for orders `1`, `2`, and multiples of
+`4`), so for the `2^k * 9` family (e.g. `1152 = 128 * 9`, `2304 = 256 * 9`) the small factor is a
+real orthogonal Discrete Hartley Transform matrix `C_9` applied with float multiplies -- the exact
+Kronecker transform `H_(2^k) (x) C_9`, again without padding.
+
+All other lengths are zero-padded to `m`, the next power of two.
 
 The result has the same element type as the input; an empty input array returns an empty array.
 
@@ -622,7 +720,9 @@ The result has the same element type as the input; an empty input array returns 
         {"Norm is preserved",
          "SELECT round(arraySum(x -> x * x, randomHadamardTransform([1, 2, 3, 4]::Array(Float32))) - 30, 4)", "0"},
         {"Truncated projection to 3 dimensions",
-         "SELECT length(randomHadamardTransform([1, 2, 3, 4, 5, 6, 7, 8]::Array(Float32), 42, 3))", "3"}};
+         "SELECT length(randomHadamardTransform([1, 2, 3, 4, 5, 6, 7, 8]::Array(Float32), 42, 3))", "3"},
+        {"Exact transform of a 2^k * 9 dimension keeps the input length (no padding)",
+         "SELECT length(randomHadamardTransform(CAST(range(1152), 'Array(Float32)')))", "1152"}};
     FunctionDocumentation::IntroducedIn introduced_in = {26, 7};
     FunctionDocumentation::Category category = FunctionDocumentation::Category::Array;
     FunctionDocumentation documentation = {description, syntax, arguments, {}, returned_value, examples, introduced_in, category};
