@@ -17,6 +17,7 @@ using namespace DB;
 namespace DB::ErrorCodes
 {
     extern const int INCORRECT_DATA;
+    extern const int ATTEMPT_TO_READ_AFTER_EOF;
 }
 
 TEST(ObjectSerialization, FieldBinarySerialization)
@@ -226,5 +227,89 @@ TEST(ObjectSerialization, TooManySharedDataPathsStatistics)
     {
         ASSERT_EQ(e.code(), ErrorCodes::INCORRECT_DATA) << e.message();
         ASSERT_NE(e.message().find("too many paths"), std::string::npos) << e.message();
+    }
+}
+
+/// A large-but-representable dynamic-paths count (far below `max_size()`, so it passes the
+/// container-capacity guard) must not drive a huge up-front allocation: the reader reserves only a
+/// capped hint and appends paths one by one, so a corrupted count that the stream cannot back trips
+/// a normal read error at end of stream (a `DB::Exception`), not a `std::bad_alloc` / OOM. This is
+/// the below-`max_size()` companion to `04350_json_native_too_many_paths`, which covers the
+/// `SIZE_MAX` corner (rejected up front as `INCORRECT_DATA` "too many paths").
+TEST(ObjectSerialization, LargeButRepresentablePathCountFailsCleanly)
+{
+    auto type = DataTypeFactory::instance().get("JSON");
+    auto serialization = type->getDefaultSerialization();
+
+    /// Hand-crafted V1 (version = 0) ObjectStructure prefix:
+    ///   [UInt64 LE version = 0]
+    ///   [VarUInt max_dynamic_paths = 0]                (V1 only)
+    ///   [VarUInt number of dynamic paths = 100000000]  <- large but representable, no path bytes follow
+    WriteBufferFromOwnString structure;
+    writeBinaryLittleEndian(static_cast<UInt64>(0), structure); /// SerializationVersion::V1
+    writeVarUInt(static_cast<UInt64>(0), structure);            /// max_dynamic_paths
+    writeVarUInt(static_cast<UInt64>(100000000), structure);    /// number of dynamic paths
+    std::string structure_bytes = structure.str();
+    ReadBufferFromString structure_stream(structure_bytes);
+
+    ISerialization::DeserializeBinaryBulkSettings settings;
+    settings.getter = [&](const ISerialization::SubstreamPath & path) -> ReadBuffer *
+    {
+        if (!path.empty() && path.back().type == ISerialization::Substream::ObjectStructure)
+            return &structure_stream;
+        return nullptr;
+    };
+
+    ISerialization::DeserializeBinaryBulkStatePtr state;
+    try
+    {
+        serialization->deserializeBinaryBulkStatePrefix(settings, state, nullptr);
+        FAIL() << "Expected a read error for a corrupted dynamic-paths count the stream cannot back";
+    }
+    catch (const Exception & e)
+    {
+        ASSERT_EQ(e.code(), ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF) << e.message();
+    }
+}
+
+/// `shared_data_buckets` in a V3 `Object` prefix is a raw count later used to size per-bucket state
+/// vectors and `Columns`. A corrupted value must be rejected up front with a clean `INCORRECT_DATA`
+/// error instead of propagating a huge allocation into the bucketed shared-data readers.
+TEST(ObjectSerialization, TooManySharedDataBuckets)
+{
+    auto type = DataTypeFactory::instance().get("JSON");
+    auto serialization = type->getDefaultSerialization();
+
+    /// Hand-crafted V3 (version = 4) ObjectStructure prefix:
+    ///   [UInt64 LE version = 4]
+    ///   [VarUInt number of dynamic paths = 0]
+    ///   [VarUInt shared data serialization version = 1]   (MAP_WITH_BUCKETS, so a bucket count follows)
+    ///   [VarUInt shared_data_buckets = SIZE_MAX]           <- corrupted
+    WriteBufferFromOwnString structure;
+    writeBinaryLittleEndian(static_cast<UInt64>(4), structure); /// SerializationVersion::V3
+    writeVarUInt(static_cast<UInt64>(0), structure);            /// number of dynamic paths
+    writeVarUInt(static_cast<UInt64>(1), structure);            /// shared data serialization version = MAP_WITH_BUCKETS
+    writeVarUInt(std::numeric_limits<size_t>::max(), structure);/// shared_data_buckets
+    std::string structure_bytes = structure.str();
+    ReadBufferFromString structure_stream(structure_bytes);
+
+    ISerialization::DeserializeBinaryBulkSettings settings;
+    settings.getter = [&](const ISerialization::SubstreamPath & path) -> ReadBuffer *
+    {
+        if (!path.empty() && path.back().type == ISerialization::Substream::ObjectStructure)
+            return &structure_stream;
+        return nullptr;
+    };
+
+    ISerialization::DeserializeBinaryBulkStatePtr state;
+    try
+    {
+        serialization->deserializeBinaryBulkStatePrefix(settings, state, nullptr);
+        FAIL() << "Expected INCORRECT_DATA for a corrupted shared_data_buckets count";
+    }
+    catch (const Exception & e)
+    {
+        ASSERT_EQ(e.code(), ErrorCodes::INCORRECT_DATA) << e.message();
+        ASSERT_NE(e.message().find("too many shared data buckets"), std::string::npos) << e.message();
     }
 }

@@ -11,11 +11,14 @@
 #include <DataTypes/DataTypesNumber.h>
 
 #include <Columns/ColumnDynamic.h>
+#include <Core/Defines.h>
 #include <IO/WriteHelpers.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/ReadHelpers.h>
 #include <IO/ReadBufferFromString.h>
 #include <Formats/EscapingRuleUtils.h>
+
+#include <algorithm>
 
 namespace DB
 {
@@ -29,21 +32,21 @@ namespace ErrorCodes
 namespace
 {
 
-/// Reserving `num_types` elements for a list of Dynamic's nested types read from a (possibly
-/// untrusted, e.g. Native format) stream: a corrupted `num_types` close to SIZE_MAX makes
-/// `std::vector::reserve` throw an uncaught `std::length_error` instead of a normal
-/// DB::Exception. Convert that into an informative, catchable error.
+/// `num_types` is the length of a list of Dynamic's nested types read from a (possibly untrusted,
+/// e.g. Native format) stream. It must not be handed to `reserve` directly: a count the container
+/// cannot hold escapes as an uncaught `std::length_error` instead of a `DB::Exception`, and a
+/// large-but-representable count (e.g. `100000000`, far below `max_size()`) would drive a huge
+/// up-front allocation and fail as `std::bad_alloc` / OOM before a single type is read. Reject the
+/// first as corruption, and cap the `reserve` hint for the second: `reserve` is only a sizing hint,
+/// so the caller's read loop still appends each type as it is decoded (growing the container on
+/// demand for a legitimately large count), while a corrupted over-count trips a normal read error
+/// at end of stream instead of a huge allocation.
 template <typename Container>
 void reserveOrThrowTooManyTypes(Container & container, size_t num_types)
 {
-    try
-    {
-        container.reserve(num_types);
-    }
-    catch (const std::length_error &)
-    {
+    if (num_types > container.max_size())
         throw Exception(ErrorCodes::INCORRECT_DATA, "Dynamic column has too many types: {}", num_types);
-    }
+    container.reserve(std::min(num_types, DEFAULT_NATIVE_BINARY_MAX_NUM_COLUMNS));
 }
 
 }
