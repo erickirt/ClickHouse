@@ -74,14 +74,14 @@ DEFAULT_CHECKS = [
 ]
 
 # The subset a consuming client repo (e.g. clickhouse-connect) runs: only the
-# checks that validate the slice it owns. The snippet-import policy is not a
-# separate client check: scoped_validate_check bundles it with the scoped
-# validator, so language-client workflows get both as one validation step.
-# `mint validate` proves the docs.json fragment and frontmatter are well-formed,
-# and the internal-links check proves the client's own links and anchors resolve.
-# Redirects, external links, and locale checks are aggregator-global concerns a
-# client cannot fix.
-CLIENT_CHECKS = [VALIDATE_CHECK, INTERNAL_LINKS_CHECK]
+# checks that validate the slice it owns. Unscoped callers retain the standalone
+# snippet-import policy check alongside `mint validate`. In scoped mode,
+# scoped_validate_check bundles the snippet policy with the scoped validator, so
+# language-client workflows get both as one validation step without running the
+# full validator. The internal-links check proves the client's own links and
+# anchors resolve. Redirects, external links, and locale checks are
+# aggregator-global concerns a client cannot fix.
+CLIENT_CHECKS = [SNIPPET_IMPORTS_CHECK, VALIDATE_CHECK, INTERNAL_LINKS_CHECK]
 
 
 # Swaps the full `mint validate` (which MDX-parses the whole site, ~13 minutes)
