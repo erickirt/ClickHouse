@@ -12,6 +12,9 @@
 #include <IO/WriteHelpers.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/readDecimalText.h>
+#include <Common/LockMemoryExceptionInThread.h>
+
+#include <absl/container/inlined_vector.h>
 
 
 using namespace std::literals;
@@ -52,7 +55,7 @@ void Field::createContainerIteratively(const Field & src)
     /// being copied recursively, so the copy runs with a bounded native stack.
     initEmptyContainer(src.which);
 
-    std::vector<std::pair<const Field *, Field *>> pending;
+    absl::InlinedVector<std::pair<const Field *, Field *>, 16> pending;
 
     /// On a mid-copy allocation failure, tear down what was built so we neither leak the
     /// partial container nor leave the storage in a half-constructed state (matches the
@@ -137,7 +140,15 @@ void Field::destroyContainerIteratively(Types::Which old_which) noexcept
     /// non-empty nested-container child into an explicit worklist so each vector/map
     /// destructor only ever destroys leaf elements (and already-emptied containers, which are
     /// trivial), keeping the native stack depth bounded regardless of the nesting depth.
-    std::vector<Field> to_destroy;
+    ///
+    /// This runs from ~Field, so it must not throw. The worklist can allocate, and allocation
+    /// goes through the throwing operator new, so suppress the memory-limit exception for its
+    /// lifetime (memory is still tracked, so freeing the value being destroyed is still credited).
+    /// The worklist only holds the current frontier of nested containers, which for a deeply
+    /// nested value is narrow (a deep literal is query-size bounded, so it cannot also be wide);
+    /// the inline buffer keeps that common case allocation-free.
+    LockMemoryExceptionInThread block_memory_limit_exception;
+    absl::InlinedVector<Field, 16> to_destroy;
 
     auto steal_children = [&to_destroy](Field & container, Types::Which w)
     {
