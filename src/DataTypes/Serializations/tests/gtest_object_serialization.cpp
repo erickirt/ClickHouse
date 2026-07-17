@@ -1,4 +1,5 @@
 #include <Columns/ColumnObject.h>
+#include <Core/MergeTreeSerializationEnums.h>
 #include <DataTypes/DataTypeFactory.h>
 #include <DataTypes/Serializations/SerializationObject.h>
 #include <DataTypes/Serializations/SerializationObjectHelpers.h>
@@ -273,9 +274,12 @@ TEST(ObjectSerialization, LargeButRepresentablePathCountFailsCleanly)
 }
 
 /// `shared_data_buckets` in a V3 `Object` prefix is a raw count later used to size per-bucket state
-/// vectors and `Columns`. A corrupted value must be rejected up front with a clean `INCORRECT_DATA`
-/// error instead of propagating a huge allocation into the bucketed shared-data readers.
-TEST(ObjectSerialization, TooManySharedDataBuckets)
+/// vectors and `Columns`. A value outside the legitimate on-wire range `[1, MAX_OBJECT_SHARED_DATA_BUCKETS]`
+/// must be rejected up front with a clean `INCORRECT_DATA` error instead of propagating a huge
+/// allocation into the bucketed shared-data readers. Legitimate counts come from a small MergeTree
+/// setting, so not just the `SIZE_MAX` corner but also a large-but-representable count (e.g. `100000`,
+/// far below the container's `max_size()`) and `0` are all corruption.
+static void expectInvalidNumberOfBucketsRejected(size_t num_buckets)
 {
     auto type = DataTypeFactory::instance().get("JSON");
     auto serialization = type->getDefaultSerialization();
@@ -284,12 +288,12 @@ TEST(ObjectSerialization, TooManySharedDataBuckets)
     ///   [UInt64 LE version = 4]
     ///   [VarUInt number of dynamic paths = 0]
     ///   [VarUInt shared data serialization version = 1]   (MAP_WITH_BUCKETS, so a bucket count follows)
-    ///   [VarUInt shared_data_buckets = SIZE_MAX]           <- corrupted
+    ///   [VarUInt shared_data_buckets = num_buckets]        <- corrupted
     WriteBufferFromOwnString structure;
     writeBinaryLittleEndian(static_cast<UInt64>(4), structure); /// SerializationVersion::V3
     writeVarUInt(static_cast<UInt64>(0), structure);            /// number of dynamic paths
     writeVarUInt(static_cast<UInt64>(1), structure);            /// shared data serialization version = MAP_WITH_BUCKETS
-    writeVarUInt(std::numeric_limits<size_t>::max(), structure);/// shared_data_buckets
+    writeVarUInt(num_buckets, structure);                       /// shared_data_buckets
     std::string structure_bytes = structure.str();
     ReadBufferFromString structure_stream(structure_bytes);
 
@@ -305,11 +309,24 @@ TEST(ObjectSerialization, TooManySharedDataBuckets)
     try
     {
         serialization->deserializeBinaryBulkStatePrefix(settings, state, nullptr);
-        FAIL() << "Expected INCORRECT_DATA for a corrupted shared_data_buckets count";
+        FAIL() << "Expected INCORRECT_DATA for an invalid shared_data_buckets count " << num_buckets;
     }
     catch (const Exception & e)
     {
         ASSERT_EQ(e.code(), ErrorCodes::INCORRECT_DATA) << e.message();
-        ASSERT_NE(e.message().find("too many shared data buckets"), std::string::npos) << e.message();
+        ASSERT_NE(e.message().find("invalid number of shared data buckets"), std::string::npos) << e.message();
     }
+}
+
+TEST(ObjectSerialization, InvalidNumberOfSharedDataBuckets)
+{
+    /// The `SIZE_MAX` corner (above the container's `max_size()`).
+    expectInvalidNumberOfBucketsRejected(std::numeric_limits<size_t>::max());
+    /// A large-but-representable count: far below `max_size()`, but far above the writer-side cap of
+    /// MAX_OBJECT_SHARED_DATA_BUCKETS, so it must not reach the per-bucket sizing.
+    expectInvalidNumberOfBucketsRejected(100000);
+    /// Just past the maximum.
+    expectInvalidNumberOfBucketsRejected(MAX_OBJECT_SHARED_DATA_BUCKETS + 1);
+    /// Zero buckets is impossible on the wire (the writer always writes at least one).
+    expectInvalidNumberOfBucketsRejected(0);
 }

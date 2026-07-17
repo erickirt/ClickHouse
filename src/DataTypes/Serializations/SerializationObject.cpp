@@ -11,6 +11,7 @@
 
 #include <Columns/ColumnObject.h>
 #include <Core/Defines.h>
+#include <Core/MergeTreeSerializationEnums.h>
 #include <DataTypes/DataTypeObject.h>
 #include <DataTypes/DataTypeArray.h>
 #include <IO/ReadBufferFromString.h>
@@ -56,13 +57,20 @@ void reserveOrThrowTooManyPaths(Container & container, size_t num_paths)
 }
 
 /// `shared_data_buckets` in a V3 `Object` prefix is another raw count from a possibly-untrusted
-/// stream, later used to size per-bucket state vectors and `Columns`. Legitimate values come from
-/// a small MergeTree setting (a few hundred at most), so a count anywhere near the structural
-/// ceiling can only be corruption; reject it up front instead of propagating a huge allocation.
-void throwIfTooManyBuckets(size_t num_buckets)
+/// stream, later used to size per-bucket state vectors and `Columns`. Unlike the path / type counts,
+/// this one has a tight writer-side invariant: the number of buckets is chosen from the small
+/// MergeTree settings `object_shared_data_buckets_for_{compact,wide}_part`, which are non-zero and
+/// capped at `MAX_OBJECT_SHARED_DATA_BUCKETS`. So the only legitimate on-wire range is
+/// `1 .. MAX_OBJECT_SHARED_DATA_BUCKETS`; any value outside it (including a large-but-representable
+/// count such as `100000`, which the generic `Native` column-count cap would let through) can only
+/// be corruption and must be rejected up front, before it is used to size the per-bucket state.
+void throwIfInvalidNumberOfBuckets(size_t num_buckets)
 {
-    if (num_buckets > DEFAULT_NATIVE_BINARY_MAX_NUM_COLUMNS)
-        throw Exception(ErrorCodes::INCORRECT_DATA, "JSON/Object column has too many shared data buckets: {}", num_buckets);
+    if (num_buckets == 0 || num_buckets > MAX_OBJECT_SHARED_DATA_BUCKETS)
+        throw Exception(
+            ErrorCodes::INCORRECT_DATA,
+            "JSON/Object column has an invalid number of shared data buckets: {} (must be in the range [1, {}])",
+            num_buckets, MAX_OBJECT_SHARED_DATA_BUCKETS);
 }
 
 }
@@ -778,7 +786,7 @@ ISerialization::DeserializeBinaryBulkStatePtr SerializationObject::deserializeOb
                     || structure_state->shared_data_serialization_version.value == SerializationObjectSharedData::SerializationVersion::ADVANCED)
                 {
                     readVarUInt(structure_state->shared_data_buckets, *structure_stream);
-                    throwIfTooManyBuckets(structure_state->shared_data_buckets);
+                    throwIfInvalidNumberOfBuckets(structure_state->shared_data_buckets);
                 }
             }
 
