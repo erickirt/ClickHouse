@@ -48,6 +48,11 @@ FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7 L
 SELECT 'distinct without limit:', countIf(explain LIKE '%InputSelector%') > 0
 FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7);
 
+-- The DISTINCT limit hint is seeded from the query limit even when the limit reads till
+-- the end, so it must not disable lazy FINAL in that case.
+SELECT 'distinct with limit reading till end:', countIf(explain LIKE '%InputSelector%') > 0
+FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 5 SETTINGS exact_rows_before_limit = 1);
+
 -- arrayJoin changes the number of rows, so a limit above it is not comparable to the
 -- number of selected rows: lazy FINAL applies.
 SELECT 'limit above arrayJoin:', countIf(explain LIKE '%InputSelector%') > 0

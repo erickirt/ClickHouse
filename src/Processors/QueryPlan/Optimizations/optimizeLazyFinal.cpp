@@ -427,9 +427,22 @@ void optimizeLazyFinal(const Stack & stack, QueryPlan & query_plan, QueryPlan::N
             continue;
         }
         /// DISTINCT stops reading as soon as its pushed-down limit hint of distinct rows is produced.
+        /// The hint is seeded from the query limit even when that limit reads till the end
+        /// (e.g. exact_rows_before_limit or WITH TOTALS), so confirm with the LimitStep above.
         if (const auto * distinct_step = typeid_cast<DistinctStep *>(step))
         {
-            limit_above_reading = distinct_step->getLimitHint();
+            if (size_t limit_hint = distinct_step->getLimitHint())
+            {
+                for (size_t j = i; j-- > 0;)
+                {
+                    auto * upper_step = stack[j].node->step.get();
+                    if (typeid_cast<ExpressionStep *>(upper_step) || typeid_cast<DistinctStep *>(upper_step))
+                        continue;
+                    if (const auto * limit_step = typeid_cast<LimitStep *>(upper_step); limit_step && !limit_step->alwaysReadTillEnd())
+                        limit_above_reading = limit_hint;
+                    break;
+                }
+            }
             break;
         }
         /// With always_read_till_end (e.g. exact_rows_before_limit or WITH TOTALS) the query
