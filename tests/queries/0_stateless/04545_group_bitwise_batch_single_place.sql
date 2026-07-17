@@ -482,3 +482,31 @@ FROM
 SELECT 'Int256 identity', groupBitOrIf(v, c0) = CAST(0, 'Int256'), groupBitAndIf(v, c0) = bitNot(CAST(0, 'Int256')), groupBitXorIf(v, c0) = CAST(0, 'Int256') FROM (SELECT toInt256(bitOr(bitOr(bitShiftLeft(CAST(cityHash64(number, 1), 'UInt256'), 192), bitShiftLeft(CAST(cityHash64(number, 2), 'UInt256'), 128)), bitOr(bitShiftLeft(CAST(cityHash64(number, 3), 'UInt256'), 64), CAST(cityHash64(number, 4), 'UInt256')))) AS v, number > 100 AS c0 FROM numbers(100));
 SELECT 'Int256 empty', groupBitOr(v) = CAST(0, 'Int256'), groupBitAnd(v) = bitNot(CAST(0, 'Int256')), groupBitXor(v) = CAST(0, 'Int256') FROM (SELECT toInt256(bitOr(bitOr(bitShiftLeft(CAST(cityHash64(number, 1), 'UInt256'), 192), bitShiftLeft(CAST(cityHash64(number, 2), 'UInt256'), 128)), bitOr(bitShiftLeft(CAST(cityHash64(number, 3), 'UInt256'), 64), CAST(cityHash64(number, 4), 'UInt256')))) AS v FROM numbers(100) WHERE number > 100);
 SELECT 'Int256 allnull', isNull(groupBitOr(vn)), isNull(groupBitAnd(vn)), isNull(groupBitXor(vn)) FROM (SELECT if(number != 999, NULL, toInt256(bitOr(bitOr(bitShiftLeft(CAST(cityHash64(number, 1), 'UInt256'), 192), bitShiftLeft(CAST(cityHash64(number, 2), 'UInt256'), 128)), bitOr(bitShiftLeft(CAST(cityHash64(number, 3), 'UInt256'), 64), CAST(cityHash64(number, 4), 'UInt256'))))) AS vn FROM numbers(100));
+
+-- Constructed non-saturating masking check. The random cross-checks above OR to all-ones and
+-- AND to all-zeros over 70k rows, so groupBitOrIf/groupBitAndIf reach the right answer regardless
+-- of which rows their keep_mask selects. Here bit 0 is set only in kept rows and the top bit only
+-- in dropped rows, so groupBitOrIf(v, c) != groupBitOr(v) and groupBitAndIf(v, c) != groupBitAnd(v):
+-- each -If kernel proves its own masking formula instead of leaning on groupBitXorIf as a proxy.
+-- Covers the scalar path (UInt8) and the wide-integer memset path (UInt256), plain and Nullable.
+SELECT 'UInt8 masked',
+    groupBitOrIf(v, c)  = arrayReduce('groupBitOr',  groupArrayIf(v, c)),
+    groupBitAndIf(v, c) = arrayReduce('groupBitAnd', groupArrayIf(v, c)),
+    groupBitXorIf(v, c) = arrayReduce('groupBitXor', groupArrayIf(v, c)),
+    groupBitOrIf(vn, c)  = arrayReduce('groupBitOr',  groupArrayIf(vn, c)),
+    groupBitAndIf(vn, c) = arrayReduce('groupBitAnd', groupArrayIf(vn, c)),
+    groupBitXorIf(vn, c) = arrayReduce('groupBitXor', groupArrayIf(vn, c)),
+    groupBitOrIf(v, c)  != groupBitOr(v),
+    groupBitAndIf(v, c) != groupBitAnd(v)
+FROM (SELECT toUInt8(bitOr(if(bitAnd(number, 1) = 0, 1, 128), bitShiftLeft(bitAnd(number, 15), 1))) AS v, bitAnd(number, 1) = 0 AS c, if(bitAnd(number, 3) = 1, NULL, toUInt8(bitOr(if(bitAnd(number, 1) = 0, 1, 128), bitShiftLeft(bitAnd(number, 15), 1)))) AS vn FROM numbers(14));
+
+SELECT 'UInt256 masked',
+    groupBitOrIf(v, c)  = arrayReduce('groupBitOr',  groupArrayIf(v, c)),
+    groupBitAndIf(v, c) = arrayReduce('groupBitAnd', groupArrayIf(v, c)),
+    groupBitXorIf(v, c) = arrayReduce('groupBitXor', groupArrayIf(v, c)),
+    groupBitOrIf(vn, c)  = arrayReduce('groupBitOr',  groupArrayIf(vn, c)),
+    groupBitAndIf(vn, c) = arrayReduce('groupBitAnd', groupArrayIf(vn, c)),
+    groupBitXorIf(vn, c) = arrayReduce('groupBitXor', groupArrayIf(vn, c)),
+    groupBitOrIf(v, c)  != groupBitOr(v),
+    groupBitAndIf(v, c) != groupBitAnd(v)
+FROM (SELECT bitOr(if(bitAnd(number, 1) = 0, CAST(1, 'UInt256'), bitShiftLeft(CAST(1, 'UInt256'), 255)), CAST(bitShiftLeft(bitAnd(number, 15), 1), 'UInt256')) AS v, bitAnd(number, 1) = 0 AS c, if(bitAnd(number, 3) = 1, NULL, bitOr(if(bitAnd(number, 1) = 0, CAST(1, 'UInt256'), bitShiftLeft(CAST(1, 'UInt256'), 255)), CAST(bitShiftLeft(bitAnd(number, 15), 1), 'UInt256'))) AS vn FROM numbers(14));

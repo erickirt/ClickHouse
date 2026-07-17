@@ -46,3 +46,5 @@ Int256	1	1	1	1	1	1	1	1	1	1	1	1
 Int256 identity	1	1	1
 Int256 empty	1	1	1
 Int256 allnull	1	1	1
+UInt8 masked	1	1	1	1	1	1	1	1
+UInt256 masked	1	1	1	1	1	1	1	1
