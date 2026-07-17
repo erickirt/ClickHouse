@@ -62,6 +62,7 @@ MergeTreeReaderTextIndex::MergeTreeReaderTextIndex(
     , index(std::move(index_))
     , condition_text(assert_cast<const MergeTreeIndexConditionText *>(index.condition_template->generateUnsubstituted().get()))
 {
+    search_queries.reserve(columns_.size());
     for (const auto & column : columns_)
     {
         if (!column.name.starts_with(TEXT_INDEX_VIRTUAL_COLUMN_PREFIX) || !WhichDataType(column.type).isUInt8())
@@ -70,7 +71,12 @@ MergeTreeReaderTextIndex::MergeTreeReaderTextIndex(
                 "Column {} with type {} should not be filled by text index reader",
                 column.name, column.type->getName());
         }
+
+        search_queries.push_back(condition_text->getSearchQueryForVirtualColumn(column.name));
     }
+
+    lazy_cursors.resize(columns_.size());
+    prebuilt_cursors.resize(columns_.size());
 
     auto data_part = getDataPart();
     auto index_format = index.index->getDeserializedFormat(data_part->checksums, index.index->getFileName(), &data_part->getDataPartStorage());
@@ -131,10 +137,9 @@ void MergeTreeReaderTextIndex::initializeFallbackReader(const IMergeTreeReader *
     ///   and reading position data would be slower than evaluating directly.
     bool has_fallback_candidates = condition_text->hasSearchPatterns()
         || std::ranges::any_of(
-            columns_to_read,
-            [&](const auto & column)
+            search_queries,
+            [](const auto & search_query)
             {
-                const auto search_query = condition_text->getSearchQueryForVirtualColumn(column.name);
                 return search_query && search_query->getSearchMode() == TextSearchMode::Phrase
                     && search_query->getDirectReadMode() == TextIndexDirectReadMode::Exact;
             });
@@ -159,9 +164,10 @@ void MergeTreeReaderTextIndex::initializeFallbackReader(const IMergeTreeReader *
         physical_header.insert({phys_col.type->createColumn(), phys_col.type, phys_col.name});
 
     NameSet fallback_columns_set;
-    for (const auto & column : columns_to_read)
+    for (size_t i = 0; i < columns_to_read.size(); ++i)
     {
-        auto search_query = condition_text->getSearchQueryForVirtualColumn(column.name);
+        const auto & column = columns_to_read[i];
+        const auto & search_query = search_queries[i];
         if (!search_query)
             continue;
 
@@ -249,8 +255,7 @@ void MergeTreeReaderTextIndex::readGranule()
     small_postings_stream = makeTextIndexStream(substreams[2]);
 
     sparse_index_stream->seekToStart();
-    lazy_cursors.clear();
-    prebuilt_cursors.clear();
+    resetCursors();
 
     MergeTreeIndexInputStreams streams;
     streams[MergeTreeIndexSubstream::Type::Regular] = sparse_index_stream.get();
@@ -272,7 +277,7 @@ void MergeTreeReaderTextIndex::classifyVirtualColumns()
     for (size_t i = 0; i < columns_to_read.size(); ++i)
     {
         const auto & column = columns_to_read[i];
-        auto search_query = condition_text->getSearchQueryForVirtualColumn(column.name);
+        const auto & search_query = search_queries[i];
         const auto & query_builder = analyzer.getQueryBuilder(*search_query);
 
         if (search_query->getTokens().empty() && search_query->getPatterns().empty())
@@ -422,10 +427,7 @@ size_t MergeTreeReaderTextIndex::readRows(
         /// forward-only (their `linearOr` / `linearAnd` / `advance` walk segments from
         /// `current_segment_idx` onward), so they cannot serve an earlier `row_offset`.
         if (from_mark < current_mark)
-        {
-            lazy_cursors.clear();
-            prebuilt_cursors.clear();
-        }
+            resetCursors();
 
         from_row = index_granularity.getMarkStartingRow(from_mark) + rows_offset;
     }
@@ -510,7 +512,7 @@ size_t MergeTreeReaderTextIndex::readRows(
                     fallback_offset,
                     rows_to_read);
             }
-            else if (auto search_query = condition_text->getSearchQueryForVirtualColumn(columns_to_read[i].name);
+            else if (const auto & search_query = search_queries[i];
                      search_query && search_query->getSearchMode() == TextSearchMode::Phrase)
             {
                 /// Phrase queries are resolved from positional data (.pos), not per-mark posting lists.
@@ -518,7 +520,7 @@ size_t MergeTreeReaderTextIndex::readRows(
             }
             else if (use_lazy_mode)
             {
-                fillColumnLazy(column_mutable, columns_to_read[i].name, from_row, rows_to_read, range_posting);
+                fillColumnLazy(column_mutable, i, from_row, rows_to_read, range_posting);
             }
             else
             {
@@ -601,7 +603,7 @@ std::vector<PostingList> MergeTreeReaderTextIndex::buildPostingsForMark(size_t m
         if (is_always_true[i] || use_fallback[i])
             continue;
 
-        auto search_query = condition_text->getSearchQueryForVirtualColumn(columns_to_read[i].name);
+        const auto & search_query = search_queries[i];
         if (search_query->getTokens().empty() && search_query->getPatterns().empty())
             continue;
 
@@ -698,6 +700,12 @@ std::vector<PostingListPtr> MergeTreeReaderTextIndex::readPostingsBlocksForToken
     return result;
 }
 
+void MergeTreeReaderTextIndex::resetCursors()
+{
+    lazy_cursors.assign(lazy_cursors.size(), {});
+    prebuilt_cursors.assign(prebuilt_cursors.size(), {});
+}
+
 void MergeTreeReaderTextIndex::cleanupPostingsBlocks(const RowsRange & range)
 {
     if (!granule)
@@ -741,12 +749,12 @@ void MergeTreeReaderTextIndex::fillColumn(IColumn & column, const PostingList & 
     }
 }
 
-void MergeTreeReaderTextIndex::fillColumnLazy(IColumn & column, const String & column_name, size_t row_offset, size_t num_rows, PostingList & range_posting)
+void MergeTreeReaderTextIndex::fillColumnLazy(IColumn & column, size_t column_idx, size_t row_offset, size_t num_rows, PostingList & range_posting)
 {
     auto & column_data = assert_cast<ColumnUInt8 &>(column).getData();
     size_t old_size = column_data.size();
 
-    auto search_query = condition_text->getSearchQueryForVirtualColumn(column_name);
+    const auto & search_query = search_queries[column_idx];
     chassert(search_query->getPatterns().empty());
 
     if (search_query->getTokens().empty())
@@ -771,7 +779,7 @@ void MergeTreeReaderTextIndex::fillColumnLazy(IColumn & column, const String & c
 
     if (query_builder.needReadPostings())
     {
-        auto & column_cursors = lazy_cursors[column_name];
+        auto & column_cursors = lazy_cursors[column_idx];
 
         for (const auto & [token, token_info] : query_builder.tokens)
         {
@@ -790,11 +798,11 @@ void MergeTreeReaderTextIndex::fillColumnLazy(IColumn & column, const String & c
     if (query_builder.postings)
     {
         /// Check the per-column cache first: the prebuilt cursor is built once and reused across marks.
-        auto it = prebuilt_cursors.find(column_name);
+        auto & prebuilt_cursor = prebuilt_cursors[column_idx];
 
-        if (it != prebuilt_cursors.end())
+        if (prebuilt_cursor)
         {
-            cursors.push_back(it->second);
+            cursors.push_back(prebuilt_cursor);
         }
         else if (!query_builder.postings->isEmpty())
         {
@@ -814,7 +822,7 @@ void MergeTreeReaderTextIndex::fillColumnLazy(IColumn & column, const String & c
             }
 
             /// Convert postings to a sorted array and build a cursor from it.
-            auto key = TextIndexPostingsCache::hash(granule->getIndexIdForCaches(), column_name, static_cast<UInt8>(TextIndexPostingsCacheKind::Flat));
+            auto key = TextIndexPostingsCache::hash(granule->getIndexIdForCaches(), columns_to_read[column_idx].name, static_cast<UInt8>(TextIndexPostingsCacheKind::Flat));
 
             auto cell = condition_text->postingsCache()->getOrSet(key, [&]
             {
@@ -823,9 +831,8 @@ void MergeTreeReaderTextIndex::fillColumnLazy(IColumn & column, const String & c
                 return std::make_shared<TextIndexPostingsCacheCell>(std::move(flat));
             });
 
-            auto cursor = std::make_shared<PostingListCursor>(std::get<FlatPostingsPtr>(cell->value));
-            prebuilt_cursors.emplace(column_name, cursor);
-            cursors.push_back(cursor);
+            prebuilt_cursor = std::make_shared<PostingListCursor>(std::get<FlatPostingsPtr>(cell->value));
+            cursors.push_back(prebuilt_cursor);
         }
     }
 
@@ -961,8 +968,7 @@ void MergeTreeReaderTextIndex::setPrecomputedGranule(const IndexGranulesMap & gr
 
     if (it != granules.end() && it->second)
     {
-        lazy_cursors.clear();
-        prebuilt_cursors.clear();
+        resetCursors();
         postings_blocks.clear();
         setIndexGranule(it->second);
     }
