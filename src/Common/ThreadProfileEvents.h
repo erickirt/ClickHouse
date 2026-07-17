@@ -82,8 +82,16 @@ struct RUsageCounters
     {
         ::rusage rusage {};
 #if defined(OS_DARWIN)
-        /// macOS has no RUSAGE_THREAD; read per-thread user/system CPU time from the Mach kernel.
-        /// pthread_mach_thread_np does not add a port reference, so nothing needs to be deallocated.
+        /// macOS has no RUSAGE_THREAD; read per-thread user/system CPU time from the Mach kernel instead.
+        ///
+        /// pthread_mach_thread_np(...)   -> the low-level Mach thread port (mach_port_t) for the calling
+        ///                                  thread. It returns the thread's existing port without taking a
+        ///                                  reference, so there is nothing to mach_port_deallocate afterwards.
+        /// thread_info(port, THREAD_BASIC_INFO, ...) -> fills thread_basic_info_data_t, which carries the
+        ///                                  thread's accumulated user_time and system_time (each a
+        ///                                  seconds/microseconds pair). `count` is an in/out field count,
+        ///                                  initialized to THREAD_BASIC_INFO_COUNT (the struct's size in
+        ///                                  natural_t words). On success it returns KERN_SUCCESS.
         thread_basic_info_data_t info{};
         mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
         if (thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) == KERN_SUCCESS)

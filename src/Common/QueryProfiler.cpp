@@ -288,7 +288,7 @@ namespace
             return sampler;
         }
 
-        void add(pthread_t thread, int clock_type, UInt64 period_ns, int signal)
+        void addThread(pthread_t thread, int clock_type, UInt64 period_ns, int signal)
         {
             std::lock_guard lock(mutex);
             auto & reg = registrations[{reinterpret_cast<uintptr_t>(thread), signal}];
@@ -296,12 +296,12 @@ namespace
             reg.mach_thread = pthread_mach_thread_np(thread);
             reg.signal = signal;
             reg.is_cpu = (clock_type == CLOCK_THREAD_CPUTIME_ID);
-            arm(reg, period_ns);
+            armRegistration(reg, period_ns);
             ensureThreadStarted();
             cond.notify_all();
         }
 
-        void setPeriod(pthread_t thread, int signal, UInt64 period_ns)
+        void setThreadPeriod(pthread_t thread, int signal, UInt64 period_ns)
         {
             std::lock_guard lock(mutex);
             auto it = registrations.find({reinterpret_cast<uintptr_t>(thread), signal});
@@ -310,11 +310,11 @@ namespace
             /// Re-arm from now with the new period (like the Linux Timer::set), so lowering the period
             /// takes effect immediately instead of waiting out the previous, possibly much larger,
             /// deadline (e.g. the 10s default global profiler before a query sets a smaller period).
-            arm(it->second, period_ns);
+            armRegistration(it->second, period_ns);
             cond.notify_all();
         }
 
-        void remove(pthread_t thread, int signal)
+        void removeThread(pthread_t thread, int signal)
         {
             std::lock_guard lock(mutex);
             registrations.erase({reinterpret_cast<uintptr_t>(thread), signal});
@@ -360,7 +360,7 @@ namespace
 
         /// (Re)arm a registration, mirroring the randomized initial `it_value` of the Linux POSIX timers
         /// so a query shorter than the period can still be sampled.
-        void arm(Registration & reg, UInt64 period_ns)
+        void armRegistration(Registration & reg, UInt64 period_ns)
         {
             reg.period_ns = clampPeriod(period_ns);
             if (reg.is_cpu)
@@ -401,53 +401,57 @@ namespace
                 }
 
                 UInt64 now = nowMonotonicNs();
+                /// Sleep until the nearest per-registration deadline rather than on a fixed tick, so a
+                /// coarse profiler (e.g. the default 10s global CPU profiler) does not wake the sampler a
+                /// thousand times a second. addThread()/setThreadPeriod() wake us early via notify for a
+                /// shorter period. Accumulated in the same pass that processes the due registrations.
+                UInt64 sleep_ns = 3600ULL * TIMER_PRECISION;
                 for (auto & [key, reg] : registrations)
                 {
                     /// Each registration has its own wall-clock deadline, so a coarse profiler is only
                     /// touched at its own cadence even when a fine one keeps the sampler busy. In
                     /// particular, thread_info is not called for a long-period CPU registration until it
                     /// is actually due - no shared amplification from the shortest configured period.
-                    if (now < reg.next_deadline_ns)
-                        continue;
-
-                    bool fire = false;
-                    if (reg.is_cpu)
+                    if (now >= reg.next_deadline_ns)
                     {
-                        /// Fire once the thread has consumed `cpu_budget_ns` more CPU time (see arm()).
-                        UInt64 cpu = threadCPUNs(reg.mach_thread);
-                        UInt64 consumed = cpu - reg.last_cpu_ns;
-                        reg.last_cpu_ns = cpu;
-                        if (consumed >= reg.cpu_budget_ns)
+                        bool fire = false;
+                        if (reg.is_cpu)
                         {
-                            fire = true;
-                            reg.cpu_budget_ns = reg.period_ns; /// next fire after a full period of CPU
+                            /// Fire once the thread has consumed `cpu_budget_ns` more CPU time (see armRegistration()).
+                            /// CPU time is monotonic, so a reading not above the previous one means no reliable
+                            /// progress - in particular threadCPUNs() returns 0 on a transient thread_info error.
+                            /// Treat that as zero consumed (never underflow into a spurious fire) and keep the
+                            /// last reading (never regress it, which would over-count on the next successful poll).
+                            UInt64 cpu = threadCPUNs(reg.mach_thread);
+                            UInt64 consumed = cpu > reg.last_cpu_ns ? cpu - reg.last_cpu_ns : 0;
+                            reg.last_cpu_ns = std::max(cpu, reg.last_cpu_ns);
+                            if (consumed >= reg.cpu_budget_ns)
+                            {
+                                fire = true;
+                                reg.cpu_budget_ns = reg.period_ns; /// next fire after a full period of CPU
+                            }
+                            else
+                                reg.cpu_budget_ns -= consumed;
+                            /// Schedule the next poll at the wall time the remaining budget would elapse under
+                            /// full CPU use (a lower bound on the real fire time, so we never overshoot it);
+                            /// a partly-idle thread simply re-estimates here on the next poll. The floor
+                            /// bounds polling of a thread stuck just below the threshold.
+                            reg.next_deadline_ns = now + std::max<UInt64>(reg.cpu_budget_ns, MIN_CPU_POLL_NS);
                         }
                         else
-                            reg.cpu_budget_ns -= consumed;
-                        /// Schedule the next poll at the wall time the remaining budget would elapse under
-                        /// full CPU use (a lower bound on the real fire time, so we never overshoot it);
-                        /// a partly-idle thread simply re-estimates here on the next poll. The floor
-                        /// bounds polling of a thread stuck just below the threshold.
-                        reg.next_deadline_ns = now + std::max<UInt64>(reg.cpu_budget_ns, MIN_CPU_POLL_NS);
-                    }
-                    else
-                    {
-                        fire = true;
-                        reg.next_deadline_ns = now + reg.period_ns; /// real timer fires every period
+                        {
+                            fire = true;
+                            reg.next_deadline_ns = now + reg.period_ns; /// real timer fires every period
+                        }
+
+                        /// pthread_kill returns ESRCH if the thread is already gone; the owning
+                        /// QueryProfiler removes its registration before the thread exits, so this is benign.
+                        if (fire)
+                            pthread_kill(reg.thread, reg.signal);
                     }
 
-                    /// pthread_kill returns ESRCH if the thread is already gone; the owning
-                    /// QueryProfiler removes its registration before the thread exits, so this is benign.
-                    if (fire)
-                        pthread_kill(reg.thread, reg.signal);
-                }
-
-                /// Sleep until the nearest per-registration deadline rather than on a fixed tick, so a
-                /// coarse profiler (e.g. the default 10s global CPU profiler) does not wake the sampler a
-                /// thousand times a second. add()/setPeriod() wake us early via notify for a shorter period.
-                UInt64 sleep_ns = 3600ULL * TIMER_PRECISION;
-                for (const auto & [key, reg] : registrations)
                     sleep_ns = std::min(sleep_ns, reg.next_deadline_ns > now ? reg.next_deadline_ns - now : UInt64(0));
+                }
                 cond.wait_for(lock, std::chrono::nanoseconds(sleep_ns));
             }
         }
@@ -516,7 +520,7 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
         timer.set(period);
 #else
         /// macOS: a shared background thread delivers the signal via pthread_kill (see ProfilerSampler).
-        ProfilerSampler::instance().add(pthread_self(), clock_type, period, pause_signal);
+        ProfilerSampler::instance().addThread(pthread_self(), clock_type, period, pause_signal);
 #endif
         signal_handler_disarmed = false;
     }
@@ -525,7 +529,7 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
 #if defined(SIGEV_THREAD_ID)
         timer.cleanup();
 #else
-        ProfilerSampler::instance().remove(pthread_self(), pause_signal);
+        ProfilerSampler::instance().removeThread(pthread_self(), pause_signal);
 #endif
         throw;
     }
@@ -541,7 +545,7 @@ void QueryProfilerBase<ProfilerImpl>::setPeriod([[maybe_unused]] UInt64 period_)
 #if defined(SIGEV_THREAD_ID)
     timer.set(period_);
 #elif defined(OS_DARWIN)
-    ProfilerSampler::instance().setPeriod(pthread_self(), pause_signal, period_);
+    ProfilerSampler::instance().setThreadPeriod(pthread_self(), pause_signal, period_);
 #else
     throw Exception(ErrorCodes::NOT_IMPLEMENTED, "QueryProfiler requires SIGEV_THREAD_ID");
 #endif
@@ -567,7 +571,7 @@ void QueryProfilerBase<ProfilerImpl>::cleanup()
     timer.stop();
     signal_handler_disarmed = true;
 #elif defined(OS_DARWIN)
-    ProfilerSampler::instance().remove(pthread_self(), pause_signal);
+    ProfilerSampler::instance().removeThread(pthread_self(), pause_signal);
     signal_handler_disarmed = true;
 #endif
 }

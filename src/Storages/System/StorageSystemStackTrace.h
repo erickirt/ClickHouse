@@ -16,12 +16,14 @@ namespace DB
 class Context;
 
 
-#ifdef OS_LINUX
+#if defined(OS_LINUX)
 const int STACK_TRACE_SERVICE_SIGNAL = SIGRTMIN;
-#else
+#elif defined(OS_DARWIN)
 /// macOS has no real-time signals; SIGUSR1/SIGUSR2 are the query profiler's, so use the free
 /// virtual-timer signal here.
 const int STACK_TRACE_SERVICE_SIGNAL = SIGVTALRM;
+#else
+#error "STACK_TRACE_SERVICE_SIGNAL is not defined for this platform"
 #endif
 
 /// Allows to introspect stack trace of all server threads.
