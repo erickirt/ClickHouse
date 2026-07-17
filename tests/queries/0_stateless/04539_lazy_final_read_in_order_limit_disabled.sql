@@ -48,8 +48,9 @@ FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7 L
 SELECT 'distinct without limit:', countIf(explain LIKE '%InputSelector%') > 0
 FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7);
 
--- The DISTINCT limit hint is seeded from the query limit even when the limit reads till
--- the end, so it must not disable lazy FINAL in that case.
+-- The DISTINCT transform stops reading at its limit hint even when the enclosing limit
+-- has always_read_till_end (exact_rows_before_limit), so lazy FINAL must be disabled
+-- here the same way as without the setting.
 SELECT 'distinct with limit reading till end:', countIf(explain LIKE '%InputSelector%') > 0
 FROM (EXPLAIN SELECT DISTINCT k % 10 FROM t_lazy_final_gates FINAL WHERE v = 7 LIMIT 5 SETTINGS exact_rows_before_limit = 1);
 
