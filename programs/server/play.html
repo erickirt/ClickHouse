@@ -5315,7 +5315,12 @@ function restoreErrorSnapshot(el, data)
 /// `matToken` and bails without using the value).
 async function renderSnapshotIntoElement(el, snap, tab, matToken) {
     el.queryText = snap.query;
-    if (!snap.data) return true;
+    /// `data == null` means no stored payload for this statement - an image (streamed as a blob,
+    /// kept as `data: null`) or a statement that never ran - so restore it as blank. A successful
+    /// statement with a legitimately empty body (`data === ''`, e.g. a raw-format `SELECT ... WHERE
+    /// 0`) is not that case and must still render, so test null here, not falsiness (mirrors the
+    /// single-query guard in `materializeResult`).
+    if (snap.data == null) return true;
     const format = snap.format;
 
     if (!snap.ok) {
@@ -5556,7 +5561,12 @@ async function materializeResult(tab) {
     /// full (persisted as a compact summary) or was not stored at all (a legacy/edge snapshot with
     /// `data: null`): fall through to the `!result.ok` branch below rather than reopening blank. A
     /// never-run tab has no `ok` field, so it still resolves to idle here.
-    if (!result.data && result.ok !== false) { tab.progressPhase = 'idle'; return; }
+    ///
+    /// Test `data == null` ("no stored snapshot"), not falsiness: a successful run can legitimately
+    /// have an empty body (`data === ''`) in a raw format - e.g. `SELECT 1 WHERE 0 FORMAT CSV`
+    /// returns `200` with no bytes - and must still restore as `done` (with its elapsed time and
+    /// download action), not be demoted to idle.
+    if (result.data == null && result.ok !== false) { tab.progressPhase = 'idle'; return; }
 
     let is_table = false;
     let is_raw = false;
