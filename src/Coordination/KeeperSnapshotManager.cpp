@@ -1324,8 +1324,6 @@ void KeeperSnapshotReader::Stream::readNodeDataAndStats(std::string_view path, c
         out_stats.makeContainer();
     else if (ephemeral_owner != 0)
         out_stats.makeEphemeral(ephemeral_owner);
-    else
-        out_stats.setNumChildren(num_children);
 
     readBinary(out_stats.pzxid, *in);
 
@@ -1361,6 +1359,9 @@ void KeeperSnapshotReader::Stream::readNodeDataAndStats(std::string_view path, c
             out_stats.makeTTL(ttl_ms);
         }
     }
+
+    if (!out_stats.isEphemeral() && !out_stats.isTTL())
+        out_stats.setNumChildren(num_children);
 
     /// Refuse to load system nodes from snapshot.
     auto match_result = Coordination::matchPath(path, keeper_system_path);
