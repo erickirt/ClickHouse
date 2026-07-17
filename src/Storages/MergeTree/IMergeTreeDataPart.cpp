@@ -2198,15 +2198,14 @@ void IMergeTreeDataPart::moveMetadataToDedicatedArena()
 {
     ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
 
-    /// `auto v = x; x = std::move(v)` re-allocates `v` under the arena scope and then adopts it,
-    /// freeing the original storage.
-    { auto v = partition; partition = std::move(v); }
-    { auto v = ttl_infos; ttl_infos = std::move(v); }
-    { auto v = expired_columns; expired_columns = std::move(v); }
+    /// Re-home the members built outside the arena into it (copy under the scope, then adopt).
+    reallocateByCopy(partition);
+    reallocateByCopy(ttl_infos);
+    reallocateByCopy(expired_columns);
     if (auto minmax = getMinMaxIndex())
         setMinMaxIndex(std::make_shared<MinMaxIndex>(*minmax));
     if (info.isPatch())
-        setSourcePartsSet(SourcePartsSetForPatch(source_parts_set));
+        reallocateByCopy(source_parts_set);
 }
 
 void IMergeTreeDataPart::loadColumnsSubstreams()

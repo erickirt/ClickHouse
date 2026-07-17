@@ -287,7 +287,7 @@ MergedBlockOutputStream::Finalizer MergedBlockOutputStream::finalizePartAsync(
     /// projections via each projection part's own finalize.
     {
         ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-        { auto checksums_copy = new_part->checksums; new_part->checksums = std::move(checksums_copy); }
+        reallocateByCopy(new_part->checksums);
         if (new_part->index_granularity)
             new_part->index_granularity = new_part->index_granularity->clone();
     }

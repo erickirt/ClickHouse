@@ -40,6 +40,9 @@ std::vector<unsigned> arena_indices;
 /// Maps an absolute CPU id (from `getCurrentCPU`) to a slot in `arena_indices`. Sized to the
 /// highest allowed CPU id. Built so every created arena is reachable regardless of the mask.
 std::vector<UInt32> slot_by_cpu;
+/// Number of arenas `initialize` tried to create (configured count capped at the allowed CPUs);
+/// `arena_indices.size()` may be smaller if `arenas.create` failed.
+size_t intended_arena_count = 0;
 std::atomic<bool> initialized = false;
 
 std::optional<unsigned> createArena()
@@ -118,6 +121,7 @@ void initialize(size_t num_arenas)
         /// mask (`cpu_id % N` alone would leave arenas unreachable and overstate the count).
         const std::vector<UInt32> allowed_cpus = getAllowedCPUs();
         num_arenas = std::min(num_arenas, allowed_cpus.size());
+        intended_arena_count = num_arenas;
 
         std::vector<unsigned> indices;
         indices.reserve(num_arenas);
@@ -166,6 +170,11 @@ const std::vector<unsigned> & getArenaIndices()
     return arena_indices;
 }
 
+size_t getIntendedArenaCount()
+{
+    return intended_arena_count;
+}
+
 bool isEnabled()
 {
     return initialized.load(std::memory_order_acquire) && !arena_indices.empty();
@@ -196,6 +205,7 @@ namespace DB::JemallocMergeTreeArena
 void initialize(size_t) {}
 unsigned getArenaIndex() { return 0; }
 const std::vector<unsigned> & getArenaIndices() { static const std::vector<unsigned> empty; return empty; }
+size_t getIntendedArenaCount() { return 0; }
 bool isEnabled() { return false; }
 void purge() {}
 

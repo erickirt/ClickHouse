@@ -1530,6 +1530,17 @@ try
 
     /// Create the dedicated MergeTree metadata arena pool before any parts are loaded.
     JemallocMergeTreeArena::initialize(server_settings[ServerSetting::jemalloc_merge_tree_arenas]);
+    const size_t created_arenas = JemallocMergeTreeArena::getArenaIndices().size();
+    const size_t intended_arenas = JemallocMergeTreeArena::getIntendedArenaCount();
+    if (created_arenas < intended_arenas)
+    {
+        global_context->addOrUpdateWarningMessage(
+            Context::WarningType::MERGE_TREE_JEMALLOC_ARENA_POOL_DEGRADED,
+            PreformattedMessage::create(
+                "Could only create {} of the {} requested dedicated jemalloc arena(s) for MergeTree "
+                "metadata; the remaining allocations fall back to the default arena.",
+                created_arenas, intended_arenas));
+    }
 
     Poco::ThreadPool server_pool(
         /* minCapacity */3,

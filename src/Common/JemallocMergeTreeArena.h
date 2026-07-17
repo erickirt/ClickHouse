@@ -38,6 +38,10 @@ unsigned getArenaIndex();
 /// All arena indices in the pool (empty when disabled). For metrics aggregation and purge.
 const std::vector<unsigned> & getArenaIndices();
 
+/// Number of arenas the pool intended to create: the configured count capped at the number of
+/// allowed CPUs. Compare with `getArenaIndices().size()` to detect arena-creation failures.
+size_t getIntendedArenaCount();
+
 /// Whether the pool is enabled (at least one arena created).
 bool isEnabled();
 
