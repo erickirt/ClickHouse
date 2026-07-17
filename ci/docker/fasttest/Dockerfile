@@ -1,18 +1,16 @@
 # docker build -t clickhouse/fasttest .
 FROM ubuntu:24.04
 
-# ARG for quick switch to a given ubuntu mirror.
-# amd64 base images use archive.ubuntu.com, arm64 uses ports.ubuntu.com; rewrite
-# both so ARM builds are redirected too. Default to the in-region AWS mirrors,
-# which are reachable from CI runners (Canonical's mirrors are frequently
-# unreachable over IPv4 and have no IPv6 route from the runners). On 24.04 the
-# sources live in the deb822 file /etc/apt/sources.list.d/ubuntu.sources, so
-# rewrite every apt source file. The runners have no IPv6 egress, so force IPv4
-# to avoid hanging on IPv6 connect attempts (this is a CI-only image, never
-# pulled by end users, so forcing IPv4 here is safe). Also retry transient apt
-# failures.
-ARG apt_archive="http://us-east-1.ec2.archive.ubuntu.com"
-ARG apt_ports_archive="http://us-east-1.ec2.ports.ubuntu.com"
+# ARG for quick switch to a given ubuntu mirror. Defaults stay canonical so local
+# builds are unchanged; CI passes the in-region AWS mirror on the command line
+# (see ci/praktika/docker.py). amd64 base images use archive.ubuntu.com, arm64
+# uses ports.ubuntu.com, so rewrite both. On 24.04 the sources live in the deb822
+# file /etc/apt/sources.list.d/ubuntu.sources, so rewrite every apt source file.
+# The runners have no IPv6 egress, so force IPv4 to avoid hanging on IPv6 connect
+# attempts (this is a CI-only image, never pulled by end users, so forcing IPv4
+# here is safe). Also retry transient apt failures.
+ARG apt_archive="http://archive.ubuntu.com"
+ARG apt_ports_archive="http://ports.ubuntu.com"
 RUN find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -print0 | xargs -0 -r sed -i \
         -e "s|http://archive.ubuntu.com|$apt_archive|g" \
         -e "s|https://archive.ubuntu.com|$apt_archive|g" \
