@@ -7,7 +7,10 @@
 #include <DataTypes/Serializations/SerializationDynamicHelpers.h>
 
 
+#include <algorithm>
+
 #include <Columns/ColumnObject.h>
+#include <Core/Defines.h>
 #include <DataTypes/DataTypeObject.h>
 #include <DataTypes/DataTypeArray.h>
 #include <IO/ReadBufferFromString.h>
@@ -31,34 +34,33 @@ namespace ErrorCodes
 namespace
 {
 
-/// The number of paths in a `JSON` / `Object` column is read from a (possibly untrusted, e.g.
-/// `Native` format) stream. A corrupted count close to `SIZE_MAX` makes `std::vector::resize`
-/// (or a hash table `reserve`) throw an uncaught `std::length_error` instead of a normal
-/// `DB::Exception`. Convert that into an informative, catchable `INCORRECT_DATA` error.
+/// The number of paths in a `JSON` / `Object` column is read from a possibly-untrusted stream
+/// (e.g. `Native` input, or the statistics of a corrupted on-disk part). A corrupted count close
+/// to `SIZE_MAX` must not be handed to a container's `resize` / `reserve` directly: depending on
+/// the standard library and allocator that escapes as an uncaught non-`DB::Exception` (it may be
+/// `std::length_error`, `std::bad_array_new_length` or `std::bad_alloc`) or triggers a huge
+/// allocation. Reject a count the container cannot possibly hold as corruption instead, producing
+/// an informative, catchable `INCORRECT_DATA` error.
 template <typename Container>
 void resizeOrThrowTooManyPaths(Container & container, size_t num_paths)
 {
-    try
-    {
-        container.resize(num_paths);
-    }
-    catch (const std::length_error &)
-    {
+    if (num_paths > container.max_size())
         throw Exception(ErrorCodes::INCORRECT_DATA, "JSON/Object column has too many paths: {}", num_paths);
-    }
+    container.resize(num_paths);
 }
 
 template <typename Container>
 void reserveOrThrowTooManyPaths(Container & container, size_t num_paths)
 {
-    try
-    {
-        container.reserve(num_paths);
-    }
-    catch (const std::length_error &)
-    {
+    if (num_paths > container.max_size())
         throw Exception(ErrorCodes::INCORRECT_DATA, "JSON/Object column has too many paths: {}", num_paths);
-    }
+    /// `reserve` is only a sizing hint: even a count below `max_size()` can overflow a hash
+    /// table's internal bucket arithmetic (which, unlike `std::vector::reserve`, does not throw
+    /// `std::length_error` for such a count on libc++/libstdc++). Cap the hint so the reservation
+    /// itself can never overflow or over-allocate. The read loop that follows validates the real
+    /// number of entries (a corrupted count trips a normal read error), and a legitimate larger
+    /// count still grows the container on demand beyond the cap.
+    container.reserve(std::min(num_paths, DEFAULT_NATIVE_BINARY_MAX_NUM_COLUMNS));
 }
 
 }

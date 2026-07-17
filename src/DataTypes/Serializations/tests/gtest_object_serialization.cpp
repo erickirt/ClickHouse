@@ -3,10 +3,21 @@
 #include <DataTypes/Serializations/SerializationObject.h>
 #include <DataTypes/Serializations/SerializationObjectHelpers.h>
 #include <IO/ReadBufferFromString.h>
+#include <IO/VarInt.h>
+#include <IO/WriteBufferFromString.h>
+#include <IO/WriteHelpers.h>
+#include <Common/Exception.h>
 
 #include <gtest/gtest.h>
 
+#include <limits>
+
 using namespace DB;
+
+namespace DB::ErrorCodes
+{
+    extern const int INCORRECT_DATA;
+}
 
 TEST(ObjectSerialization, FieldBinarySerialization)
 {
@@ -170,4 +181,50 @@ TEST(ObjectSerialization, FlattenAndBucketSharedDataPaths)
         {"b", {21, std::nullopt, std::nullopt}},
         {"c", {22, std::nullopt, std::nullopt}},
     });
+}
+
+/// The shared-data-paths statistics count in the ObjectStructure prefix is only read when
+/// `object_and_dynamic_read_statistics` is enabled -- the MergeTree part read path, which the
+/// `Native` input format (covered by 04350_json_native_too_many_paths) never reaches, since it
+/// always leaves statistics disabled. A corrupted count there must be rejected with a clean
+/// `INCORRECT_DATA` error instead of escaping as an uncaught `std::bad_alloc` /
+/// `std::length_error` / `std::bad_array_new_length` from the hash-table `reserve`.
+TEST(ObjectSerialization, TooManySharedDataPathsStatistics)
+{
+    auto type = DataTypeFactory::instance().get("JSON");
+    auto serialization = type->getDefaultSerialization();
+
+    /// Hand-crafted V1 (version = 0) ObjectStructure prefix:
+    ///   [UInt64 LE version = 0]
+    ///   [VarUInt max_dynamic_paths = 0]                            (V1 only)
+    ///   [VarUInt number of dynamic paths = 0]
+    ///   [VarUInt shared-data-paths statistics count = SIZE_MAX]    <- corrupted
+    WriteBufferFromOwnString structure;
+    writeBinaryLittleEndian(static_cast<UInt64>(0), structure); /// SerializationVersion::V1
+    writeVarUInt(static_cast<UInt64>(0), structure);            /// max_dynamic_paths
+    writeVarUInt(static_cast<UInt64>(0), structure);            /// number of dynamic paths
+    writeVarUInt(std::numeric_limits<size_t>::max(), structure);/// shared-data-paths count
+    std::string structure_bytes = structure.str();
+    ReadBufferFromString structure_stream(structure_bytes);
+
+    ISerialization::DeserializeBinaryBulkSettings settings;
+    settings.object_and_dynamic_read_statistics = true;
+    settings.getter = [&](const ISerialization::SubstreamPath & path) -> ReadBuffer *
+    {
+        if (!path.empty() && path.back().type == ISerialization::Substream::ObjectStructure)
+            return &structure_stream;
+        return nullptr;
+    };
+
+    ISerialization::DeserializeBinaryBulkStatePtr state;
+    try
+    {
+        serialization->deserializeBinaryBulkStatePrefix(settings, state, nullptr);
+        FAIL() << "Expected INCORRECT_DATA for a corrupted shared-data-paths statistics count";
+    }
+    catch (const Exception & e)
+    {
+        ASSERT_EQ(e.code(), ErrorCodes::INCORRECT_DATA) << e.message();
+        ASSERT_NE(e.message().find("too many paths"), std::string::npos) << e.message();
+    }
 }
