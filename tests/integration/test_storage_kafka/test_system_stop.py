@@ -1003,3 +1003,57 @@ def test_two_queued_refreshes_run_two_cycles(kafka_cluster):
         # START drains the remaining backlog.
         instance.query(f"SYSTEM START test.{table}")
         wait_dst_count(table, 6)
+
+
+def test_refresh_survives_active_direct_reader(kafka_cluster):
+    # A REFRESH permit claimed by a Kafka2 streaming round that then bails out on an active direct
+    # reader must be re-credited, not lost: the round consumed the one-shot permit before the reader
+    # handshake, so the refresh never ran once the reader drained and the table was stopped.
+    admin_client = k.get_admin_client(kafka_cluster)
+    table = f"kafka2_refresh_reader_{k.random_string(6)}"
+    n = 20
+    with k.kafka_topic(admin_client, table):
+        instance.query(
+            f"""
+            CREATE TABLE test.{table} (key UInt64, value UInt64)
+                ENGINE = Kafka
+                SETTINGS kafka_broker_list = 'kafka1:19092',
+                         kafka_topic_list = '{table}',
+                         kafka_group_name = '{table}',
+                         kafka_format = 'JSONEachRow',
+                         kafka_flush_interval_ms = 500,
+                         kafka_keeper_path = '/clickhouse/kafka2/{table}',
+                         kafka_replica_name = 'r1';
+            CREATE TABLE test.{table}_dst (key UInt64, value UInt64) ENGINE = MergeTree ORDER BY key;
+            """,
+            settings={"allow_experimental_kafka_offsets_storage_in_keeper": 1},
+        )
+        produce(kafka_cluster, table, 0, n)
+
+        # No view is attached yet, so the direct read is allowed; sleepEachRow holds the reader
+        # (and active_direct_readers) open for ~n*0.4s, and it commits no offsets.
+        result = {}
+
+        def run_select():
+            result["answer"], result["error"] = instance.query_and_get_answer_with_error(
+                f"SELECT count() FROM test.{table} WHERE NOT sleepEachRow(0.4)",
+                settings={"stream_like_engine_allow_direct_select": 1},
+            )
+
+        reader = threading.Thread(target=run_select)
+        reader.start()
+        try:
+            time.sleep(2)  # the reader is registered and pulling rows slowly
+            instance.query(
+                f"CREATE MATERIALIZED VIEW test.{table}_mv TO test.{table}_dst AS "
+                f"SELECT key, value FROM test.{table}"
+            )
+            instance.query(f"SYSTEM REFRESH test.{table}")
+            time.sleep(2)  # streaming rounds claim the permit but bail out on the active reader
+            instance.query(f"SYSTEM STOP test.{table}")  # blocks cycles and aborts the reader
+        finally:
+            reader.join(timeout=60)
+
+        # Once the reader is gone, the queued REFRESH must still run one cycle despite the STOP.
+        wait_dst_count(table, n)
+        assert_dst_count_stable(table, n, seconds=5)

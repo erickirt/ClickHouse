@@ -1179,6 +1179,7 @@ void StorageKafka2::threadFunc(size_t idx)
         // Check if at least one direct dependency is attached
         size_t num_views = DatabaseCatalog::instance().getDependentViews(table_id).size();
         const UInt64 cycle_epoch = stream_control.currentCancelEpoch();
+        const UInt64 refresh_epoch = task->last_seen_refresh_epoch;
         const bool run_cycle = stream_control.claimCycle(task->last_seen_refresh_epoch);
         if (num_views && run_cycle)
         {
@@ -1191,6 +1192,9 @@ void StorageKafka2::threadFunc(size_t idx)
                 if (active_direct_readers.load() > 0)
                 {
                     LOG_DEBUG(log, "Direct readers are active, skipping MV streaming this round");
+                    /// Give back a REFRESH permit consumed by `claimCycle`, so the refresh still
+                    /// runs once the readers drain, even if the table is stopped by then.
+                    task->last_seen_refresh_epoch = refresh_epoch;
                 }
                 else
                 {
