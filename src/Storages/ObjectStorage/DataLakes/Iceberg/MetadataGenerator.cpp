@@ -1,6 +1,7 @@
 #include <IO/ReadHelpers.h>
 #include <Storages/ObjectStorage/DataLakes/Iceberg/MetadataGenerator.h>
 
+#include <algorithm>
 #include <climits>
 #include <Poco/JSON/Array.h>
 #include <Poco/JSON/Object.h>
@@ -36,6 +37,56 @@ Poco::JSON::Object::Ptr deepCopy(Poco::JSON::Object::Ptr obj)
     Poco::JSON::Parser parser;
     auto result = parser.parse(oss.str());
     return result.extract<Poco::JSON::Object::Ptr>();
+}
+
+/// Walk an Iceberg type node, recording the largest field id assigned to it or
+/// any of its nested children (struct fields, list element, map key/value).
+void collectMaxFieldId(const Poco::Dynamic::Var & type, Int32 & max_id)
+{
+    /// Primitive types are plain strings ("int", "long", ...) with no ids; only
+    /// complex types are JSON objects carrying nested field ids.
+    if (type.type() != typeid(Poco::JSON::Object::Ptr))
+        return;
+    auto obj = type.extract<Poco::JSON::Object::Ptr>();
+    auto type_str = obj->getValue<String>(Iceberg::f_type);
+    if (type_str == "struct")
+    {
+        auto fields = obj->getArray(Iceberg::f_fields);
+        for (UInt32 i = 0; i < fields->size(); ++i)
+        {
+            auto field = fields->getObject(i);
+            max_id = std::max(max_id, field->getValue<Int32>(Iceberg::f_id));
+            collectMaxFieldId(field->get(Iceberg::f_type), max_id);
+        }
+    }
+    else if (type_str == "list")
+    {
+        max_id = std::max(max_id, obj->getValue<Int32>(Iceberg::f_element_id));
+        collectMaxFieldId(obj->get(Iceberg::f_element), max_id);
+    }
+    else if (type_str == "map")
+    {
+        max_id = std::max(max_id, obj->getValue<Int32>(Iceberg::f_key_id));
+        max_id = std::max(max_id, obj->getValue<Int32>(Iceberg::f_value_id));
+        collectMaxFieldId(obj->get(Iceberg::f_key), max_id);
+        collectMaxFieldId(obj->get(Iceberg::f_value), max_id);
+    }
+}
+
+/// Largest field id assigned anywhere in the schema's top-level fields and their
+/// nested children. Used to recover the correct starting id even when a metadata
+/// file written by an older buggy build recorded a too-small last-column-id.
+Int32 maxAssignedFieldId(Poco::JSON::Object::Ptr schema)
+{
+    Int32 max_id = 0;
+    auto fields = schema->getArray(Iceberg::f_fields);
+    for (UInt32 i = 0; i < fields->size(); ++i)
+    {
+        auto field = fields->getObject(i);
+        max_id = std::max(max_id, field->getValue<Int32>(Iceberg::f_id));
+        collectMaxFieldId(field->get(Iceberg::f_type), max_id);
+    }
+    return max_id;
 }
 
 bool checkValidSchemaEvolution(Poco::Dynamic::Var old_type, Poco::Dynamic::Var new_type)
@@ -317,7 +368,14 @@ void MetadataGenerator::generateAddColumnMetadata(const String & column_name, Da
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Column {} already exists", column_name);
     }
 
-    auto last_column_id = metadata_object->getValue<Int32>(Iceberg::f_last_column_id);
+    /// Do not blindly trust the persisted last-column-id: a metadata file written
+    /// by an older buggy build under-counted nested tuple/array/map children, so
+    /// it can be smaller than a field id already in use. Start from the larger of
+    /// the persisted value and the max field id actually assigned in the current
+    /// schema, so upgraded tables never reuse a nested child id.
+    auto last_column_id = std::max(
+        metadata_object->getValue<Int32>(Iceberg::f_last_column_id),
+        maxAssignedFieldId(current_schema));
     /// The new top-level field takes the next id; nested tuple/array/map
     /// children (when `type` is complex) take the ids after it via the shared
     /// `iter`. After getIcebergType `iter` is the max assigned id, which is what
