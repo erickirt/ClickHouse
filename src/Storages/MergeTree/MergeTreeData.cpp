@@ -379,6 +379,7 @@ namespace ErrorCodes
     extern const int NOT_ENOUGH_SPACE;
     extern const int ALTER_OF_COLUMN_IS_FORBIDDEN;
     extern const int SUPPORT_IS_DISABLED;
+    extern const int UNIQUE_KEY_DENSE_INDEX_UNREADABLE;
     extern const int ILLEGAL_INDEX;
     extern const int TOO_MANY_SIMULTANEOUS_QUERIES;
     extern const int INCORRECT_QUERY;
@@ -2746,10 +2747,11 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks, std::optional<std::un
         for (auto & part : broken_parts_to_detach)
             part->renameToDetached("broken-on-start", /*ignore_error=*/ replicated); /// detached parts must not have '_' in prefixes
 
-    /// UNIQUE KEY — SST sweep for parts that landed without a sidecar
-    /// (restore, freeze taken before UK shipped). The active set is captured
-    /// here under `part_lock`; the I/O-heavy per-part rebuild runs below,
-    /// after the lock is released.
+    /// UNIQUE KEY — SST sweep + per-part validation for parts that landed
+    /// without a usable sidecar (restore, freeze taken before UK shipped, or a
+    /// corrupt/truncated SST that survived because it carries no checksums.txt
+    /// entry). The active set is captured here under `part_lock`; the I/O-heavy
+    /// per-part validate+rebuild runs below, after the lock is released.
     MutableDataPartsVector active_uk_parts_to_rebuild;
     if (!is_static_storage && !all_disks_are_readonly && !is_table_readonly)
     {
@@ -2779,13 +2781,20 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks, std::optional<std::un
     {
         try
         {
-            unique_key_dense_index_ops->rebuildIfMissing(p);
+            unique_key_dense_index_ops->ensureValidDenseIndex(p);
         }
         catch (...)
         {
-            /// A UNIQUE KEY part with no dense index that cannot be rebuilt must
-            /// not stay active — the probe would miss its keys and let duplicates
-            /// through. Detach it as broken via the standard broken-part flow.
+            /// A transient failure to VALIDATE an existing SST (I/O error, not
+            /// corruption) must not destroy a healthy part: `ensureValidDenseIndex`
+            /// leaves the file in place and raises UNIQUE_KEY_DENSE_INDEX_UNREADABLE.
+            /// Propagate it so the load fails and a retry/restart can recover.
+            if (getCurrentExceptionCode() == ErrorCodes::UNIQUE_KEY_DENSE_INDEX_UNREADABLE)
+                throw;
+            /// Otherwise the part genuinely has no usable dense index (corrupt SST
+            /// that could not be rebuilt, missing UK column, unreadable rows) — the
+            /// probe would miss its keys and let duplicates through. Detach it as
+            /// broken via the standard broken-part flow.
             tryLogCurrentException(log,
                 fmt::format("Detaching part {} as broken: cannot build its UNIQUE KEY dense index", p->name));
             forcefullyMovePartToDetachedAndRemoveFromMemory(p, "broken-on-start");
@@ -4649,6 +4658,26 @@ void MergeTreeData::checkAlterIsPossible(const AlterCommands & commands, Context
                 throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                     "Column TTL is not supported on tables with UNIQUE KEY");
 
+            /// CLEAR COLUMN (parsed as DROP_COLUMN with `clear`) rewrites the whole
+            /// part and drops the per-part `unique_key_index.sst`, regardless of
+            /// which column is targeted. Reject it on UNIQUE KEY tables, but only
+            /// when it would actually rewrite a part: the target must be an existing
+            /// physical (stored) column. `CLEAR COLUMN missing IF EXISTS` and CLEAR
+            /// of a non-stored column are no-ops (`hasPhysical` is false for both),
+            /// so they fall through to normal handling. CLEAR of a UK column falls
+            /// through to the ALTER_OF_COLUMN_IS_FORBIDDEN guard below. Note the
+            /// mutation-path guard in `checkMutationIsPossible` never sees CLEAR
+            /// COLUMN — it is dispatched as an AlterCommand, not a mutation — so this
+            /// is the effective chokepoint.
+            if (command.type == AlterCommand::DROP_COLUMN && command.clear
+                && !uk_set.contains(command.column_name)
+                && old_metadata.columns.hasPhysical(command.column_name))
+                throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
+                    "ALTER TABLE ... CLEAR COLUMN {} is not supported on tables with UNIQUE KEY: "
+                    "the whole part is rewritten regardless of which column is targeted, so the "
+                    "per-part UNIQUE KEY dense index would be lost.",
+                    backQuoteIfNeed(command.column_name));
+
             const bool affects_column =
                 command.type == AlterCommand::DROP_COLUMN
                 || command.type == AlterCommand::RENAME_COLUMN
@@ -5261,10 +5290,6 @@ void MergeTreeData::checkMutationIsPossible(const MutationCommands & commands, c
     if (auto uk_metadata = getInMemoryMetadataPtr(getContext(), false); uk_metadata->hasUniqueKey())
     {
         const auto & uk_column_names = uk_metadata->getUniqueKeyColumns();
-        auto is_uk_column = [&](const String & column)
-        {
-            return std::find(uk_column_names.begin(), uk_column_names.end(), column) != uk_column_names.end();
-        };
 
         for (const auto & command : commands)
         {
@@ -5280,18 +5305,25 @@ void MergeTreeData::checkMutationIsPossible(const MutationCommands & commands, c
                 throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
                     "ALTER TABLE ... MATERIALIZE TTL is not supported on tables with UNIQUE KEY");
 
-            if (command.type == MutationCommand::MATERIALIZE_COLUMN && is_uk_column(command.column_name))
+            /// MATERIALIZE / CLEAR COLUMN rewrite the whole part via MutateTask
+            /// regardless of which column is targeted (compact and full-rewrite
+            /// parts lose all sidecars; `unique_key_index.sst` is in
+            /// `getFileNamesWithoutChecksums` → `files_to_skip`), so the dense
+            /// index is dropped even for a non-UK column. Reject both for the
+            /// whole table until mutation-side SST rebuild lands (mirrors the
+            /// REWRITE-family stance below).
+            if (command.type == MutationCommand::MATERIALIZE_COLUMN)
                 throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
-                    "ALTER TABLE ... MATERIALIZE COLUMN `{}` is not supported: the column is part of the UNIQUE KEY, "
-                    "and MATERIALIZE would rewrite stored values without going through UNIQUE KEY dedup, "
-                    "producing duplicate live keys. UNIQUE KEY columns: ({}).",
+                    "ALTER TABLE ... MATERIALIZE COLUMN `{}` is not supported on tables with UNIQUE KEY: "
+                    "the whole part is rewritten regardless of which column is targeted, so the "
+                    "per-part UNIQUE KEY dense index would be lost. UNIQUE KEY columns: ({}).",
                     command.column_name, fmt::join(uk_column_names, ", "));
 
-            if (command.type == MutationCommand::DROP_COLUMN && command.clear && is_uk_column(command.column_name))
+            if (command.type == MutationCommand::DROP_COLUMN && command.clear)
                 throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
-                    "ALTER TABLE ... CLEAR COLUMN `{}` is not supported: the column is part of the UNIQUE KEY, "
-                    "and CLEAR would rewrite stored values without going through UNIQUE KEY dedup, "
-                    "producing duplicate live keys. UNIQUE KEY columns: ({}).",
+                    "ALTER TABLE ... CLEAR COLUMN `{}` is not supported on tables with UNIQUE KEY: "
+                    "the whole part is rewritten regardless of which column is targeted, so the "
+                    "per-part UNIQUE KEY dense index would be lost. UNIQUE KEY columns: ({}).",
                     command.column_name, fmt::join(uk_column_names, ", "));
 
             /// These commands rebuild whole parts (the full read+rewrite mutation path) and

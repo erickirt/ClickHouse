@@ -194,7 +194,7 @@ TEST_F(SSTFixture, RoundTrip10K)
     }
 
     /// Link-time guard for the load-time rebuild instrumentation
-    /// (`rebuildIfMissing`): the ProfileEvent slots must exist and increment.
+    /// (`ensureValidDenseIndex`): the ProfileEvent slots must exist and increment.
     const size_t count_before
         = ProfileEvents::global_counters[ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount];
     ProfileEvents::increment(ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount);

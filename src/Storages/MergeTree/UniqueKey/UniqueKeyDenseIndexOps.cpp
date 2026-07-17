@@ -2,6 +2,7 @@
 
 #include <Core/Settings.h>
 #include <Interpreters/Context.h>
+#include <Parsers/ASTSelectQuery.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
 #include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
@@ -11,6 +12,7 @@
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Storages/MergeTree/StorageFromMergeTreeDataPart.h>
 #include <Storages/MergeTree/UniqueKey/SSTIndexWriter.h>
+#include <Storages/MergeTree/UniqueKey/UniqueKeySSTProbe.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/StorageInMemoryMetadata.h>
 #include <Storages/StorageSnapshot.h>
@@ -19,6 +21,12 @@
 #include <Common/ProfileEvents.h>
 #include <Common/Stopwatch.h>
 #include <Common/logger_useful.h>
+
+#if USE_ROCKSDB
+#include <rocksdb/sst_file_reader.h>
+#include <rocksdb/status.h>
+#include <rocksdb/table_properties.h>
+#endif
 
 
 namespace ProfileEvents
@@ -34,6 +42,7 @@ namespace ErrorCodes
 {
     extern const int CORRUPTED_DATA;
     extern const int SUPPORT_IS_DISABLED;
+    extern const int UNIQUE_KEY_DENSE_INDEX_UNREADABLE;
 }
 
 namespace Setting
@@ -54,6 +63,63 @@ namespace
 /// (mirrors its private `FILE_NAME + ".tmp"` staging name).
 const std::string SST_STAGING_FILE_NAME = std::string(SSTIndexWriter::FILE_NAME) + ".tmp";
 
+#if USE_ROCKSDB
+/// Outcome of validating an existing `unique_key_index.sst`.
+enum class DenseIndexSSTStatus
+{
+    Valid,      /// opens, checksums verify, entry count matches the part → trust it
+    Corrupt,    /// genuine damage (corruption status or wrong entry count) → remove + rebuild
+    Transient,  /// could not determine (I/O error / exception) → leave file, fail the load
+};
+
+/// Validate an existing `unique_key_index.sst`. Presence is not trust: the SST
+/// carries no `checksums.txt` entry. `num_entries == rows_count` holds because
+/// `SSTIndexWriter` does one `Put` per row and rejects Nullable UK columns, so an
+/// entry-count mismatch flags a block-boundary truncation that still checksum-
+/// verifies. `reason` is filled for the log/exception message.
+DenseIndexSSTStatus classifyDenseIndexSST(const String & sst_path, UInt64 expected_rows, String & reason)
+{
+    try
+    {
+        auto opened = tryOpenSSTReaderFromPath(sst_path);
+        if (!opened.status.ok())
+        {
+            reason = "open failed: " + opened.status.ToString();
+            return opened.status.IsCorruption() ? DenseIndexSSTStatus::Corrupt : DenseIndexSSTStatus::Transient;
+        }
+        auto & reader = *opened.reader;
+
+        auto verify_status = reader.VerifyChecksum();
+        if (!verify_status.ok())
+        {
+            reason = "checksum verify failed: " + verify_status.ToString();
+            return verify_status.IsCorruption() ? DenseIndexSSTStatus::Corrupt : DenseIndexSSTStatus::Transient;
+        }
+
+        /// Table properties are read during `Open`; after a successful open +
+        /// verify they are populated without an extra read.
+        auto props = reader.GetTableProperties();
+        if (!props)
+        {
+            reason = "table properties unavailable after open";
+            return DenseIndexSSTStatus::Transient;
+        }
+        if (props->num_entries != expected_rows)
+        {
+            reason = fmt::format("entry count {} != part rows_count {} (truncated/stale index)",
+                                 props->num_entries, expected_rows);
+            return DenseIndexSSTStatus::Corrupt;
+        }
+        return DenseIndexSSTStatus::Valid;
+    }
+    catch (...)
+    {
+        reason = "exception: " + getCurrentExceptionMessage(/*with_stacktrace=*/false);
+        return DenseIndexSSTStatus::Transient;
+    }
+}
+#endif
+
 }
 
 
@@ -69,7 +135,7 @@ void UniqueKeyDenseIndexOps::writeDenseIndexOnInsert(
     /// `SSTIndexWriter` accounts for `UniqueKeySSTWriteMicroseconds` itself, and
     /// throws SUPPORT_IS_DISABLED without RocksDB: a UNIQUE KEY INSERT that cannot
     /// build the dense index fails closed rather than publishing a part with no
-    /// `unique_key_index.sst`. (UK-INSERT stateless tests carry `no-fasttest`.)
+    /// `unique_key_index.sst`.
     SSTIndexWriter::write(
         storage,
         block,
@@ -127,7 +193,7 @@ void UniqueKeyDenseIndexOps::sweepOrphans(const DataPartsLock & /*part_lock*/)
 }
 
 
-void UniqueKeyDenseIndexOps::rebuildIfMissing(MutableDataPartPtr & part) const
+void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part) const
 {
     if (!part || part->rows_count == 0)
         return;
@@ -143,7 +209,46 @@ void UniqueKeyDenseIndexOps::rebuildIfMissing(MutableDataPartPtr & part) const
 
     auto & storage = part->getDataPartStorage();
     if (storage.existsFile(SSTIndexWriter::FILE_NAME))
+    {
+#if USE_ROCKSDB
+        /// An existing SST is not trusted on presence alone (it carries no
+        /// checksums.txt entry). Validate it and branch on the outcome.
+        ///
+        /// Cost: `classifyDenseIndexSST` runs `VerifyChecksum`, which re-reads
+        /// every block, so this is O(index-size) per part on every load / ATTACH
+        /// — the inherent price of the corruption guarantee for this experimental
+        /// feature.
+        /// TODO(unique-key): skip re-verification for a known-good SST via a
+        /// validity/generation marker written alongside it, so an unchanged file
+        /// loads without a full re-read.
+        String reason;
+        switch (classifyDenseIndexSST(
+            storage.getFullPath() + "/" + SSTIndexWriter::FILE_NAME, part->rows_count, reason))
+        {
+            case DenseIndexSSTStatus::Valid:
+                return;
+            case DenseIndexSSTStatus::Corrupt:
+                LOG_WARNING(log, "ensureValidDenseIndex: part {} has a corrupt `{}` ({}); "
+                            "removing and rebuilding",
+                            part->name, SSTIndexWriter::FILE_NAME, reason);
+                storage.removeFileIfExists(SSTIndexWriter::FILE_NAME);
+                break;  /// fall through to the rebuild path below
+            case DenseIndexSSTStatus::Transient:
+                /// Do not delete or rebuild: the file may be healthy but momentarily
+                /// unreadable. Fail the load with a distinguished code the caller
+                /// re-raises (instead of detaching the part as broken) so a
+                /// retry/restart can recover the untouched file.
+                throw Exception(ErrorCodes::UNIQUE_KEY_DENSE_INDEX_UNREADABLE,
+                    "ensureValidDenseIndex: could not validate `{}` for part {} ({}); "
+                    "leaving it in place and failing the load for retry",
+                    SSTIndexWriter::FILE_NAME, part->name, reason);
+        }
+#else
+        /// Without RocksDB we cannot open/validate the SST; presence is all we
+        /// can check (and the probe path is unavailable anyway). Keep the part.
         return;
+#endif
+    }
 
     /// Fail closed if any UK column is missing from the part: a non-empty UK
     /// part with no dense index would let duplicate keys slip past the probe.
@@ -153,7 +258,7 @@ void UniqueKeyDenseIndexOps::rebuildIfMissing(MutableDataPartPtr & part) const
     {
         if (!part_cols.tryGetByName(uk_name).has_value())
             throw Exception(ErrorCodes::CORRUPTED_DATA,
-                "rebuildIfMissing: part {} is missing UK column '{}'; cannot rebuild dense index",
+                "ensureValidDenseIndex: part {} is missing UK column '{}'; cannot rebuild dense index",
                 part->name, uk_name);
     }
 
@@ -164,7 +269,7 @@ void UniqueKeyDenseIndexOps::rebuildIfMissing(MutableDataPartPtr & part) const
         Block accumulated = readUniqueKeyColumns(part, metadata_snapshot, uk_names);
         if (accumulated.rows() == 0)
             throw Exception(ErrorCodes::CORRUPTED_DATA,
-                "rebuildIfMissing: part {} has rows_count={} but sequential read yielded 0 rows; "
+                "ensureValidDenseIndex: part {} has rows_count={} but sequential read yielded 0 rows; "
                 "cannot rebuild dense index",
                 part->name, part->rows_count);
 
@@ -184,11 +289,11 @@ void UniqueKeyDenseIndexOps::rebuildIfMissing(MutableDataPartPtr & part) const
         ProfileEvents::increment(ProfileEvents::UniqueKeyLoadTimeSSTRebuildCount);
         ProfileEvents::increment(ProfileEvents::UniqueKeyLoadTimeSSTRebuildMicroseconds, elapsed_us);
 
-        LOG_INFO(log, "rebuildIfMissing: rebuilt `{}` for part {} ({} rows, {} us)",
+        LOG_INFO(log, "ensureValidDenseIndex: rebuilt `{}` for part {} ({} rows, {} us)",
                  SSTIndexWriter::FILE_NAME, part->name, rows, elapsed_us);
 #else
         throw Exception(ErrorCodes::SUPPORT_IS_DISABLED,
-            "rebuildIfMissing: part {} needs a UNIQUE KEY dense index but the server was built without RocksDB",
+            "ensureValidDenseIndex: part {} needs a UNIQUE KEY dense index but the server was built without RocksDB",
             part->name);
 #endif
     }
@@ -198,7 +303,7 @@ void UniqueKeyDenseIndexOps::rebuildIfMissing(MutableDataPartPtr & part) const
         /// surface it to the caller so the part is detached as broken rather
         /// than activated. (Re-throw the original error.)
         tryLogCurrentException(log,
-            "rebuildIfMissing: SST rebuild failed for part " + part->name);
+            "ensureValidDenseIndex: SST rebuild failed for part " + part->name);
         throw;
     }
 }
@@ -215,7 +320,7 @@ void UniqueKeyDenseIndexOps::onPartAttach(MutableDataPartPtr & part) const
                     SST_STAGING_FILE_NAME, part->name);
         storage.removeFileIfExists(SST_STAGING_FILE_NAME);
     }
-    rebuildIfMissing(part);
+    ensureValidDenseIndex(part);
 }
 
 
@@ -240,6 +345,11 @@ Block UniqueKeyDenseIndexOps::readUniqueKeyColumns(
 
     QueryPlan plan;
     SelectQueryInfo query_info;
+    /// The `ReadFromMergeTree` ctor calls `SelectQueryInfo::isFinal()`, which
+    /// dereferences `query` when neither `query_tree` nor
+    /// `table_expression_modifiers` is set — so a plain (non-FINAL) `ASTSelectQuery`
+    /// is required here.
+    query_info.query = make_intrusive<ASTSelectQuery>();
     const size_t max_block_size = context->getSettingsRef()[Setting::max_block_size];
     storage_from_part->read(
         plan, uk_names, storage_snapshot, query_info, context,

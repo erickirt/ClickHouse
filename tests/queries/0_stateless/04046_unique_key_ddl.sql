@@ -95,6 +95,28 @@ ENGINE = MergeTree
 UNIQUE KEY (a, a)
 ORDER BY (b); -- { serverError BAD_ARGUMENTS }
 
+-- 7e. UNIQUE KEY on an ALIAS column is rejected: alias columns are not stored,
+-- so the INSERT-time SST write and the load-time dense-index rebuild have no
+-- data for them. Only physical (Ordinary / Materialized) columns are allowed.
+CREATE TABLE uk_t (id UInt64, a UInt64 ALIAS id + 1)
+ENGINE = MergeTree
+UNIQUE KEY (a)
+ORDER BY (id); -- { serverError BAD_ARGUMENTS }
+
+-- 7f. UNIQUE KEY on an EPHEMERAL column is rejected for the same reason.
+CREATE TABLE uk_t (id UInt64, e UInt64 EPHEMERAL)
+ENGINE = MergeTree
+UNIQUE KEY (e)
+ORDER BY (id); -- { serverError BAD_ARGUMENTS }
+
+-- 7g. UNIQUE KEY on a virtual column (e.g. `_part`) is rejected. Virtual columns
+-- are not in the stored block; `getKeyFromAST` resolves against physical + virtual,
+-- so this would otherwise pass DDL and crash the first INSERT on block.getByName.
+CREATE TABLE uk_t (id UInt64)
+ENGINE = MergeTree
+UNIQUE KEY (_part)
+ORDER BY (id); -- { serverError BAD_ARGUMENTS }
+
 -- 8. ALTER DROP COLUMN on a unique-key column -> error (via ORDER BY key guard).
 CREATE TABLE uk_t (id UInt64, user_id UInt32, v String)
 ENGINE = MergeTree

@@ -16,6 +16,8 @@
 /// without RocksDB, and its only caller (the probe factory / gtests) is guarded.
 #if USE_ROCKSDB
 
+#include <rocksdb/status.h>
+
 namespace rocksdb
 {
     class SstFileReader;
@@ -36,6 +38,20 @@ struct SSTReaderHandle
 {
     std::shared_ptr<rocksdb::SstFileReader> reader;
 };
+
+/// Result of a non-throwing open: the reader plus the raw RocksDB `Status`, so
+/// callers can distinguish a corruption from a transient failure themselves.
+/// `reader` is null when `status` is not ok.
+struct SSTOpenResult
+{
+    std::shared_ptr<rocksdb::SstFileReader> reader;
+    rocksdb::Status status;
+};
+
+/// Single source of truth for the SST read-open options (bloom policy + table
+/// factory that must match what `SSTIndexWriter` produced). Opens the sidecar and
+/// returns the reader + status without throwing.
+SSTOpenResult tryOpenSSTReaderFromPath(const String & sst_path);
 
 /// Open an SST sidecar directly by local filesystem path. SST-only: knows
 /// nothing about caching, parts, or the dense-index block cache. Throws

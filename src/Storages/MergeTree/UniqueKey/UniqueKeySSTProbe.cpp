@@ -47,10 +47,10 @@ namespace
     }
 }
 
-SSTReaderHandle openSSTReaderFromPath(const String & sst_path)
+SSTOpenResult tryOpenSSTReaderFromPath(const String & sst_path)
 {
-    SSTReaderHandle out;
-
+    /// The one place the read-open options live: bloom policy + table factory
+    /// must match what `SSTIndexWriter` wrote.
     rocksdb::Options options;
     rocksdb::BlockBasedTableOptions block_based;
     block_based.filter_policy.reset(
@@ -60,11 +60,18 @@ SSTReaderHandle openSSTReaderFromPath(const String & sst_path)
     auto reader = std::make_shared<rocksdb::SstFileReader>(options);
     auto status = reader->Open(sst_path);
     if (!status.ok())
-        throw Exception(ErrorCodes::CANNOT_OPEN_FILE,
-            "Failed to open UNIQUE KEY SST `{}`: {}", sst_path, status.ToString());
+        return {nullptr, std::move(status)};
+    return {std::move(reader), std::move(status)};
+}
 
-    out.reader = std::move(reader);
-    return out;
+SSTReaderHandle openSSTReaderFromPath(const String & sst_path)
+{
+    auto opened = tryOpenSSTReaderFromPath(sst_path);
+    if (!opened.status.ok())
+        throw Exception(ErrorCodes::CANNOT_OPEN_FILE,
+            "Failed to open UNIQUE KEY SST `{}`: {}", sst_path, opened.status.ToString());
+
+    return SSTReaderHandle{std::move(opened.reader)};
 }
 
 SSTProbeTargetPart::SSTProbeTargetPart(

@@ -54,20 +54,22 @@ public:
     /// Caller holds the parts lock.
     void sweepOrphans(const DataPartsLock & part_lock);
 
-    /// Materializes `unique_key_index.sst` if missing. Defensive path
-    /// for parts arriving without a sidecar (ATTACH / restore / fetch);
-    /// fast-paths when the SST is already on disk. Fails closed: throws
-    /// (CORRUPTED_DATA / SUPPORT_IS_DISABLED) when a non-empty UK part cannot
-    /// get a dense index (missing UK column, empty read, rebuild error, or no
-    /// RocksDB). The caller is responsible for detaching the part as broken.
-    void rebuildIfMissing(MutableDataPartPtr & part) const;
+    /// Materializes `unique_key_index.sst` when it is missing OR present but
+    /// invalid (corrupt/truncated — the SST carries no checksums.txt entry, so
+    /// presence alone is not trusted; the existing file is checksum-verified and
+    /// removed+rebuilt if it fails). Defensive path for parts arriving without a
+    /// usable sidecar (ATTACH / restore / fetch); fast-paths when a valid SST is
+    /// already on disk. Fails closed: throws (CORRUPTED_DATA / SUPPORT_IS_DISABLED)
+    /// when a non-empty UK part cannot get a dense index (missing UK column, empty
+    /// read, rebuild error, or no RocksDB). The caller detaches the part as broken.
+    void ensureValidDenseIndex(MutableDataPartPtr & part) const;
 
-    /// Per-part ATTACH hook: `.sst.tmp` cleanup + `rebuildIfMissing`.
+    /// Per-part ATTACH hook: `.sst.tmp` cleanup + `ensureValidDenseIndex`.
     void onPartAttach(MutableDataPartPtr & part) const;
 
 private:
     /// Gated on USE_ROCKSDB: its only caller branch (the rebuild body in
-    /// `rebuildIfMissing`) is gated too, so without RocksDB this would be an
+    /// `ensureValidDenseIndex`) is gated too, so without RocksDB this would be an
     /// unused private member function.
 #if USE_ROCKSDB
     Block readUniqueKeyColumns(
