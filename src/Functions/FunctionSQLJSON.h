@@ -413,24 +413,25 @@ public:
         }
     };
 
-    /// Normalize the path argument exactly as the function framework does before executeImpl (and
-    /// thus before buildPlan): LowCardinality is removed recursively
-    /// (defaultImplementationForLowCardinalityColumns), while Nullable is removed only at the top
-    /// level (createBlockWithNestedColumns strips the outer Nullable but leaves any Nullable nested
-    /// inside a Tuple/Array intact). On Dynamic arguments the raw path type reaches the return-type
-    /// helpers unstripped (e.g. a scalar subquery (SELECT tuple('$.a','$.b')) has type
-    /// Nullable(Tuple(String,String))), so applying the same normalization here keeps the declared
-    /// return type in agreement with what the runtime plan accepts and produces. Nested wrapped
+    /// Strip the wrappers that the function framework removes before executeImpl (and thus before
+    /// buildPlan) but which are still present on the Dynamic path at return-type declaration:
+    /// LowCardinality is removed recursively (defaultImplementationForLowCardinalityColumns), while
+    /// Nullable is removed only at the top level (createBlockWithNestedColumns strips the outer
+    /// Nullable but leaves any Nullable nested inside a Tuple/Array intact). On Dynamic arguments the
+    /// raw path type reaches the return-type helpers unstripped (e.g. a scalar subquery
+    /// (SELECT tuple('$.a','$.b')) has type Nullable(Tuple(String,String))), so the Dynamic
+    /// return-type helpers apply this before isMultiPathType/buildReturnType to keep the declared
+    /// return type in agreement with what the nested execution actually produces. Nested wrapped
     /// nodes (e.g. Tuple(Nullable(Tuple(...)), String)) are deliberately NOT unwrapped: the runtime
-    /// buildPlan rejects them, and so does the normal (non-Dynamic) path, so they must be classified
-    /// as non-multi-path here too.
-    static DataTypePtr normalizePathArgument(const DataTypePtr & type)
+    /// buildPlan rejects them, and so does the normal (non-Dynamic) path, so they stay non-multi-path.
+    static DataTypePtr normalizeDynamicPathArgument(const DataTypePtr & type)
     {
         return removeNullable(recursiveRemoveLowCardinality(type));
     }
 
     /// Raw recursion mirroring MultiPathExecutor::buildPlan: only bare String/Tuple/Array nodes are
-    /// accepted. Wrappers are handled once at the top level by normalizePathArgument.
+    /// accepted. On the normal path the framework has already stripped the wrappers before we are
+    /// called; on the Dynamic path the caller applies normalizeDynamicPathArgument first.
     static DataTypePtr buildReturnTypeImpl(const DataTypePtr & path_type, const DataTypePtr & leaf_type)
     {
         if (isString(path_type))
@@ -456,9 +457,8 @@ public:
     }
 
     /// Raw recursion mirroring MultiPathExecutor::buildPlan: only bare String/Tuple/Array leaves
-    /// count. A nested wrapped node (Nullable(...) that survives top-level stripping) is not a
-    /// String and not a Tuple/Array, so it makes the structure non-multi-path, consistent with the
-    /// runtime rejecting it.
+    /// count. A wrapped node (Nullable/LowCardinality) is neither a String nor a Tuple/Array, so it
+    /// makes the structure non-multi-path, consistent with the runtime rejecting it.
     static bool isMultiPathTypeImpl(const DataTypePtr & type)
     {
         if (isString(type))
@@ -482,16 +482,16 @@ public:
 
     /// Build a return type that mirrors the path argument structure,
     /// replacing each String leaf with `leaf_type`.
-    static DataTypePtr buildReturnType(const DataTypePtr & path_type_, const DataTypePtr & leaf_type)
+    static DataTypePtr buildReturnType(const DataTypePtr & path_type, const DataTypePtr & leaf_type)
     {
-        return buildReturnTypeImpl(normalizePathArgument(path_type_), leaf_type);
+        return buildReturnTypeImpl(path_type, leaf_type);
     }
 
     /// Check whether a type is a nested structure (Tuple/Array) with String leaves,
     /// i.e., suitable as a multi-path argument.
-    static bool isMultiPathType(const DataTypePtr & type_)
+    static bool isMultiPathType(const DataTypePtr & type)
     {
-        return isMultiPathTypeImpl(normalizePathArgument(type_));
+        return isMultiPathTypeImpl(type);
     }
 };
 
@@ -588,8 +588,15 @@ public:
 
     static DataTypePtr getReturnTypeForDynamic(const DataTypes & arguments, bool)
     {
-        if (arguments.size() >= 2 && FunctionSQLJSONHelpers::isMultiPathType(arguments[1]))
-            return FunctionSQLJSONHelpers::buildReturnType(arguments[1], std::make_shared<DataTypeUInt8>());
+        if (arguments.size() >= 2)
+        {
+            /// On the Dynamic path the framework has not yet stripped Nullable/LowCardinality from the
+            /// arguments (that happens later, before executeImpl), so strip them here to match what the
+            /// nested execution sees. See normalizeDynamicPathArgument.
+            auto path = FunctionSQLJSONHelpers::normalizeDynamicPathArgument(arguments[1]);
+            if (FunctionSQLJSONHelpers::isMultiPathType(path))
+                return FunctionSQLJSONHelpers::buildReturnType(path, std::make_shared<DataTypeUInt8>());
+        }
 
         return std::make_shared<DataTypeUInt8>();
     }
@@ -665,12 +672,18 @@ public:
 
     static DataTypePtr getReturnTypeForDynamic(const DataTypes & arguments, bool function_json_value_return_type_allow_nullable)
     {
-        if (arguments.size() >= 2 && FunctionSQLJSONHelpers::isMultiPathType(arguments[1]))
+        if (arguments.size() >= 2)
         {
-            DataTypePtr leaf_type = std::make_shared<DataTypeString>();
-            if (function_json_value_return_type_allow_nullable)
-                leaf_type = makeNullable(leaf_type);
-            return FunctionSQLJSONHelpers::buildReturnType(arguments[1], leaf_type);
+            /// See normalizeDynamicPathArgument: on the Dynamic path Nullable/LowCardinality are not
+            /// yet stripped from the arguments, so strip them here to match the nested execution.
+            auto path = FunctionSQLJSONHelpers::normalizeDynamicPathArgument(arguments[1]);
+            if (FunctionSQLJSONHelpers::isMultiPathType(path))
+            {
+                DataTypePtr leaf_type = std::make_shared<DataTypeString>();
+                if (function_json_value_return_type_allow_nullable)
+                    leaf_type = makeNullable(leaf_type);
+                return FunctionSQLJSONHelpers::buildReturnType(path, leaf_type);
+            }
         }
 
         return std::make_shared<DataTypeString>();
@@ -765,8 +778,14 @@ public:
 
     static DataTypePtr getReturnTypeForDynamic(const DataTypes & arguments, bool)
     {
-        if (arguments.size() >= 2 && FunctionSQLJSONHelpers::isMultiPathType(arguments[1]))
-            return FunctionSQLJSONHelpers::buildReturnType(arguments[1], std::make_shared<DataTypeString>());
+        if (arguments.size() >= 2)
+        {
+            /// See normalizeDynamicPathArgument: on the Dynamic path Nullable/LowCardinality are not
+            /// yet stripped from the arguments, so strip them here to match the nested execution.
+            auto path = FunctionSQLJSONHelpers::normalizeDynamicPathArgument(arguments[1]);
+            if (FunctionSQLJSONHelpers::isMultiPathType(path))
+                return FunctionSQLJSONHelpers::buildReturnType(path, std::make_shared<DataTypeString>());
+        }
 
         return std::make_shared<DataTypeString>();
     }
