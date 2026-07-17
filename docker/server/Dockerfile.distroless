@@ -31,8 +31,8 @@ ARG apt_ports_archive="http://ports.ubuntu.com"
 RUN sed -i -e "s|http://archive.ubuntu.com|${apt_archive}|g" -e "s|http://ports.ubuntu.com|${apt_ports_archive}|g" /etc/apt/sources.list \
     && groupadd -r clickhouse --gid=101 \
     && useradd -r -g clickhouse --uid=101 --home-dir=/var/lib/clickhouse --shell=/bin/bash clickhouse \
-    && apt-get update -o Acquire::Retries=5 \
-    && apt-get install --yes --no-install-recommends -o Acquire::Retries=5 \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends \
         ca-certificates \
         wget \
     && rm -rf /var/lib/apt/lists/* /var/cache/debconf /tmp/*
