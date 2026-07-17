@@ -106,8 +106,10 @@ inline ResponseOutput responseWriteBuffer(const HTTPServerRequest & request, HTT
         return result;
 
     response.set("Content-Encoding", toContentEncodingName(method));
+    /// HTTP `Content-Encoding: snappy` is standardized to use the snappy framing format.
+    /// `SnappyMode::Framed` is a no-op for all other compression methods.
     result.setCompressedOut(wrapWriteBufferWithCompressionMethod(
-        result.response_holder.get(), method, 1, 0));
+        result.response_holder.get(), method, 1, 0, SnappyMode::Framed));
 
     return result;
 }

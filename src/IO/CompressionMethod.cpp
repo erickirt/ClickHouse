@@ -122,13 +122,17 @@ CompressionMethod chooseHTTPCompressionMethod(const std::string & list)
 
     static constexpr std::pair<std::string_view, CompressionMethod> preferred[] = {
         {"zstd", CompressionMethod::Zstd},
+#if USE_BROTLI
         {"br", CompressionMethod::Brotli},
+#endif
         {"lz4", CompressionMethod::Lz4},
         {"snappy", CompressionMethod::Snappy},
         {"gzip", CompressionMethod::Gzip},
         {"deflate", CompressionMethod::Zlib},
         {"xz", CompressionMethod::Xz},
+#if USE_BZIP2
         {"bz2", CompressionMethod::Bzip2},
+#endif
     };
 
     for (const auto & [name, method] : preferred)
