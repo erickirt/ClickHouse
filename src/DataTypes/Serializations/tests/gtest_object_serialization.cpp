@@ -1,8 +1,10 @@
 #include <Columns/ColumnObject.h>
 #include <Core/MergeTreeSerializationEnums.h>
 #include <DataTypes/DataTypeFactory.h>
+#include <DataTypes/DataTypeObject.h>
 #include <DataTypes/Serializations/SerializationObject.h>
 #include <DataTypes/Serializations/SerializationObjectHelpers.h>
+#include <DataTypes/Serializations/SerializationObjectSharedData.h>
 #include <IO/ReadBufferFromString.h>
 #include <IO/VarInt.h>
 #include <IO/WriteBufferFromString.h>
@@ -329,4 +331,68 @@ TEST(ObjectSerialization, InvalidNumberOfSharedDataBuckets)
     expectInvalidNumberOfBucketsRejected(MAX_OBJECT_SHARED_DATA_BUCKETS + 1);
     /// Zero buckets is impossible on the wire (the writer always writes at least one).
     expectInvalidNumberOfBucketsRejected(0);
+}
+
+/// The per-granule `num_paths` count in the `ADVANCED` (V3) shared-data structure stream is another
+/// raw count read from a possibly-untrusted on-disk part and used to size `all_paths` before any path
+/// bytes are read (`SerializationObjectSharedData::deserializeStructureGranulePrefix`). Unlike the
+/// outer-prefix counts (covered above and by `04350_json_native_too_many_paths`), this one is reached
+/// only when reading a MergeTree part, not through the `Native` input format, so it needs its own
+/// coverage. A `SIZE_MAX`-family count must be rejected up front as `INCORRECT_DATA` "too many paths";
+/// a large-but-representable count the stream cannot back must fail as a normal read error at end of
+/// stream (a `DB::Exception`), not a `std::bad_alloc` / OOM.
+static void expectGranulePathCountRejected(size_t num_paths, int expected_error_code)
+{
+    /// A single-bucket ADVANCED shared-data serialization, driven directly through its public bulk
+    /// read API in Compact-part mode (the whole-column path that sets `need_all_paths = true`).
+    auto dynamic_type = DataTypeFactory::instance().get("Dynamic");
+    auto serialization = SerializationObjectSharedData::create(
+        SerializationObjectSharedData::SerializationVersion(SerializationObjectSharedData::SerializationVersion::ADVANCED),
+        dynamic_type,
+        dynamic_type->getDefaultSerialization(),
+        /*buckets=*/1);
+
+    /// Hand-crafted ObjectSharedDataStructurePrefix stream for the single granule:
+    ///   [VarUInt num_rows = 1]
+    ///   [VarUInt num_paths = num_paths]   <- corrupted; no path bytes follow
+    WriteBufferFromOwnString structure_prefix;
+    writeVarUInt(static_cast<UInt64>(1), structure_prefix); /// num_rows
+    writeVarUInt(num_paths, structure_prefix);              /// num_paths
+    std::string structure_prefix_bytes = structure_prefix.str();
+    ReadBufferFromString structure_prefix_stream(structure_prefix_bytes);
+
+    ISerialization::DeserializeBinaryBulkSettings settings;
+    settings.data_part_type = MergeTreeDataPartType::Compact;
+    settings.use_specialized_prefixes_and_suffixes_substreams = true;
+    settings.getter = [&](const ISerialization::SubstreamPath & path) -> ReadBuffer *
+    {
+        if (!path.empty() && path.back().type == ISerialization::Substream::ObjectSharedDataStructurePrefix)
+            return &structure_prefix_stream;
+        return nullptr;
+    };
+
+    ISerialization::DeserializeBinaryBulkStatePtr state;
+    serialization->deserializeBinaryBulkStatePrefix(settings, state, nullptr);
+
+    ColumnPtr column = DataTypeObject::getTypeOfSharedData()->createColumn();
+    try
+    {
+        serialization->deserializeBinaryBulkWithMultipleStreams(column, /*rows_offset=*/0, /*limit=*/1, settings, state, nullptr);
+        FAIL() << "Expected an exception for a corrupted granule num_paths count " << num_paths;
+    }
+    catch (const Exception & e)
+    {
+        ASSERT_EQ(e.code(), expected_error_code) << e.message();
+        if (expected_error_code == ErrorCodes::INCORRECT_DATA)
+            ASSERT_NE(e.message().find("too many paths"), std::string::npos) << e.message();
+    }
+}
+
+TEST(ObjectSerialization, InvalidGranulePathCount)
+{
+    /// The `SIZE_MAX` corner (above the container's `max_size()`) is rejected up front.
+    expectGranulePathCountRejected(std::numeric_limits<size_t>::max(), ErrorCodes::INCORRECT_DATA);
+    /// A large-but-representable count the stream cannot back trips a normal read error at end of
+    /// stream, not a huge allocation.
+    expectGranulePathCountRejected(100000000, ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF);
 }
