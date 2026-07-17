@@ -22,6 +22,10 @@
 3	1
 4	1
 5	1
+-- local plan reads initiator locally
+1
+-- remote plan reads all replicas remotely
+1
 -- parallel replicas engaged (both plans)
 04371_pr_local	1
 04371_pr_remote	1

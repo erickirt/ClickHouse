@@ -24,8 +24,12 @@ SELECT '-- projection path (projection actually used)';
 SELECT a, count() FROM t_04371 WHERE a GROUP BY a ORDER BY a LIMIT 5
 SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, enable_parallel_replicas = 0;
 
+-- enable_analyzer = 1 is required: parallel_replicas_local_plan = 1 only engages the local
+-- plan with the analyzer on (canUseLocalPlanForParallelReplicas returns false otherwise), so
+-- without pinning it a randomized old-analyzer run would silently send the local-plan query
+-- through the same remote path and leave that half of the regression uncovered.
+SET enable_analyzer = 1;
 SET automatic_parallel_replicas_mode = 0;
-SET parallel_replicas_only_with_analyzer = 0;  -- necessary for CI run with disabled analyzer
 SET enable_parallel_replicas = 1, max_parallel_replicas = 3,
     parallel_replicas_for_non_replicated_merge_tree = 1,
     parallel_replicas_min_number_of_rows_per_replica = 0,
@@ -39,6 +43,17 @@ SETTINGS parallel_replicas_local_plan = 1, log_comment = '04371_pr_local';
 SELECT '-- parallel replicas, remote plan';
 SELECT a, count() FROM t_04371 WHERE a GROUP BY a ORDER BY a LIMIT 5
 SETTINGS parallel_replicas_local_plan = 0, log_comment = '04371_pr_remote';
+
+-- Plan-shape assertions lock in the local/remote split independently of the row results:
+-- the local plan reads the initiator's share via ReadFromMergeTree and the rest remotely,
+-- the remote plan reads every replica remotely with no local ReadFromMergeTree.
+SELECT '-- local plan reads initiator locally';
+SELECT countIf(explain ILIKE '%ReadFromMergeTree%') > 0 AND countIf(explain ILIKE '%ReadFromRemoteParallelReplicas%') > 0
+FROM (EXPLAIN SELECT a, count() FROM t_04371 WHERE a GROUP BY a ORDER BY a LIMIT 5 SETTINGS parallel_replicas_local_plan = 1);
+
+SELECT '-- remote plan reads all replicas remotely';
+SELECT countIf(explain ILIKE '%ReadFromMergeTree%') = 0 AND countIf(explain ILIKE '%ReadFromRemoteParallelReplicas%') > 0
+FROM (EXPLAIN SELECT a, count() FROM t_04371 WHERE a GROUP BY a ORDER BY a LIMIT 5 SETTINGS parallel_replicas_local_plan = 0);
 
 SYSTEM FLUSH LOGS query_log;
 
