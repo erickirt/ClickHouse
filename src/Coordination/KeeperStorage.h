@@ -133,6 +133,13 @@ public:
         StringHashForHeterogeneousLookup::transparent_key_equal>
         ttl_paths;
 
+    /// Paths of all container nodes (auto-deleted when last child is removed)
+    mutable std::unordered_set<
+        String,
+        StringHashForHeterogeneousLookup,
+        StringHashForHeterogeneousLookup::transparent_key_equal>
+        container_paths;
+
     /// All active sessions with timeout
     SessionAndTimeout session_and_timeout;
 
@@ -310,8 +317,14 @@ public:
 
     std::vector<std::pair<std::string, Int32>> collectExpiredTTLPaths(int64_t now_ms, size_t batch_size) const;
 
+    /// Container nodes eligible for GC: childless after having had children, or never
+    /// populated and empty past max_never_used_interval_ms.
+    std::vector<std::pair<std::string, Int32>> collectContainerCandidates(size_t batch_size, UInt64 max_never_used_interval_ms) const;
+
     /// Used by tests.
     bool containsTTLPath(const std::string & path) const;
+
+    void nodeLoadedFromSnapshot(std::string_view path, const KeeperNodeStats & stats);
 
     /// Register watches from a request/response pair.
     void updateWatches(

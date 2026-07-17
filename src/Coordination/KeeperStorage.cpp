@@ -52,6 +52,7 @@ namespace ProfileEvents
 namespace CurrentMetrics
 {
     extern const Metric KeeperTTLNodes;
+    extern const Metric KeeperContainerNodes;
 }
 
 
@@ -455,7 +456,7 @@ void KeeperStorage::UncommittedState::rollback(std::list<Delta> rollback_deltas)
                     }
                     else if constexpr (std::same_as<DeltaType, RemoveNodeDelta>)
                     {
-                        if (operation.stat.getEphemeralOwner() != 0)
+                        if (operation.stat.isEphemeral())
                             storage.uncommitted_state.ephemerals[operation.stat.getEphemeralOwner()].emplace(delta.path);
                     }
                 },
@@ -577,6 +578,8 @@ Coordination::Error KeeperStorage::commit(KeeperStorage::DeltaRange deltas)
                     }
                     if (operation.stat.isTTL())
                         ttl_paths.insert(path);
+                    if (operation.stat.isContainer())
+                        container_paths.insert(path);
                     return Coordination::Error::ZOK;
                 }
                 else if constexpr (std::same_as<DeltaType, UpdateNodeStatDelta>)
@@ -588,7 +591,7 @@ Coordination::Error KeeperStorage::commit(KeeperStorage::DeltaRange deltas)
                 else if constexpr (std::same_as<DeltaType, RemoveNodeDelta>)
                 {
                     acl_map.removeUsage(operation.stat.acl_id);
-                    if (operation.stat.getEphemeralOwner() != 0)
+                    if (operation.stat.isEphemeral())
                     {
                         chassert(committed_ephemeral_nodes != 0);
                         --committed_ephemeral_nodes;
@@ -597,6 +600,8 @@ Coordination::Error KeeperStorage::commit(KeeperStorage::DeltaRange deltas)
                     }
                     if (operation.stat.isTTL())
                         ttl_paths.erase(path);
+                    if (operation.stat.isContainer())
+                        container_paths.erase(path);
                     return Coordination::Error::ZOK;
                 }
                 else if constexpr (std::same_as<DeltaType, ErrorDelta>)
@@ -811,10 +816,58 @@ std::vector<std::pair<std::string, Int32>> KeeperStorage::collectExpiredTTLPaths
     return result;
 }
 
+std::vector<std::pair<std::string, Int32>> KeeperStorage::collectContainerCandidates(size_t batch_size, UInt64 max_never_used_interval_ms) const
+{
+    std::vector<std::pair<std::string, Int32>> result;
+
+    const int64_t now_ms = max_never_used_interval_ms > 0
+        ? std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()
+        : 0;
+
+    {
+        /// `container_paths` and `container` are mutated by commit under exclusive
+        /// `storage_mutex`. Take it shared to read them consistently.
+        SharedLockGuard storage_lock(storage_mutex);
+
+        for (const auto & container_path : container_paths)
+        {
+            KeeperNodeStats stats;
+            bool exists = nodes_storage->getCommittedNodeSimple(container_path, &stats, /*out_data=*/nullptr);
+            if (!exists || !stats.isContainer() || stats.getNumChildren() != 0)
+                continue;
+
+            /// Standard case: had children at some point but now empty.
+            if (stats.cversion > 0)
+                result.emplace_back(container_path, stats.version);
+            /// Never-used case: created empty and still empty after the configured grace period.
+            else if (max_never_used_interval_ms > 0 && now_ms - stats.getCTime() > static_cast<int64_t>(max_never_used_interval_ms))
+                result.emplace_back(container_path, stats.version);
+
+            if (result.size() >= batch_size)
+                break;
+        }
+    }
+
+    return result;
+}
+
 bool KeeperStorage::containsTTLPath(const std::string & path) const
 {
     SharedLockGuard storage_lock(storage_mutex);
     return ttl_paths.contains(path);
+}
+
+void KeeperStorage::nodeLoadedFromSnapshot(std::string_view path, const KeeperNodeStats & stats)
+{
+    if (stats.isEphemeral())
+    {
+        committed_ephemerals[stats.getEphemeralOwner()].insert(std::string{path});
+        ++committed_ephemeral_nodes;
+    }
+    if (stats.isTTL())
+        ttl_paths.insert(std::string{path});
+    if (stats.isContainer())
+        container_paths.insert(std::string{path});
 }
 
 void KeeperStorage::clearDeadWatches(int64_t session_id)
@@ -1220,6 +1273,7 @@ KeeperStorageStats KeeperStorage::getStorageStats() const
     };
     nodes_storage->getNodeStorageStats(res);
     CurrentMetrics::set(CurrentMetrics::KeeperTTLNodes, ttl_paths.size());
+    CurrentMetrics::set(CurrentMetrics::KeeperContainerNodes, container_paths.size());
     return res;
 }
 

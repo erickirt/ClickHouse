@@ -213,8 +213,7 @@ struct KeeperMemNodesStorage final : public KeeperNodesStorage
     mutable ZxidToNodes uncommitted_zxid_to_nodes;
 
     /// Main hashtable with nodes. Contain all information about data.
-    /// All other structures expect session_and_timeout can be restored from
-    /// container.
+    /// Most other structures can be restored from container.
     Container container;
 
     /// Must be called before mutating any node in other prepare* functions.

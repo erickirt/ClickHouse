@@ -187,6 +187,18 @@ void KeeperStorageSnapshot::serialize(const KeeperStorageSnapshot & snapshot, Wr
                 snapshot.storage->ttl_paths.size(),
                 static_cast<uint8_t>(SnapshotVersion::V8));
     }
+    if (snapshot.version < SnapshotVersion::V9)
+    {
+        SharedLockGuard storage_lock(snapshot.storage->storage_mutex);
+        if (!snapshot.storage->container_paths.empty())
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Cannot serialize snapshot with version {}: storage contains {} container node(s), which require snapshot "
+                "version {} or higher. Bump write_snapshot_version after every replica has been upgraded.",
+                static_cast<uint8_t>(snapshot.version),
+                snapshot.storage->container_paths.size(),
+                static_cast<uint8_t>(SnapshotVersion::V9));
+    }
 
     writeBinary(static_cast<uint8_t>(snapshot.version), out);
     serializeSnapshotMetadata(snapshot.snapshot_meta, out);
@@ -1308,10 +1320,12 @@ void KeeperSnapshotReader::Stream::readNodeDataAndStats(std::string_view path, c
     int32_t num_children = 0;
     readBinary(num_children, *in);
 
-    if (ephemeral_owner == 0)
-        out_stats.setNumChildren(num_children);
-    else
+    if (ephemeral_owner == KeeperNodeStats::CONTAINER_EPHEMERAL_OWNER)
+        out_stats.makeContainer();
+    else if (ephemeral_owner != 0)
         out_stats.makeEphemeral(ephemeral_owner);
+    else
+        out_stats.setNumChildren(num_children);
 
     readBinary(out_stats.pzxid, *in);
 
@@ -1319,14 +1333,14 @@ void KeeperSnapshotReader::Stream::readNodeDataAndStats(std::string_view path, c
     {
         int64_t seq_num = 0;
         readBinary(seq_num, *in);
-        if (ephemeral_owner == 0)
+        if (!out_stats.isEphemeral())
             out_stats.setSeqNum(seq_num);
     }
     else
     {
         int32_t seq_num = 0;
         readBinary(seq_num, *in);
-        if (ephemeral_owner == 0)
+        if (!out_stats.isEphemeral())
             out_stats.setSeqNum(seq_num);
     }
 

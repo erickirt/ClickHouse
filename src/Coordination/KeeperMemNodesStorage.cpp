@@ -302,20 +302,11 @@ void KeeperMemNodesStorage::loadNodesFromSnapshot(KeeperSnapshotReader & reader,
             node.data = std::unique_ptr<char[]>(new char[node.stats.data_size]);
         streams[0]->readNodeDataAndStats(path, node.data.get(), data_size, node.stats);
 
-        auto ephemeral_owner = node.stats.getEphemeralOwner();
-        if (!node.stats.isEphemeral() && node.stats.getNumChildren() > 0)
+        if (node.stats.getNumChildren() > 0)
             node.getChildren().reserve(node.stats.getNumChildren());
 
         if (storage)
-        {
-            if (ephemeral_owner != 0)
-            {
-                storage->committed_ephemerals[node.stats.getEphemeralOwner()].insert(std::string{path});
-                ++storage->committed_ephemeral_nodes;
-            }
-            if (node.stats.isTTL())
-                storage->ttl_paths.insert(std::string{path});
-        }
+            storage->nodeLoadedFromSnapshot(path, node.stats);
 
         if (out_digest)
             *out_digest += node.getDigest(path);

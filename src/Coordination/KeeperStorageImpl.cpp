@@ -134,6 +134,7 @@ auto callOnConcreteRequestType(Coordination::ZooKeeperRequest & zk_request, F fu
             return function(static_cast<Coordination::ZooKeeperGetRequest &>(zk_request));
         case Coordination::OpNum::Create:
         case Coordination::OpNum::Create2:
+        case Coordination::OpNum::CreateContainer:
         case Coordination::OpNum::CreateIfNotExists:
         case Coordination::OpNum::CreateTTL:
             return function(static_cast<Coordination::ZooKeeperCreateRequest &>(zk_request));
@@ -372,6 +373,8 @@ static Coordination::Error preprocess(
         stats.makeEphemeral(session_id);
     else if (zk_request.include_ttl)
         stats.makeTTL(zk_request.ttl);
+    else if (zk_request.is_container)
+        stats.makeContainer();
 
     storage.nodes.prepareUpdateNodeStat(
         parent_path, std::move(parent_node_ref), new_parent_stats, storage.staging);
@@ -405,7 +408,9 @@ static Coordination::ZooKeeperResponsePtr process(const Coordination::ZooKeeperC
     if (create_delta_it != deltas.end())
     {
         created_path = create_delta_it->path;
-        if (response->getOpNum() == Coordination::OpNum::Create2 || response->getOpNum() == Coordination::OpNum::CreateTTL)
+        if (response->getOpNum() == Coordination::OpNum::Create2 ||
+            response->getOpNum() == Coordination::OpNum::CreateTTL ||
+            response->getOpNum() == Coordination::OpNum::CreateContainer)
             std::get<CreateNodeDelta>(create_delta_it->operation).stat.setResponseStat(static_cast<Coordination::ZooKeeperCreate2Response &>(*response).zstat);
     }
     if (const auto result = storage.commit(std::move(deltas)); result != Coordination::Error::ZOK)
@@ -497,9 +502,10 @@ static Coordination::Error preprocess(
         return Coordination::Error::ZBADARGUMENTS;
     }
 
-    /// The internal TTL garbage collector session has no ACLs and is server-issued;
-    /// it must be allowed to expire a node regardless of user-level Delete ACLs.
+    /// The internal TTL/container garbage collector sessions have no ACLs and are server-issued;
+    /// they must be allowed to remove a node regardless of user-level Delete ACLs.
     const bool is_ttl_gc_remove = zk_request.try_remove && session_id == keeper_internal_ttl_garbage_collector_session_id;
+    const bool is_container_gc_remove = zk_request.try_remove && session_id == keeper_internal_container_garbage_collector_session_id;
 
     auto parent_path = Coordination::parentNodePath(zk_request.path);
     auto parent_node_ref = storage.nodes.getUncommittedNode(parent_path);
@@ -508,7 +514,9 @@ static Coordination::Error preprocess(
     if (!parent_node)
         return zk_request.try_remove ? Coordination::Error::ZOK : Coordination::Error::ZNONODE;
 
-    if (check_acl && !is_ttl_gc_remove && !storage.checkACL(parent_node->stats.acl_id, Coordination::ACL::Delete, session_id, /*committed=*/ false))
+    const bool is_internal_gc_remove = is_ttl_gc_remove || is_container_gc_remove;
+    if (check_acl && !is_internal_gc_remove &&
+        !storage.checkACL(parent_node->stats.acl_id, Coordination::ACL::Delete, session_id, /*committed=*/ false))
         return Coordination::Error::ZNOAUTH;
 
     KeeperNodeStats new_parent_stats = parent_node->stats;
@@ -533,7 +541,7 @@ static Coordination::Error preprocess(
         return Coordination::Error::ZNONODE;
     }
 
-    if (check_acl && !is_ttl_gc_remove &&
+    if (check_acl && !is_internal_gc_remove &&
         storage.keeper_context->getCoordinationSettings()[CoordinationSetting::check_node_acl_on_remove] &&
         !storage.checkACL(node->stats.acl_id, Coordination::ACL::Delete, session_id, /*committed=*/ false))
         return Coordination::Error::ZNOAUTH;
@@ -551,6 +559,15 @@ static Coordination::Error preprocess(
         /// Re-check TTL expiration, in case user requests bumped modification time or re-created the
         /// node after garbage collector decided to delete it.
         if (!node->stats.isTTL() || time < node->stats.destroyTime())
+            return {};
+    }
+    /// Similarly re-check container deletions. This has ABA problem: the container could be removed
+    /// and re-created since the GC request was issued. In this case we may delete a newly created
+    /// node too early, before container_gc_max_never_used_interval_ms elapsed. This is ok and
+    /// not worth fixing, and ZooKeeper behaves the same way.
+    if (is_container_gc_remove)
+    {
+        if (!node->stats.isContainer() || node->stats.getNumChildren() != 0)
             return {};
     }
 
@@ -1668,7 +1685,8 @@ KeeperDigest KeeperStorageImpl<NS>::preprocessRequest(
         uncommitted_state.addDeltas(std::move(staging.deltas));
         staging.deltas.clear();
 
-        if (zk_request->getOpNum() == Coordination::OpNum::Create)
+        if (zk_request->getOpNum() == Coordination::OpNum::Create
+            || zk_request->getOpNum() == Coordination::OpNum::CreateContainer)
         {
             fiu_do_on(FailPoints::keeper_leader_sets_invalid_digest, staging.digest.value = 42);
         }
