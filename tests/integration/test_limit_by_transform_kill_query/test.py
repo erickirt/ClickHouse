@@ -41,6 +41,8 @@ HASHMAP_FAULT_NAME = "limit_by_transform_pause"
 SORTED_FAULT_NAME = "limit_by_sorted_stream_transform_pause"
 HASHMAP_AFTER_LOOP_FAULT_NAME = "limit_by_transform_after_loop_pause"
 SORTED_AFTER_LOOP_FAULT_NAME = "limit_by_sorted_stream_transform_after_loop_pause"
+HASHMAP_MID_LOOP_FAULT_NAME = "limit_by_transform_mid_loop_pause"
+SORTED_MID_LOOP_FAULT_NAME = "limit_by_sorted_stream_transform_mid_loop_pause"
 
 
 def run_kill_query_failpoint_test(query, fault_name, query_id=None):
@@ -173,4 +175,18 @@ def test_sorted_kill_query_after_loop(started_cluster):
         SORTED_QUERY,
         SORTED_AFTER_LOOP_FAULT_NAME,
         "Cancelled after processing runs",
+    )
+
+
+def test_hashmap_kill_query_mid_loop(started_cluster):
+    run_kill_query_failpoint_test(
+        HASHMAP_QUERY,
+        HASHMAP_MID_LOOP_FAULT_NAME,
+    )
+
+
+def test_sorted_kill_query_mid_loop(started_cluster):
+    run_kill_query_failpoint_test(
+        SORTED_QUERY,
+        SORTED_MID_LOOP_FAULT_NAME,
     )

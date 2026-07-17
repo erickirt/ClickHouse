@@ -245,6 +245,8 @@ static struct InitFiu
     PAUSEABLE_ONCE(limit_by_transform_pause) \
     PAUSEABLE_ONCE(limit_by_sorted_stream_transform_after_loop_pause) \
     PAUSEABLE_ONCE(limit_by_transform_after_loop_pause) \
+    PAUSEABLE_ONCE(limit_by_sorted_stream_transform_mid_loop_pause) \
+    PAUSEABLE_ONCE(limit_by_transform_mid_loop_pause) \
     REGULAR(replicated_database_status_finished_node_missing)
 
 namespace FailPoints

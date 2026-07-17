@@ -29,6 +29,8 @@ extern const char limit_by_sorted_stream_transform_pause[];
 extern const char limit_by_transform_pause[];
 extern const char limit_by_sorted_stream_transform_after_loop_pause[];
 extern const char limit_by_transform_after_loop_pause[];
+extern const char limit_by_sorted_stream_transform_mid_loop_pause[];
+extern const char limit_by_transform_mid_loop_pause[];
 }
 
 namespace
@@ -249,6 +251,9 @@ void LimitByTransform::consumeImpl(Method & hash_method, const ColumnRawPtrs & g
             return;
         }
 
+        if (row_idx == 5)
+            FailPointInjection::pauseFailPoint(FailPoints::limit_by_transform_mid_loop_pause);
+
         auto key_emplace_result = state.emplaceKey(hash_method.data, row_idx, *data.aggregates_pool);
         size_t row_group_idx = 0;
         if (key_emplace_result.isInserted()) /// New grouping key
@@ -445,6 +450,7 @@ void LimitBySortedStreamTransform::transform(Chunk & chunk)
 
     FailPointInjection::pauseFailPoint(FailPoints::limit_by_sorted_stream_transform_pause);
 
+    size_t run_count = 0;
     while (current_run_start_row < row_count)
     {
         if (isCancelled())
@@ -454,6 +460,9 @@ void LimitBySortedStreamTransform::transform(Chunk & chunk)
             return;
         }
 
+        if (run_count == 5)
+            FailPointInjection::pauseFailPoint(FailPoints::limit_by_sorted_stream_transform_mid_loop_pause);
+
         const UInt64 run_end = getEqualRangeEndAssumeSorted(normalized_grouping_key_columns, current_run_start_row, row_count, 1);
         processRun(current_run_start_row, run_end - current_run_start_row);
 
@@ -461,6 +470,7 @@ void LimitBySortedStreamTransform::transform(Chunk & chunk)
         if (run_end != row_count)
             current_group_rows_seen = 0;
         current_run_start_row = run_end;
+        ++run_count;
     }
 
     /// Save the last grouping key so the next chunk can detect whether its first
