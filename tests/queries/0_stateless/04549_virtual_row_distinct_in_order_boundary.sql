@@ -1,3 +1,7 @@
+-- Tags: long
+-- ^ Reliably reproducing the boundary violation needs several unmerged parts with many small
+-- granules, so a single run can exceed the 180s flaky-check limit under sanitizer builds.
+
 -- Regression test for the "Virtual row boundary violated in MergingSortedAlgorithm" logical error
 -- (STID 2651-3359). ORDER BY builds a read-in-order virtual row for the sort-key prefix it needs
 -- (here CounterID). distinct-in-order then widens the read to a longer prefix (CounterID, EventDate)
