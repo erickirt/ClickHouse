@@ -2542,7 +2542,7 @@ std::pair<MarkRanges, RangesInDataPartReadHints> MergeTreeDataSelectExecutor::fi
                 .min_marks_for_seek = min_marks_for_seek,
             };
 
-            auto check_in_range = [&](const MarkRange & mark_range)
+            auto check_in_range = [&may_be_true_on_range](const MarkRange & mark_range)
             {
                 return BoolMask(may_be_true_on_range(mark_range.begin, mark_range.end, nullptr), true);
             };
