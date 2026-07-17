@@ -20,6 +20,7 @@
 #include <Common/TargetSpecific.h>
 #include <Common/VectorWithMemoryTracking.h>
 
+#include <algorithm>
 #include <optional>
 
 /// Include immintrin. Otherwise `simsimd` fails to build: `unknown type name '__bfloat16'`
@@ -661,6 +662,8 @@ private:
     /// RefT is the type of the reference vector, CalcT is the type used for calculation.
     /// `planes` holds `num_groups * precision` FixedString bit-plane columns in group-major order (plane[g * precision + b]).
     /// Each stride group is untransposed into its own contiguous slice of the reconstructed `used_dims`-element vector.
+    /// A value truncated to `precision` bit planes is reconstructed to the centre of its coarse cell (the most significant dropped
+    /// bit is set), not to the cell's lower edge, mirroring `LloydMax::transposedDequantLUT` on the quantized path.
     template <typename RefT, typename CalcT, bool ref_is_const>
     ColumnPtr executeDistanceCalculation(
         const ColumnArray & col_y,
@@ -710,6 +713,14 @@ private:
         VectorWithMemoryTracking<CalcT> block(block_size * padded_array_size);
         auto block_row = [&](size_t r) -> CalcT * { return block.data() + r * padded_array_size; };
 
+        /// Round a truncated value to the centre of its coarse cell: pre-fill every word with the most significant dropped bit and
+        /// OR the `precision` kept bit planes on top (the direct analogue of `top | (1 << (7 - precision))` in
+        /// `LloydMax::transposedDequantLUT`). Zero-filling the dropped bits would reconstruct the cell's lower edge, which biases
+        /// every value towards zero and degenerates at low precision: e.g. for BFloat16 at precision 1 only the sign bit survives,
+        /// so every value would be reconstructed as +-0.0 and the distance would be the same for every row. When `precision` covers
+        /// the whole word, no bits of the word are dropped and the fill is zero.
+        const Word centre_fill = precision < sizeof(Word) * 8 ? static_cast<Word>(Word(1) << (sizeof(Word) * 8 - 1 - precision)) : Word(0);
+
 #if USE_SIMSIMD
         simsimd_metric_dense_punned_t simd_kernel = resolveSimdKernel<CalcT>();
         /// SimSIMD's i8 kernels accumulate in int32, which overflows for large dimensions (the scalar
@@ -729,7 +740,7 @@ private:
         {
             const size_t rows_in_block = std::min(block_size, input_rows_count - base_row);
 
-            memset(block.data(), 0, rows_in_block * padded_array_size * sizeof(CalcT));
+            std::fill_n(reinterpret_cast<Word *>(block.data()), rows_in_block * padded_array_size, centre_fill);
 
             /// Untranspose, for each stride group, its `precision` bit planes into that group's slice of every row of the block
             for (size_t group = 0; group < num_groups; ++group)
