@@ -38,11 +38,12 @@ SELECT
 
 DROP TABLE t_virtual_row_distinct;
 
--- The stale-conversion drop must fire ONLY for a widening request. A fixed middle key
--- (WHERE b = 1 ORDER BY a, c on key (a, b, c)) builds a conversion that is intentionally
--- narrower than the used sort-key prefix on its FIRST (ORDER BY) request; it must be preserved,
--- otherwise the virtual row optimization is lost (and behind a join the high-read-amp path is
--- re-enabled). Assert the conversion is still present in the plan.
+-- A fixed MIDDLE key (WHERE b = 1 ORDER BY a, c on key (a, b, c)) is skipped without adding it to
+-- the virtual row, so the columns after it are no longer a contiguous key prefix. The virtual row
+-- builder indexes key columns densely, so the skipped key shifts every later column onto the wrong
+-- key column: wrong value trips "Virtual row boundary violated" (STID 2651-3359), and a wrong type
+-- (e.g. Nullable key) trips "Virtual row has different type" (STID 1637-309b). Virtual rows must be
+-- disabled whenever a key column is skipped, and the reads must not throw and stay correct.
 DROP TABLE IF EXISTS t_virtual_row_fixed_key;
 
 CREATE TABLE t_virtual_row_fixed_key (a UInt32, b UInt32, c UInt32)
@@ -52,9 +53,32 @@ SETTINGS index_granularity = 8;
 INSERT INTO t_virtual_row_fixed_key SELECT number % 10, 1, number % 7 FROM numbers(2000);
 INSERT INTO t_virtual_row_fixed_key SELECT number % 10, 1, number % 7 FROM numbers(2000, 2000);
 
-SELECT count() > 0
+-- Virtual row optimization must be disabled for the skipped-middle-key read.
+SELECT count()
 FROM (EXPLAIN actions = 1 SELECT a, c FROM t_virtual_row_fixed_key WHERE b = 1 ORDER BY a, c
       SETTINGS optimize_read_in_order = 1, read_in_order_use_virtual_row = 1)
 WHERE explain ILIKE '%Virtual row conversions%';
 
+-- Must not throw and must match the unoptimized read (previously STID 2651-3359).
+SELECT
+    (SELECT groupArray((a, c)) FROM (SELECT a, c FROM t_virtual_row_fixed_key WHERE b = 1 ORDER BY a, c SETTINGS optimize_read_in_order = 1, read_in_order_use_virtual_row = 1))
+  = (SELECT groupArray((a, c)) FROM (SELECT a, c FROM t_virtual_row_fixed_key WHERE b = 1 ORDER BY a, c SETTINGS optimize_read_in_order = 0, read_in_order_use_virtual_row = 0));
+
 DROP TABLE t_virtual_row_fixed_key;
+
+-- Same skipped-middle-key path but with a Nullable key column, which previously threw the type
+-- mismatch (STID 1637-309b) instead of the boundary violation.
+DROP TABLE IF EXISTS t_virtual_row_fixed_key_nullable;
+
+CREATE TABLE t_virtual_row_fixed_key_nullable (a UInt32, b UInt32, c Nullable(UInt32))
+ENGINE = MergeTree ORDER BY (a, b, c)
+SETTINGS index_granularity = 8, allow_nullable_key = 1;
+
+INSERT INTO t_virtual_row_fixed_key_nullable SELECT number % 10, 1, number % 7 FROM numbers(2000);
+INSERT INTO t_virtual_row_fixed_key_nullable SELECT number % 10, 1, number % 7 FROM numbers(2000, 2000);
+
+SELECT
+    (SELECT groupArray((a, c)) FROM (SELECT a, c FROM t_virtual_row_fixed_key_nullable WHERE b = 1 ORDER BY a ASC NULLS FIRST, c ASC SETTINGS optimize_read_in_order = 1, read_in_order_use_virtual_row = 1))
+  = (SELECT groupArray((a, c)) FROM (SELECT a, c FROM t_virtual_row_fixed_key_nullable WHERE b = 1 ORDER BY a ASC NULLS FIRST, c ASC SETTINGS optimize_read_in_order = 0, read_in_order_use_virtual_row = 0));
+
+DROP TABLE t_virtual_row_fixed_key_nullable;
