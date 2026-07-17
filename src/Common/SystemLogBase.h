@@ -143,7 +143,7 @@ public:
     {
         MemoryTrackerUntrackedAllocationsBlockerInThread untracked_allocations_blocker;
         MemoryTrackerBlockerInThread block_memory_tracker;
-        LogElement element;
+        LogElement element{};
         fill(element);
         push(std::move(element));
     }
