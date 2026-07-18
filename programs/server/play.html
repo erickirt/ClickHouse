@@ -7225,7 +7225,22 @@ window.onpopstate = function(event) {
     if (url_elem.value !== target_server || user_elem.value !== target_user) {
         url_elem.value = target_server;
         user_elem.value = target_user;
-        resetConnectionScopedState();
+        /// The password that authenticated this entry's `target_server`/`target_user` is deliberately
+        /// never persisted to history, so it cannot be recovered here. Leaving the previous
+        /// connection's password attached to a different restored server/user would submit `B`'s
+        /// password against `A` on the next run; clear it and let the user re-enter it (the credential
+        /// refresh below then reports the real state for the restored connection).
+        password_elem.value = '';
+        /// A Back/Forward that lands on a different connection must replay the same side effects a
+        /// real connection edit performs, not merely reset the connection-scoped caches: re-ping the
+        /// restored host and refresh its `ok`/`fail` badge, recompute the Documentation link for the
+        /// new server, and clear the stale credential badge. Assigning `.value` above fires none of
+        /// the input listeners, so dispatch synthetic `input` events on the connection inputs — every
+        /// registered listener (`checkURL`, `updateDocsURL`, `resetCredentialsStatus` and
+        /// `resetConnectionScopedState`) then runs exactly as it would for a typed edit. These carry
+        /// `isTrusted === false`, so `markBootstrapDirty` ignores them; this navigation already marked
+        /// the workspace dirty above.
+        [url_elem, user_elem, password_elem].forEach(el => el.dispatchEvent(new Event('input')));
     }
     const tab = resolveTabForState(event.state);
     /// Keep this history entry's identity in sync with the tab it actually resolves to, restamping
