@@ -5501,12 +5501,21 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     /// In multi-query "Run selected" mode `history_query_text` carries the full editor content (the
     /// editor text + URL), while `resultQuery` is the single statement that produced this result.
     /// The per-column color coding modes travel with the snapshot (see `saveHistory`).
+    ///
+    /// An image result (e.g. `FORMAT PNG`) streams as a blob and is rendered directly by `postImpl`,
+    /// so its `reply` stays empty and the image bytes are not persisted. Store `data: null` for it,
+    /// exactly like an oversized result and like the per-statement multi-query path (`postMulti`):
+    /// the restore path treats `data: null` as "no stored snapshot" and reopens the tab idle rather
+    /// than misclassifying the empty body as an empty raw result (with a Copy button). The run stays
+    /// reproducible from the `run=1` URL (see `buildHistoryParams`), which is why images are grouped
+    /// with oversized results as "not snapshotted" there. Storing `data: ''` here would fall through
+    /// to the raw branch in `materializeResult` and restore the image tab as an empty text result.
     saveHistory({
         query: history_query_text || query,
         resultQuery: query,
         format: result.format,
         ok: result.response_ok,
-        data: result.reply.length > 100000 ? null : result.reply,
+        data: (result.is_image || result.reply.length > 100000) ? null : result.reply,
         elapsed_ns: el.elapsedNs,
         params: paramValuesSnapshot,
         fullEditor: ran_full_editor,
@@ -6020,6 +6029,11 @@ async function materializeResult(tab) {
     /// full (persisted as a compact summary) or was not stored at all (a legacy/edge snapshot with
     /// `data: null`): fall through to the `!result.ok` branch below rather than reopening blank. A
     /// never-run tab has no `ok` field, so it still resolves to idle here.
+    ///
+    /// A successful run with no stored snapshot (`data: null`) resolves to idle here too: this
+    /// covers an oversized result and an image result (`FORMAT PNG` and friends), whose bytes are
+    /// deliberately not persisted (see `postSingle`/`postMulti`) and which stay reproducible from
+    /// the `run=1` URL. Reopening idle avoids rendering an empty raw result for them.
     ///
     /// Test `data == null` ("no stored snapshot"), not falsiness: a successful run can legitimately
     /// have an empty body (`data === ''`) in a raw format - e.g. `SELECT 1 WHERE 0 FORMAT CSV`
