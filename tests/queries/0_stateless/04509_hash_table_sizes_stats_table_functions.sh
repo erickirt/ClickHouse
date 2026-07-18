@@ -4,6 +4,22 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CUR_DIR"/../shell_config.sh
 
+# Every pair below runs the same query twice: the first run populates the hash-table-stats cache,
+# the second one (-prealloc) must preallocate from it, which is checked through the
+# AggregationPreallocatedElementsInHashTables profile event. Different pairs use different cache
+# keys (that is the point of the test), so they are independent: to keep the test fast on slow
+# (debug/sanitizer) builds, the pairs run in parallel, and only the two runs within a pair are
+# sequential. For the same reason logs are flushed and queried once, at the end; each section uses
+# its own query_id prefix so the report queries do not pick up each other's rows.
+
+run_pair()
+{
+    local query_id_prefix=$1 name=$2 query=$3
+    shift 3
+    $CLICKHOUSE_CLIENT "$@" --query_id="${query_id_prefix}_${name}" -q "$query"
+    $CLICKHOUSE_CLIENT "$@" --query_id="${query_id_prefix}_${name}-prealloc" -q "$query"
+}
+
 settings=(
     --max_threads=1
     --enable_analyzer=1
@@ -14,24 +30,12 @@ settings=(
 big_query="SELECT number AS k FROM numbers(1e6) GROUP BY k FORMAT Null"
 small_query="SELECT number AS k FROM numbers(800e3) GROUP BY k FORMAT Null"
 
-query_id_prefix="${CLICKHOUSE_DATABASE}_04509_$RANDOM$RANDOM"
+local_prefix="${CLICKHOUSE_DATABASE}_04509_local_$RANDOM$RANDOM"
+dist_prefix="${CLICKHOUSE_DATABASE}_04509_dist_$RANDOM$RANDOM"
+mod_prefix="${CLICKHOUSE_DATABASE}_04509_mod_$RANDOM$RANDOM"
 
-$CLICKHOUSE_CLIENT "${settings[@]}" --query_id="${query_id_prefix}_big" -q "$big_query"
-$CLICKHOUSE_CLIENT "${settings[@]}" --query_id="${query_id_prefix}_big-prealloc" -q "$big_query"
-$CLICKHOUSE_CLIENT "${settings[@]}" --query_id="${query_id_prefix}_small" -q "$small_query"
-$CLICKHOUSE_CLIENT "${settings[@]}" --query_id="${query_id_prefix}_small-prealloc" -q "$small_query"
-
-$CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS query_log"
-
-$CLICKHOUSE_CLIENT -q "
-    SELECT replace(query_id, '${query_id_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
-    FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish'
-    AND current_database = currentDatabase()
-    AND startsWith(query_id, '$query_id_prefix')
-    AND endsWith(query_id, '-prealloc')
-    ORDER BY event_time_microseconds
-"
+run_pair "$local_prefix" big "$big_query" "${settings[@]}" &
+run_pair "$local_prefix" small "$small_query" "${settings[@]}" &
 
 # The same, but through a serialized query plan (distributed execution): the read is reconstructed
 # on the shard by resolveStorages / ReadFromTableFunctionStep, which must also carry the table
@@ -50,22 +54,8 @@ dist_settings=(
 dist_big_query="SELECT number AS k FROM cluster('test_shard_localhost', numbers(1e6)) GROUP BY k FORMAT Null"
 dist_small_query="SELECT number AS k FROM cluster('test_shard_localhost', numbers(800e3)) GROUP BY k FORMAT Null"
 
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${query_id_prefix}_dist-big" -q "$dist_big_query"
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${query_id_prefix}_dist-big-prealloc" -q "$dist_big_query"
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${query_id_prefix}_dist-small" -q "$dist_small_query"
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${query_id_prefix}_dist-small-prealloc" -q "$dist_small_query"
-
-$CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS query_log"
-
-$CLICKHOUSE_CLIENT -q "
-    SELECT replace(initial_query_id, '${query_id_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
-    FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish'
-    AND is_initial_query = 0
-    AND startsWith(initial_query_id, '$query_id_prefix')
-    AND endsWith(initial_query_id, '-prealloc')
-    ORDER BY event_time_microseconds
-"
+run_pair "$dist_prefix" dist-big "$dist_big_query" "${dist_settings[@]}" &
+run_pair "$dist_prefix" dist-small "$dist_small_query" "${dist_settings[@]}" &
 
 # Table expression modifiers must be part of the key as well: the same table function with and
 # without FINAL sees different row sets (ReplacingMergeTree collapses duplicates under FINAL), so
@@ -81,26 +71,42 @@ $CLICKHOUSE_CLIENT -q "
     INSERT INTO t_04509 SELECT number, number % 600000 FROM numbers(1e6);
 "
 
-mod_query_id_prefix="${CLICKHOUSE_DATABASE}_04509_mod_$RANDOM$RANDOM"
-
 final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04509$')) FINAL GROUP BY v FORMAT Null"
 no_final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04509$')) GROUP BY v FORMAT Null"
 
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${mod_query_id_prefix}_final" -q "$final_query"
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${mod_query_id_prefix}_final-prealloc" -q "$final_query"
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${mod_query_id_prefix}_no-final" -q "$no_final_query"
-$CLICKHOUSE_CLIENT "${dist_settings[@]}" --query_id="${mod_query_id_prefix}_no-final-prealloc" -q "$no_final_query"
+run_pair "$mod_prefix" final "$final_query" "${dist_settings[@]}" &
+run_pair "$mod_prefix" no-final "$no_final_query" "${dist_settings[@]}" &
 
-$CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS query_log"
+wait
 
+# The labels within each section happen to sort in the order the reference expects, and unlike
+# event_time the sort is stable under the parallel execution above.
 $CLICKHOUSE_CLIENT -q "
-    SELECT replace(initial_query_id, '${mod_query_id_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
+    SYSTEM FLUSH LOGS query_log;
+
+    SELECT replace(query_id, '${local_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
+    FROM system.query_log
+    WHERE event_date >= yesterday() AND type = 'QueryFinish'
+    AND current_database = currentDatabase()
+    AND startsWith(query_id, '$local_prefix')
+    AND endsWith(query_id, '-prealloc')
+    ORDER BY 1;
+
+    SELECT replace(initial_query_id, '${dist_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
     FROM system.query_log
     WHERE event_date >= yesterday() AND type = 'QueryFinish'
     AND is_initial_query = 0
-    AND startsWith(initial_query_id, '$mod_query_id_prefix')
+    AND startsWith(initial_query_id, '$dist_prefix')
     AND endsWith(initial_query_id, '-prealloc')
-    ORDER BY event_time_microseconds
-"
+    ORDER BY 1;
 
-$CLICKHOUSE_CLIENT -q "DROP TABLE t_04509"
+    SELECT replace(initial_query_id, '${mod_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
+    FROM system.query_log
+    WHERE event_date >= yesterday() AND type = 'QueryFinish'
+    AND is_initial_query = 0
+    AND startsWith(initial_query_id, '$mod_prefix')
+    AND endsWith(initial_query_id, '-prealloc')
+    ORDER BY 1;
+
+    DROP TABLE t_04509;
+"
