@@ -2293,7 +2293,9 @@ class QueryResultElement extends HTMLElement
                     display: block;
                 }
 
-                /* Selected cell stacks above all other cells */
+                /* Selected cell stacks above the ordinary cells around it. A pinned column stacks
+                   higher still (see below), so a pinned column stays visible even when a selected
+                   cell in a scrolling column slides underneath it. */
                 .td-selected
                 {
                     position: relative;
@@ -2310,11 +2312,13 @@ class QueryResultElement extends HTMLElement
                    the header color, which is what lets a pinned cell paint over the cells
                    scrolling underneath it. Header cells are already position: sticky (for the
                    vertical header), so the class only needs to raise the body cells; the z-index
-                   here keeps a pinned body cell above the ordinary cells it covers. */
+                   here keeps a pinned body cell above the cells it covers, including a selected
+                   cell (z-index 10) that scrolls underneath it - the pinned column must stay
+                   visible even when the ordinary selected cell would otherwise paint over it. */
                 td.pinned-column
                 {
                     position: sticky;
-                    z-index: 5;
+                    z-index: 11;
                 }
 
                 /* Delimit a pinned column from the content scrolling underneath it with a border
@@ -2329,13 +2333,14 @@ class QueryResultElement extends HTMLElement
                 }
 
                 /* A selected cell in a pinned column must keep sticking (position: sticky) while
-                   still stacking above its neighbours for the expanded content (z-index: 10).
-                   Without this more specific rule, the .td-selected position: relative would win
-                   and the selected cell would scroll away with the rest of the row. */
+                   stacking one step above the pinned layer (z-index: 12), so its expanded content
+                   paints over the neighbouring pinned cells. Without this more specific rule, the
+                   .td-selected position: relative would win and the selected cell would scroll away
+                   with the rest of the row. */
                 td.pinned-column.td-selected
                 {
                     position: sticky;
-                    z-index: 10;
+                    z-index: 12;
                 }
 
                 /* Expand the inner div on top of the table without reflowing it */
@@ -2734,7 +2739,7 @@ class QueryResultElement extends HTMLElement
             this._appendHeaderResizer(th);
             /// Base header z-index: left columns are highest so a column's type-hint tooltip
             /// overlaps its right neighbour. The `100 +` base keeps every header above the body
-            /// cells (including a pinned body cell, z-index 5, that scrolls up under the header);
+            /// cells (including a pinned body cell, z-index 11, that scrolls up under the header);
             /// pinned headers are raised further, into a separate band, by `applyPinnedColumns`.
             th.style.zIndex = 100 + zIndex;
             --zIndex;
@@ -2952,21 +2957,32 @@ class QueryResultElement extends HTMLElement
         this._updatePinAvailability();
     }
 
-    /// Lay out the pinned columns of the rows a streaming chunk just appended, so a wide result
-    /// restored from a shared `?pinned_columns=...&run=1` link keeps those columns sticky while the
-    /// response is still streaming, rather than snapping into the pinned state only when
-    /// `applyColumnColors` runs at EOF. Only the freshly appended rows are laid out (plus the
-    /// header, which is cheap), keeping the per-chunk cost proportional to the new rows instead of
-    /// re-sweeping the whole table each chunk. The final `applyPinnedColumns` pass re-lays out every
-    /// row with the final column widths, so any offset drift from columns that widened mid-stream is
-    /// corrected then. A no-op unless some column is pinned: an ordinary (unpinned) streamed result
-    /// keeps deferring all layout to EOF, so it pays no per-chunk reflow.
+    /// Keep the pinned-column feature responsive while a table result is still streaming, called
+    /// after each `flushFragment`. Two cases, both cheap:
+    ///   - Some column is pinned (e.g. a wide `?pinned_columns=...&run=1` link was opened): lay out
+    ///     only the rows this chunk just appended (plus the header, which is cheap), so those
+    ///     columns stay sticky throughout streaming instead of snapping into the pinned state only
+    ///     when `applyColumnColors` runs at EOF. The per-chunk cost stays proportional to the new
+    ///     rows rather than re-sweeping the whole table; the final `applyPinnedColumns` pass re-lays
+    ///     out every row with the final column widths, correcting any offset drift from columns that
+    ///     widened mid-stream. (`_layoutPinnedColumns` refreshes availability itself at the end.)
+    ///   - Nothing pinned yet: there are no offsets to lay out, but the table may have just grown
+    ///     wide enough to scroll horizontally, which is what reveals and enables the pin toggles.
+    ///     Refresh only that availability (O(columns), no per-row reflow) so a user can pin a column
+    ///     on a long-running wide query without waiting for it to finish - the earlier behaviour
+    ///     kept the toggles disabled/hidden until EOF.
     _pinStreamedRows(newRows)
     {
         if (!Array.isArray(this._header) || !this._dataTable.tHead) { return; }
         if (this._willTranspose()) { return; }
-        if (!this._hasPinnedColumns()) { return; }
-        this._layoutPinnedColumns(newRows);
+        if (this._hasPinnedColumns())
+        {
+            this._layoutPinnedColumns(newRows);
+        }
+        else
+        {
+            this._updatePinAvailability();
+        }
     }
 
     /// Reflect whether this table can be scrolled horizontally onto the `has-hscroll` class, which
@@ -5524,8 +5540,10 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                 /// fragment, but the node references stay valid after the move into the table body.
                 const streamed_rows = fragment.querySelectorAll('tr');
                 targetResultEl.flushFragment(fragment);
-                /// Keep pinned columns sticky as the table streams (a no-op unless a column is
-                /// pinned, e.g. when a wide `?pinned_columns=...&run=1` link is opened).
+                /// Keep the pinned-column feature live as the table streams: lay out the new rows
+                /// for any already-pinned columns (e.g. a wide `?pinned_columns=...&run=1` link),
+                /// and otherwise just refresh whether the table now scrolls horizontally so the pin
+                /// toggles become usable mid-stream rather than only at EOF.
                 targetResultEl._pinStreamedRows(streamed_rows);
 
                 if (!cont)
