@@ -4091,6 +4091,14 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
         /// The PK path only needs the data-read safety checks above; only the secondary skip-index
         /// part is gated by use_skip_indexes (buildIndexes builds key_condition_rpn_template regardless).
         const bool collect_skip_indexes = context->getSettingsRef()[Setting::use_skip_indexes];
+
+        /// Need to check ignore_data_skipping_indices
+        std::unordered_set<String> ignored_index_names;
+        if (context->getSettingsRef()[Setting::ignore_data_skipping_indices].changed)
+            ignored_index_names = parseIdentifiersOrStringLiteralsToSet(
+                context->getSettingsRef()[Setting::ignore_data_skipping_indices].toString(),
+                context->getSettingsRef());
+
         const auto & metadata = *storage_snapshot->metadata;
         const auto & pk_columns = metadata.getPrimaryKey().column_names;
         std::unordered_set<String> seen_index_names;
@@ -4105,6 +4113,8 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
                 continue;
             for (const auto & index : metadata.getSecondaryIndices())
             {
+                if (ignored_index_names.contains(index.name))
+                    continue;
                 if (index.type != "minmax" && index.type != "set" && index.type != "bloom_filter")
                     continue;
                 if (std::find(index.column_names.begin(), index.column_names.end(), descr.key_column_name) == index.column_names.end())
