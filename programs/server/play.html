@@ -4153,7 +4153,13 @@ let url_color_modes = null;
 /// as an authoritative empty set, so a shared link like `?color_modes=not-json` cannot silently wipe
 /// persisted colors. `null` `url_color_modes` alone cannot tell "absent" (clear) from "malformed" (skip).
 let color_modes_url_malformed = false;
-if (color_modes_from_url) {
+/// Presence check, not truthiness: `URLSearchParams.get` returns `''` for a PRESENT-but-empty param
+/// (`?color_modes=`) and `null` only for a truly absent one. A truthiness guard would skip the empty
+/// string entirely, leaving `color_modes_url_malformed` false so startup treats `?color_modes=` as an
+/// authoritative empty set and wipes persisted colors — the same destructive path a malformed param
+/// must avoid. Route the empty string through the parse below: `JSON.parse('')` throws, so it trips
+/// the malformed flag and is left non-destructive.
+if (color_modes_from_url !== null) {
     /// Normalize into a prototype-less map (`nullProtoMap`): the parsed object otherwise carries the
     /// `Object` prototype, so a column named `toString` (etc.) would read as colored before any action.
     /// Parse and type-check first: `nullProtoMap` of a non-object (a JSON number/string) returns a
@@ -4173,7 +4179,10 @@ let url_pinned_columns = null;
 /// Present-but-undecodable, as for `color_modes_url_malformed` above: distinguishes a malformed
 /// `?pinned_columns=not-json` link (leave persisted pins untouched) from a truly absent param (clear).
 let pinned_columns_url_malformed = false;
-if (pinned_columns_from_url) {
+/// Presence check, not truthiness, for the same reason as `color_modes_from_url` above: a PRESENT-but-empty
+/// `?pinned_columns=` param reads back as `''`, and a truthiness guard would skip it and let startup wipe
+/// persisted pins. Route it through the parse below so `JSON.parse('')` trips the malformed flag.
+if (pinned_columns_from_url !== null) {
     /// Normalize into a prototype-less map, as for the color modes above (parse and type-check first).
     let parsed = null;
     try { parsed = JSON.parse(pinned_columns_from_url); } catch (e) { /* ignore malformed */ }
