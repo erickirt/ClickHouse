@@ -313,22 +313,68 @@
     });
   }
 
-  function scan() {
-    var blocks = document.querySelectorAll('.code-block[language="sql"]');
+  var BLOCK_SELECTOR = '.code-block[language="sql"]';
+
+  function scan(root) {
+    var blocks = root.querySelectorAll(BLOCK_SELECTOR);
     for (var i = 0; i < blocks.length; i++) enhanceBlock(blocks[i]);
   }
 
+  function enhanceWithin(root) {
+    var element = root && root.nodeType === 1 ? root : root && root.parentElement;
+    if (!element || !element.isConnected) return;
+
+    var containingBlock = element.matches(BLOCK_SELECTOR)
+      ? element
+      : element.closest(BLOCK_SELECTOR);
+    if (containingBlock) enhanceBlock(containingBlock);
+
+    scan(element);
+  }
+
   function init() {
-    scan();
-    // Re-scan on SPA navigation / late renders. Our own edits set chSqlState so
-    // already-handled blocks are skipped, preventing an observer feedback loop.
+    scan(document);
+
+    // Process only subtrees added by SPA navigation or late rendering. Our own
+    // edits resolve to an already pending/done containing block, preventing an
+    // observer feedback loop without repeatedly querying the entire document.
+    var pendingRoots = [];
     var scheduled = false;
-    var observer = new MutationObserver(function () {
-      if (scheduled) return;
+
+    function queueRoot(node) {
+      var element = node && node.nodeType === 1 ? node : node && node.parentElement;
+      if (!element) return;
+
+      var containingBlock = element.matches(BLOCK_SELECTOR)
+        ? element
+        : element.closest(BLOCK_SELECTOR);
+      if (containingBlock) element = containingBlock;
+
+      for (var i = pendingRoots.length - 1; i >= 0; i--) {
+        if (pendingRoots[i].contains(element)) return;
+        if (element.contains(pendingRoots[i])) pendingRoots.splice(i, 1);
+      }
+      pendingRoots.push(element);
+    }
+
+    function flush() {
+      scheduled = false;
+      var roots = pendingRoots;
+      pendingRoots = [];
+      for (var i = 0; i < roots.length; i++) enhanceWithin(roots[i]);
+    }
+
+    var observer = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        for (var j = 0; j < records[i].addedNodes.length; j++) {
+          queueRoot(records[i].addedNodes[j]);
+        }
+      }
+      if (pendingRoots.length === 0 || scheduled) return;
       scheduled = true;
-      requestAnimationFrame(function () { scheduled = false; scan(); });
+      requestAnimationFrame(flush);
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') {

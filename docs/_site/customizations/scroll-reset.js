@@ -9,9 +9,10 @@
   // bug disappear.) Restore the expected behavior by scrolling to the top
   // whenever a forward navigation changes the path.
   //
-  // The path is watched from a rAF loop rather than by wrapping
-  // history.pushState — the router can hold a reference to the original
-  // pushState from before this script runs, which would bypass a wrapper.
+  // Route notifications come from History, popstate, the Navigation API, and
+  // narrow page-shell observers. The DOM fallback covers routers that captured
+  // native History methods before this customization loaded without polling on
+  // every animation frame.
   //
   // Back/forward (popstate) is deliberately left alone so the browser and
   // router can restore the previous scroll position. Cross-page hash links
@@ -24,6 +25,7 @@
     if (window.location.pathname !== lastPath) {
       traversed = true;
     }
+    handlePathChange();
   });
 
   // The new page renders some frames after the path changes, so poll for the
@@ -44,19 +46,117 @@
     }
   }
 
-  function watch() {
+  function handlePathChange() {
     var path = window.location.pathname;
-    if (path !== lastPath) {
-      lastPath = path;
-      if (traversed) {
-        traversed = false;
-      } else if (window.location.hash) {
-        scrollToAnchor(window.location.hash, 180);
-      } else {
-        window.scrollTo(0, 0);
+    if (path === lastPath) return;
+    lastPath = path;
+    if (traversed) {
+      traversed = false;
+    } else if (window.location.hash) {
+      scrollToAnchor(window.location.hash, 180);
+    } else {
+      window.scrollTo(0, 0);
+    }
+  }
+
+  function wrapHistoryMethod(name) {
+    var original = window.history[name];
+    window.history[name] = function () {
+      var result = original.apply(this, arguments);
+      handlePathChange();
+      return result;
+    };
+  }
+
+  wrapHistoryMethod('pushState');
+  wrapHistoryMethod('replaceState');
+
+  // currententrychange also fires when an app retained a native History method.
+  // Defer its check so popstate can mark traversals before we decide whether to
+  // preserve the browser-restored position.
+  if (window.navigation && typeof window.navigation.addEventListener === 'function') {
+    window.navigation.addEventListener('navigate', function (event) {
+      if (event.navigationType === 'traverse') traversed = true;
+    });
+    window.navigation.addEventListener('currententrychange', function () {
+      setTimeout(handlePathChange, 0);
+    });
+  }
+
+  // A user-initiated SPA navigation always starts with an internal link click.
+  // One post-click frame catches routers that bypass both wrapped History and
+  // the Navigation API; unlike the old loop, it runs only during navigation.
+  document.addEventListener('click', function (event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+        event.ctrlKey || event.shiftKey || event.altKey) return;
+    var link = event.target && event.target.closest && event.target.closest('a[href]');
+    if (!link) return;
+    var url;
+    try { url = new URL(link.href, window.location.href); } catch (e) { return; }
+    if (url.origin !== window.location.origin || url.pathname === lastPath) return;
+    setTimeout(handlePathChange, 0);
+    window.requestAnimationFrame(handlePathChange);
+  }, true);
+
+  // Next.js replaces children of these stable shell nodes during an SPA route.
+  // Observe only direct children so article highlighting and third-party widget
+  // mutations do not wake this script.
+  var currentContainer = null;
+  var currentContentArea = null;
+  var containerParentObserver = null;
+  var containerObserver = null;
+  var contentObserver = null;
+  var bootstrapObserver = null;
+
+  function onShellMutation() {
+    bindShellObservers();
+    handlePathChange();
+  }
+
+  function bindShellObservers() {
+    var container = document.getElementById('content-container');
+    if (container !== currentContainer) {
+      if (containerParentObserver) containerParentObserver.disconnect();
+      if (containerObserver) containerObserver.disconnect();
+      currentContainer = container;
+
+      if (container && container.parentNode) {
+        containerParentObserver = new MutationObserver(onShellMutation);
+        containerParentObserver.observe(container.parentNode, { childList: true });
+      }
+      if (container) {
+        containerObserver = new MutationObserver(onShellMutation);
+        containerObserver.observe(container, { childList: true });
       }
     }
-    window.requestAnimationFrame(watch);
+
+    var contentArea = document.getElementById('content-area');
+    if (contentArea !== currentContentArea) {
+      if (contentObserver) contentObserver.disconnect();
+      currentContentArea = contentArea;
+      if (contentArea) {
+        contentObserver = new MutationObserver(onShellMutation);
+        contentObserver.observe(contentArea, { childList: true });
+      }
+    }
+
+    if (container && contentArea && bootstrapObserver) {
+      bootstrapObserver.disconnect();
+      bootstrapObserver = null;
+    }
+
+    return Boolean(container && contentArea);
   }
-  window.requestAnimationFrame(watch);
+
+  if (!bindShellObservers()) {
+    bootstrapObserver = new MutationObserver(onShellMutation);
+    bootstrapObserver.observe(document.documentElement, { childList: true, subtree: true });
+    // Pages without the normal docs shell still use the History/click sources;
+    // do not leave a recursive bootstrap observer running indefinitely.
+    setTimeout(function () {
+      if (!bootstrapObserver) return;
+      bootstrapObserver.disconnect();
+      bootstrapObserver = null;
+    }, 10000);
+  }
 })();
