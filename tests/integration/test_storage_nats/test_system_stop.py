@@ -1330,7 +1330,7 @@ def test_refresh_survives_failed_resubscribe(nats_cluster):
     durable = "js_refresh_resub_durable"
     table = "nats_refresh_resub"
 
-    jetstream_setup(nats_cluster, stream, subject, durable, ack_wait_seconds=5)
+    jetstream_setup(nats_cluster, stream, subject, durable, ack_wait_seconds=30)
     instance.query(
         f"""
         CREATE TABLE test.{table} (key UInt64, value UInt64)
@@ -1342,7 +1342,9 @@ def test_refresh_survives_failed_resubscribe(nats_cluster):
                      nats_format = 'JSONEachRow',
                      nats_secure = 1,
                      nats_username = '{nats_user}',
-                     nats_password = '{nats_pass}';
+                     nats_password = '{nats_pass}',
+                     nats_flush_interval_ms = 6000,
+                     nats_wait_for_flush_interval = 1;
 
         CREATE TABLE test.{table}_dst (key UInt64, value UInt64) ENGINE = MergeTree ORDER BY key;
 
@@ -1366,7 +1368,8 @@ def test_refresh_survives_failed_resubscribe(nats_cluster):
     instance.wait_for_log_line(marker, repetitions=before + 1)
 
     # Heal: recreate the stream and publish a backlog; the pending refresh must consume it.
-    jetstream_setup(nats_cluster, stream, subject, durable, ack_wait_seconds=5)
+    # Its cycle holds the block open for the flush interval, so it sees a late publish too.
+    jetstream_setup(nats_cluster, stream, subject, durable, ack_wait_seconds=30)
     jetstream_publish(nats_cluster, subject, 2, 5)
     wait_dst_count_at_least(table, 7)
     assert_dst_count_stable(table, 7, seconds=5)
