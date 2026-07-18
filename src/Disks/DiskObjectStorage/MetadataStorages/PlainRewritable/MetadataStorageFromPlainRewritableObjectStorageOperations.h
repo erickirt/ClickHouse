@@ -8,9 +8,29 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 namespace DB
 {
+
+class MetadataStorageFromPlainObjectStorageValidateDirectoryOperation final : public IMetadataOperation
+{
+private:
+    const std::filesystem::path path;
+    const std::optional<std::string> expected_remote_path;
+    const std::shared_ptr<InMemoryDirectoryTree> fs_tree;
+
+    void validateDirectoryNotPresent();
+    void validateDirectoryPresent();
+
+public:
+    MetadataStorageFromPlainObjectStorageValidateDirectoryOperation(
+        std::filesystem::path path_,
+        std::optional<std::string> expected_remote_path_,
+        std::shared_ptr<InMemoryDirectoryTree> fs_tree_);
+
+    void execute() override;
+};
 
 class MetadataStorageFromPlainObjectStorageCreateDirectoryOperation final : public IMetadataOperation
 {
@@ -23,6 +43,7 @@ private:
     const std::shared_ptr<PlainRewritableLayout> layout;
     const std::shared_ptr<PlainRewritableMetrics> metrics;
 
+    bool write_attempted = false;
     bool created_directory = false;
 
 public:
