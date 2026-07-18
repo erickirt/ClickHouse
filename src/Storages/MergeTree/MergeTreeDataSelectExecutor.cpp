@@ -80,6 +80,8 @@ extern const Event FilteringMarksWithSecondaryKeysMicroseconds;
 extern const Event IndexBinarySearchAlgorithm;
 extern const Event IndexGenericExclusionSearchAlgorithm;
 extern const Event IndexGenericExclusionSearchStepLimitReached;
+extern const Event TextIndexGenericExclusionSearchAlgorithm;
+extern const Event TextIndexGenericExclusionSearchStepLimitReached;
 extern const Event FilterPartsByVirtualColumnsMicroseconds;
 extern const Event QueryConditionCacheHits;
 extern const Event QueryConditionCacheMisses;
@@ -2549,7 +2551,17 @@ std::pair<MarkRanges, RangesInDataPartReadHints> MergeTreeDataSelectExecutor::fi
 
             auto search_result = genericExclusionSearch(ranges, check_in_range, search_settings, /*collect_exact_ranges=*/ false);
             res = std::move(search_result.ranges);
-            LOG_TRACE(log, "Used generic exclusion search over text index for part {} with {} steps", part->name, search_result.num_steps);
+
+            ProfileEvents::increment(ProfileEvents::TextIndexGenericExclusionSearchAlgorithm);
+            if (search_result.reached_step_limit)
+                ProfileEvents::increment(ProfileEvents::TextIndexGenericExclusionSearchStepLimitReached);
+
+            LOG_TRACE(
+                log,
+                "Used generic exclusion search over text index for part {} with {} steps{}",
+                part->name,
+                search_result.num_steps,
+                search_result.reached_step_limit ? " (step limit reached, remaining ranges were accepted without further splitting)" : "");
         }
 
         read_hints.index_granules[index_helper->index.name] = std::move(granule);
