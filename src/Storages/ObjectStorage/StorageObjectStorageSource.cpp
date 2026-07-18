@@ -1015,14 +1015,22 @@ StorageObjectStorageSource::ReaderHolder StorageObjectStorageSource::createReade
             {
                 if (auto mapper = configuration->getColumnMapperForObject(object_info))
                 {
+                    /// The mapper resolves parquet field-ids to the file's OLD clickhouse
+                    /// column names, while PREWHERE / row-level filter reference the CURRENT
+                    /// (renamed or type-evolved) names. Evaluating them inside the reader
+                    /// would look up names the old-schema mapper does not know and silently
+                    /// match nothing. Strip them here and apply them as fallback
+                    /// FilterTransforms after the schema transform aliases the names below.
                     if (format_supports_prewhere)
-                        return std::make_shared<FormatFilterInfo>(
-                            format_filter_info->filter_actions_dag, format_filter_info->context.lock(),
-                            mapper, format_filter_info->row_level_filter, format_filter_info->prewhere_info);
-                    else
-                        return std::make_shared<FormatFilterInfo>(
-                            format_filter_info->filter_actions_dag, format_filter_info->context.lock(),
-                            mapper, nullptr, nullptr);
+                    {
+                        if (format_filter_info->row_level_filter)
+                            stripped_row_level_filter = format_filter_info->row_level_filter;
+                        if (format_filter_info->prewhere_info)
+                            stripped_prewhere_info = format_filter_info->prewhere_info;
+                    }
+                    return std::make_shared<FormatFilterInfo>(
+                        format_filter_info->filter_actions_dag, format_filter_info->context.lock(),
+                        mapper, nullptr, nullptr);
                 }
             }
 
