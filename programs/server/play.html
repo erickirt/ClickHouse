@@ -2886,12 +2886,13 @@ class QueryResultElement extends HTMLElement
         this._layoutPinnedColumns(this._pinnableRows());
     }
 
-    /// Shared core of the pinned-column layout: recompute the per-column sticky offsets from the
-    /// current header widths, then mark (or clear) the pinned state on the header cells and on the
-    /// given data rows, and refresh horizontal-scroll availability. `applyPinnedColumns` passes
-    /// every body/totals row for a full (re)layout; `_pinStreamedRows` passes only the rows a
-    /// streaming chunk just appended, so the per-chunk work stays proportional to the new rows.
-    _layoutPinnedColumns(rows)
+    /// Compute the per-column sticky offsets for the currently pinned columns from the current
+    /// header widths. `left_offset[j]` is the total width of the pinned columns before column `j`
+    /// and `right_offset[j]` the total width of those after it (both zero for unpinned columns), so
+    /// each pinned column sticks to whichever edge it reaches while the rest stack against it. Reads
+    /// the header cell widths, which match the column widths in this collapsed-border table.
+    /// O(columns) - no per-row work.
+    _computePinnedOffsets()
     {
         const thead = this._dataTable.tHead;
         const header_len = this._header.length;
@@ -2918,6 +2919,35 @@ class QueryResultElement extends HTMLElement
             right_offset[j] = acc;
             acc += thead.children[cellIndex(j)].offsetWidth;
         }
+        return { pinned, left_offset, right_offset };
+    }
+
+    /// A compact signature of a pinned-offset vector, used to detect when the offsets last applied
+    /// to the rendered rows have shifted (a pinned column changed width) and the earlier rows must
+    /// be re-laid-out. See `_layoutPinnedColumns` (which stores it) and `_pinStreamedRows`.
+    _pinnedOffsetsKey(left_offset, right_offset)
+    {
+        return left_offset.join(',') + '|' + right_offset.join(',');
+    }
+
+    /// Shared core of the pinned-column layout: recompute the per-column sticky offsets from the
+    /// current header widths, then mark (or clear) the pinned state on the header cells and on the
+    /// given data rows, and refresh horizontal-scroll availability. `applyPinnedColumns` passes
+    /// every body/totals row for a full (re)layout; `_pinStreamedRows` passes only the rows a
+    /// streaming chunk just appended, so the per-chunk work stays proportional to the new rows.
+    _layoutPinnedColumns(rows)
+    {
+        const thead = this._dataTable.tHead;
+        const header_len = this._header.length;
+        /// Cell index in a row for data column `j` (the leading row-number cell is at index 0).
+        const cellIndex = (j) => j + 1;
+
+        const { pinned, left_offset, right_offset } = this._computePinnedOffsets();
+
+        /// Remember the offsets just applied so `_pinStreamedRows` can tell when a later chunk shifts
+        /// them (a pinned column widened) and the rows already rendered with the old offsets need a
+        /// full re-layout rather than only the new rows.
+        this._pinnedLayoutKey = this._pinnedOffsetsKey(left_offset, right_offset);
 
         for (let j = 0; j < header_len; ++j)
         {
@@ -2958,14 +2988,16 @@ class QueryResultElement extends HTMLElement
     }
 
     /// Keep the pinned-column feature responsive while a table result is still streaming, called
-    /// after each `flushFragment`. Two cases, both cheap:
-    ///   - Some column is pinned (e.g. a wide `?pinned_columns=...&run=1` link was opened): lay out
-    ///     only the rows this chunk just appended (plus the header, which is cheap), so those
-    ///     columns stay sticky throughout streaming instead of snapping into the pinned state only
-    ///     when `applyColumnColors` runs at EOF. The per-chunk cost stays proportional to the new
-    ///     rows rather than re-sweeping the whole table; the final `applyPinnedColumns` pass re-lays
-    ///     out every row with the final column widths, correcting any offset drift from columns that
-    ///     widened mid-stream. (`_layoutPinnedColumns` refreshes availability itself at the end.)
+    /// after each `flushFragment`. Two cases, both cheap in the common path:
+    ///   - Some column is pinned (e.g. a wide `?pinned_columns=...&run=1` link was opened): keep the
+    ///     pinned columns sticky throughout streaming instead of snapping into the pinned state only
+    ///     when `applyColumnColors` runs at EOF. If the pinned-column offsets are unchanged since the
+    ///     last layout, only the rows this chunk appended need them (plus the header, which is cheap),
+    ///     so the per-chunk cost stays proportional to the new rows. If a pinned column widened in
+    ///     this chunk, the offsets of the pinned columns after it shift, so every row already rendered
+    ///     with the old offsets must be re-laid-out too, or those earlier rows would drift out of
+    ///     alignment (overlap or leave gaps) until EOF; that full pass runs only on the chunks that
+    ///     actually change a width. (`_layoutPinnedColumns` refreshes availability itself at the end.)
     ///   - Nothing pinned yet: there are no offsets to lay out, but the table may have just grown
     ///     wide enough to scroll horizontally, which is what reveals and enables the pin toggles.
     ///     Refresh only that availability (O(columns), no per-row reflow) so a user can pin a column
@@ -2977,7 +3009,9 @@ class QueryResultElement extends HTMLElement
         if (this._willTranspose()) { return; }
         if (this._hasPinnedColumns())
         {
-            this._layoutPinnedColumns(newRows);
+            const { left_offset, right_offset } = this._computePinnedOffsets();
+            const changed = this._pinnedOffsetsKey(left_offset, right_offset) !== this._pinnedLayoutKey;
+            this._layoutPinnedColumns(changed ? this._pinnableRows() : newRows);
         }
         else
         {
