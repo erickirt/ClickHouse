@@ -5,6 +5,7 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/MetadataOperationsHolder.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableLayout.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableMetrics.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/TransactionPreconditions.h>
 #include <Disks/DiskObjectStorage/ObjectStorages/StoredObject.h>
 
 #include <memory>
@@ -98,6 +99,7 @@ protected:
     /// maintain uncommitted directory tree that was populated during metadata transaction filling to be able
     /// to extrace remote path of directory during nested file creation in the same transaction.
     std::shared_ptr<InMemoryDirectoryTree> uncommitted_fs_tree;
+    std::shared_ptr<TransactionPreconditions> preconditions;
     MetadataOperationsHolder operations;
     StoredObjects removed_objects;
 

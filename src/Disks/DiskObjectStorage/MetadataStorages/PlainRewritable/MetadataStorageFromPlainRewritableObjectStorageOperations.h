@@ -5,6 +5,7 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/Plain/MetadataStorageFromPlainObjectStorage.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableLayout.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableMetrics.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/TransactionPreconditions.h>
 
 #include <filesystem>
 #include <memory>
@@ -13,31 +14,15 @@
 namespace DB
 {
 
-class MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation final : public IMetadataOperation
+class MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation final : public IMetadataOperation
 {
 private:
-    const std::filesystem::path path;
-    const std::string expected_remote_path;
+    const std::shared_ptr<TransactionPreconditions> preconditions;
     const std::shared_ptr<InMemoryDirectoryTree> fs_tree;
 
 public:
-    MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation(
-        std::filesystem::path path_,
-        std::string expected_remote_path_,
-        std::shared_ptr<InMemoryDirectoryTree> fs_tree_);
-
-    void execute() override;
-};
-
-class MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation final : public IMetadataOperation
-{
-private:
-    const std::filesystem::path path;
-    const std::shared_ptr<InMemoryDirectoryTree> fs_tree;
-
-public:
-    MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation(
-        std::filesystem::path path_,
+    MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation(
+        std::shared_ptr<TransactionPreconditions> preconditions_,
         std::shared_ptr<InMemoryDirectoryTree> fs_tree_);
 
     void execute() override;
