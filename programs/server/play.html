@@ -7184,6 +7184,18 @@ function resolveTabForState(state) {
 }
 
 window.onpopstate = function(event) {
+    /// A Back/Forward navigation supersedes the page-load URL that `reconcileStartup` is still
+    /// reconciling in the background. Its bootstrap state (`current_url`, `url_query`, `url_tab_name`,
+    /// `run_immediately`, `url_color_modes`) was snapshotted once at load, so if this `popstate`
+    /// lands before reconciliation finishes its `loadFromDb`/`activateTab`/`updateQueryParams`
+    /// awaits, that older reconcile could still switch back to the original tab, re-apply the
+    /// original URL params/colors and fire the original deferred `run=1` on top of the entry the
+    /// user just navigated to. Mark the workspace dirty — exactly as tab switches, closes and
+    /// connection edits do — so every remaining `!bootstrap_dirty`-gated branch of reconciliation
+    /// (the dirty-startup merge, the URL parameter restore and the auto-run) yields to this
+    /// navigation instead of overwriting it. A genuine Back/Forward is a trusted event, so it is
+    /// not filtered as synthetic; once reconciliation has settled this is a no-op (`bootstrap_settled`).
+    markBootstrapDirty(event);
     if (!event.state) return;
     captureActiveTab();
     /// `buildHistoryParams` serializes the `url`/`user` in effect when this entry was written
