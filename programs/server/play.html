@@ -2878,6 +2878,16 @@ class QueryResultElement extends HTMLElement
             return;
         }
 
+        this._layoutPinnedColumns(this._pinnableRows());
+    }
+
+    /// Shared core of the pinned-column layout: recompute the per-column sticky offsets from the
+    /// current header widths, then mark (or clear) the pinned state on the header cells and on the
+    /// given data rows, and refresh horizontal-scroll availability. `applyPinnedColumns` passes
+    /// every body/totals row for a full (re)layout; `_pinStreamedRows` passes only the rows a
+    /// streaming chunk just appended, so the per-chunk work stays proportional to the new rows.
+    _layoutPinnedColumns(rows)
+    {
         const thead = this._dataTable.tHead;
         const header_len = this._header.length;
         /// Cell index in a row for data column `j` (the leading row-number cell is at index 0).
@@ -2904,7 +2914,6 @@ class QueryResultElement extends HTMLElement
             acc += thead.children[cellIndex(j)].offsetWidth;
         }
 
-        const rows = this._pinnableRows();
         for (let j = 0; j < header_len; ++j)
         {
             const idx = cellIndex(j);
@@ -2941,6 +2950,23 @@ class QueryResultElement extends HTMLElement
         }
 
         this._updatePinAvailability();
+    }
+
+    /// Lay out the pinned columns of the rows a streaming chunk just appended, so a wide result
+    /// restored from a shared `?pinned_columns=...&run=1` link keeps those columns sticky while the
+    /// response is still streaming, rather than snapping into the pinned state only when
+    /// `applyColumnColors` runs at EOF. Only the freshly appended rows are laid out (plus the
+    /// header, which is cheap), keeping the per-chunk cost proportional to the new rows instead of
+    /// re-sweeping the whole table each chunk. The final `applyPinnedColumns` pass re-lays out every
+    /// row with the final column widths, so any offset drift from columns that widened mid-stream is
+    /// corrected then. A no-op unless some column is pinned: an ordinary (unpinned) streamed result
+    /// keeps deferring all layout to EOF, so it pays no per-chunk reflow.
+    _pinStreamedRows(newRows)
+    {
+        if (!Array.isArray(this._header) || !this._dataTable.tHead) { return; }
+        if (this._willTranspose()) { return; }
+        if (!this._hasPinnedColumns()) { return; }
+        this._layoutPinnedColumns(newRows);
     }
 
     /// Reflect whether this table can be scrolled horizontally onto the `has-hscroll` class, which
@@ -5494,7 +5520,13 @@ async function postImpl(posted_request_num, query, targetResultEl, abortControll
                     if (!cont) { break; }
                 }
 
+                /// The rows this chunk appended: captured before `flushFragment` empties the
+                /// fragment, but the node references stay valid after the move into the table body.
+                const streamed_rows = fragment.querySelectorAll('tr');
                 targetResultEl.flushFragment(fragment);
+                /// Keep pinned columns sticky as the table streams (a no-op unless a column is
+                /// pinned, e.g. when a wide `?pinned_columns=...&run=1` link is opened).
+                targetResultEl._pinStreamedRows(streamed_rows);
 
                 if (!cont)
                 {
