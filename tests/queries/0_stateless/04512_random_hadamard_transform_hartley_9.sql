@@ -29,8 +29,9 @@ SELECT arrayMap(x -> round(x, 4), randomHadamardTransform(CAST(range(18), 'Array
 SELECT randomHadamardTransform(CAST(range(18), 'Array(Float32)'), 42) = randomHadamardTransform(CAST(range(18), 'Array(Float32)'), 42);
 SELECT randomHadamardTransform(CAST(range(18), 'Array(Float32)'), 1) = randomHadamardTransform(CAST(range(18), 'Array(Float32)'), 2);
 
--- output_dims truncates a DHT Kronecker transform (subsampled projection); it must not exceed the
--- input dimension.
+-- output_dims produces a subsampled projection. A genuine truncation of the 2^k * 9 family falls back
+-- to the zero-padded power-of-two transform (the exact C_9 rows are not uniform-leverage, so truncating
+-- them would be position-biased); an output_dims above the input length still throws.
 SELECT length(randomHadamardTransform(CAST(range(1152), 'Array(Float32)'), 7, 500));
 SELECT randomHadamardTransform(CAST(range(9), 'Array(Float32)'), 0, 16); -- { serverError ARGUMENT_OUT_OF_BOUND }
 

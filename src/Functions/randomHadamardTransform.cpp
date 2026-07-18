@@ -48,6 +48,10 @@
   *   the length 2^k * 9 family (e.g. 1152 = 128 * 9) the small factor is a real orthogonal Discrete
   *   Hartley Transform matrix C_9 applied with float multiplies: the exact Kronecker product
   *   H_(2^k) (x) C_9, again without padding. See buildHartleyMatrix / kroneckerHartleyScalar.
+  *   Unlike the +-1 Hadamard factors, C_9's rows do not have uniform leverage, so a truncated prefix of
+  *   them is a position-biased projection instead of a valid SRHT one. The exact C_9 path is therefore
+  *   used only for the full transform; a genuine truncation (output_dims < length) of the 2^k * 9 family
+  *   falls back to the zero-padded power-of-two FWHT, which does have the uniform-leverage property.
   */
 namespace DB
 {
@@ -187,7 +191,25 @@ private:
                 /// factor, or m = 9 via a DHT factor); otherwise zero-pad to the next power of two.
                 /// The working dimension is the input length in the exact case and the padded length
                 /// otherwise.
-                const auto [kron_m, kron_blocks, kron_kind] = kroneckerFactorFor(length);
+                auto [kron_m, kron_blocks, kron_kind] = kroneckerFactorFor(length);
+
+                /// The dense order-9 Hartley small factor C_9 is orthogonal, so the full transform is
+                /// norm-preserving, but its rows do NOT have uniform leverage, unlike the +-1 Hadamard
+                /// factors. A truncated prefix of C_9 rows is therefore a position-biased projection
+                /// rather than a valid Johnson-Lindenstrauss / SRHT one -- e.g. for length 18 and
+                /// output_dims 2 a one-hot input at lane 1 comes out with squared norm ~1.49 while lane 8
+                /// gives ~0.51. So the exact C_9 path is kept only for the full transform; a genuine
+                /// truncation (output_dims < length) of the 2^k * 9 family falls back to the zero-padded
+                /// power-of-two FWHT, whose flat +-1 rows give a correct truncated projection. The +-1
+                /// Hadamard Kronecker factors (m in {12, 20}) keep uniform leverage under truncation and
+                /// are unaffected. An output_dims larger than length still throws below in every case.
+                if (kron_kind == SmallFactorKind::Hartley && fixed_out_dims != 0 && fixed_out_dims < length)
+                {
+                    kron_m = 0;
+                    kron_blocks = 0;
+                    kron_kind = SmallFactorKind::None;
+                }
+
                 const size_t working_dim = kron_m ? length : std::bit_ceil(length);
                 const size_t k = fixed_out_dims ? fixed_out_dims : working_dim;
                 if (k > working_dim)
@@ -294,7 +316,11 @@ rather than growing to the next power of two.
 Order `9` has no `+/-1` Hadamard matrix (those exist only for orders `1`, `2`, and multiples of
 `4`), so for the `2^k * 9` family (e.g. `1152 = 128 * 9`, `2304 = 256 * 9`) the small factor is a
 real orthogonal Discrete Hartley Transform matrix `C_9` applied with float multiplies -- the exact
-Kronecker transform `H_(2^k) (x) C_9`, again without padding.
+Kronecker transform `H_(2^k) (x) C_9`, again without padding. This exact `C_9` path is used only for
+the full transform: its rows do not have the uniform leverage of a `+/-1` Hadamard matrix, so a
+truncated prefix of them would be a position-biased projection rather than a valid SRHT one.
+Consequently, a truncating `output_dims` (smaller than the input length) on the `2^k * 9` family
+falls back to the zero-padded power-of-two transform, which does keep that property.
 
 All other lengths are zero-padded to `m`, the next power of two.
 
@@ -305,7 +331,9 @@ The result has the same element type as the input; an empty input array returns 
 - `output_dims` (optional, default the transform length): keeps only the first `output_dims`
   coordinates. The `1/sqrt(output_dims)` scaling keeps the result norm-preserving for the full
   transform and norm-preserving in expectation when truncated. It must not exceed the transform
-  length (the next power of two, or the input length for the exact Kronecker case).
+  length (the next power of two, or the input length for the exact Kronecker case). Truncating the
+  `2^k * 9` family uses the zero-padded power-of-two transform rather than the exact `C_9` one, so
+  that the truncated projection keeps the uniform-leverage (SRHT) property.
 )DOCS_MD";
     FunctionDocumentation::Syntax syntax = "randomHadamardTransform(vector[, seed[, output_dims]])";
     FunctionDocumentation::Arguments arguments = {
