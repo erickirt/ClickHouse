@@ -1,5 +1,5 @@
 /// Measures `Base::BUCKET_DENSITY_TO_ENABLE_RANGE_SCAN`: how a `timeSeries*ToGrid` finalize should visit its buckets in index
-/// order. The buckets live in the production container `HashMap<UInt64, Bucket, TrivialHash, HashTableGrower<4>>`
+/// order. The buckets live in the production container `TimeSeriesBucketsMap` (a `HashMap` with `TrivialHash`)
 /// keyed by an index in `[0, bucket_count)`; finalize must process them in ascending index order. Two strategies,
 /// swept across densities:
 ///   - range scan: walk index 0..bucket_count and `find` each (the "dense" path); O(bucket_count).
@@ -25,10 +25,9 @@
 /// Build: it is part of the `clickhouse-examples` multi-call binary.
 /// Run:   `clickhouse-examples timeseries_to_grid_range_scan_vs_std_sort`
 
+#include <AggregateFunctions/TimeSeries/AggregateFunctionTimeseriesBase.h>
 #include <AggregateFunctions/TimeSeries/AggregateFunctionTimeseriesSamples.h>
 
-#include <Common/HashTable/Hash.h>
-#include <Common/HashTable/HashMap.h>
 #include <Common/Stopwatch.h>
 #include <Common/VectorWithMemoryTracking.h>
 
@@ -57,7 +56,7 @@ constexpr Int64 STEP = 10;
 constexpr int REPEATS = 5;  /// timing iterations per measurement; the minimum over them is used
 
 using Bucket = AggregateFunctionTimeseriesSamples<UInt32, Float64>;
-using Buckets = HashMap<UInt64, Bucket, TrivialHash, HashTableGrower<4>>;  /// same type as production's bucket map
+using Buckets = TimeSeriesBucketsMap<Bucket>;  /// the production bucket map type
 using Dataset = std::vector<Buckets>;  /// one Buckets map per series; STYLE_CHECK_ALLOW_STD_CONTAINERS
 
 /// One populated bucket and its index, for the collect-and-sort strategy. Sorted by `index`.

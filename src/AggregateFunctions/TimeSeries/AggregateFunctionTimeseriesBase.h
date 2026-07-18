@@ -34,6 +34,24 @@ namespace ErrorCodes
     extern const int INCORRECT_DATA;
 }
 
+/// Grower for the bucket maps. The stock `HashTableGrower` quadruples the buffer below `max_size_degree`,
+/// which leaves the table at a load factor as low as ~0.125; with the whole `Bucket` stored in every cell that
+/// wastes a lot of memory across many aggregation states. Doubling keeps the same worst-case load factor (0.5)
+/// with at most half the slots of quadrupling.
+struct TimeSeriesBucketsHashTableGrower : public HashTableGrower<4>
+{
+    void increaseSize()
+    {
+        ++size_degree;
+    }
+};
+
+/// The bucket map of the `timeSeries*ToGrid` aggregation states: maps a bucket index in `[0, bucket_count)` to
+/// the bucket's aggregate data. Also used by the `timeseries_to_grid_range_scan_vs_std_sort` example, which
+/// tunes `BUCKET_DENSITY_TO_ENABLE_RANGE_SCAN` for this exact container.
+template <typename Bucket>
+using TimeSeriesBucketsMap = HashMap<UInt64, Bucket, TrivialHash, TimeSeriesBucketsHashTableGrower>;
+
 /// Base class for time series aggregate functions that map values to a grid specified by start timestamp, end timestamp, step and window.
 /// It implements the common logic for handling input data as either scalar timestamps and values or vectors of timestamps and values of
 /// equal sizes and adding the data to the grid buckets. The actual aggregation logic within buckets is implemented in derived classes.
@@ -407,7 +425,7 @@ private:
     struct State
     {
         /// Maps bucket index to the set of all timestamps and values
-        HashMap<UInt64, Bucket, TrivialHash, HashTableGrower<4>> buckets;
+        TimeSeriesBucketsMap<Bucket> buckets;
     };
 
     static DataTypePtr createResultType()
