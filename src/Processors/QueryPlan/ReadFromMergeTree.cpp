@@ -4086,7 +4086,8 @@ void ReadFromMergeTree::initializePipeline(QueryPipelineBuilder & pipeline, [[ma
         && !pending_mutations
         /// Not supported under parallel replicas: the descriptor is not carried to remote replica
         /// reads, so pruning would only cover the local replica's share. Skip it entirely there.
-        && !isParallelReadingFromReplicas())
+        && !isParallelReadingFromReplicas()
+        && indexes.has_value())
     {
         /// The PK path only needs the data-read safety checks above; only the secondary skip-index
         /// part is gated by use_skip_indexes (buildIndexes builds key_condition_rpn_template regardless).
