@@ -407,7 +407,7 @@ private:
     struct State
     {
         /// Maps bucket index to the set of all timestamps and values
-        HashMap<UInt64, Bucket, DefaultHash<UInt64>, HashTableGrower<4>> buckets;
+        HashMap<UInt64, Bucket, TrivialHash, HashTableGrower<4>> buckets;
     };
 
     static DataTypePtr createResultType()
