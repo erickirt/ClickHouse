@@ -34,9 +34,12 @@ FROM qbit_recon ORDER BY id;
 DROP TABLE qbit_recon;
 
 -- Read out the reconstructed first coordinate through a dot product with a one-hot reference vector.
--- BFloat16 1.0 is 0x3F80: at precision 1 only the sign survives and the centre fill gives +-2.0 (not +-0.0);
--- at precision 8 the fill restores the dropped exponent LSB, reconstructing 1.0 exactly; at precision 9 the
--- most significant dropped mantissa bit is set, giving 1.5; precision 16 keeps all bits.
+-- BFloat16 1.0 is 0x3F80 (exponent bits E = 8). At precision 1 only the sign survives and the centre fill sets the
+-- top exponent bit, giving a bounded +-2.0 (not the degenerate +-0.0). At precision 8 an exponent bit is still being
+-- truncated, so setting the most significant dropped bit would jump across binades; the bounded lower edge of the
+-- coarse cell is kept instead, reconstructing 0.5. At precision 9 the whole exponent is kept and only mantissa bits
+-- are dropped, so the most significant dropped mantissa bit is set (bounded midpoint within the binade), giving 1.5.
+-- Precision 16 keeps all bits.
 SELECT '-- BFloat16 reconstruction of +-1.0 at precisions 1, 8, 9, 16';
 WITH [1.0, -1.0]::QBit(BFloat16, 2) AS v, [1.0, 0.0]::Array(BFloat16) AS first, [0.0, 1.0]::Array(BFloat16) AS second
 SELECT dotProductTransposed(v, first, 1), dotProductTransposed(v, second, 1),
@@ -54,10 +57,12 @@ SELECT '-- Int8 reconstruction of 100 and -100 at precision 1 (cell centre +-64,
 WITH [100, -100]::QBit(Int8, 2) AS v, [1, 0]::Array(Int8) AS first, [0, 1]::Array(Int8) AS second
 SELECT dotProductTransposed(v, first, 1), dotProductTransposed(v, second, 1);
 
--- A stored 0 must stay 0 at reduced precision, otherwise the generic centre fill turns an all-zero float cell into a
--- positive constant, injecting a fake direction into zero or padded dimensions (so reduced-precision cosine distance
--- would report identical zero vectors as maximally dissimilar). At precision >= 2 the retained exponent bits mark the
--- all-zero cell as genuinely near-zero, so a float type keeps it at exact 0; the reviewer's repro then yields 0, not 1.
+-- A stored 0 must stay 0 at reduced precision, otherwise a naive centre fill of every cell turns an all-zero float
+-- cell into a positive constant, injecting a fake direction into zero or padded dimensions (so reduced-precision
+-- cosine distance would report identical zero vectors as maximally dissimilar). For a float at precision >= 2 the
+-- all-zero cell reconstructs to exact 0: while exponent bits are truncated the bounded lower edge is kept (no centre),
+-- and once only mantissa bits are dropped the all-zero cell is collapsed back to 0. The reviewer's repro then yields
+-- 0, not 1.
 SELECT '-- Zero cell: reduced-precision cosine of identical zero BFloat16 vectors is 0, not 1';
 SELECT cosineDistanceTransposed([0.0]::QBit(BFloat16, 1), [0.0]::Array(BFloat16), 8) AS bf16_zero_cos_p8;
 
@@ -76,3 +81,12 @@ SELECT dotProductTransposed(v, first, 1) AS f64_p1, dotProductTransposed(v, firs
 SELECT '-- Int8 keeps the unconditional centre for its all-zero cell';
 WITH [0, 100]::QBit(Int8, 2) AS v, [1, 0]::Array(Int8) AS first
 SELECT dotProductTransposed(v, first, 2) AS int8_zero_p2;
+
+-- Truncating exponent bits must keep magnitudes bounded: a smaller precision trades accuracy for speed, it must not
+-- blow the value up by orders of magnitude (which would also make the squared result architecture-sensitive across
+-- SIMD kernels). The most significant dropped bit is an exponent bit at these precisions, so the bounded lower edge of
+-- the coarse cell is kept instead of a bit-space centre that would jump across binades. Before this fix the Float64
+-- case reconstructed ~3.3e77 and the Float32 case ~1.3e5; both must now stay small and portable.
+SELECT '-- Exponent-truncation reconstruction stays bounded (no magnitude explosion)';
+SELECT round(L2DistanceTransposed([1, 2, 3]::QBit(Float64, 3), [1, 2, 3]::Array(Float64), 3), 1) AS f64_p3,
+       round(L2DistanceTransposed([2, 2, 2]::QBit(Float32, 3), [0, 0, 0]::Array(Float32), 4), 1) AS f32_p4;

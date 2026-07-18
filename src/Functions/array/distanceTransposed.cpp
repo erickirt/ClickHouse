@@ -663,7 +663,10 @@ private:
     /// `planes` holds `num_groups * precision` FixedString bit-plane columns in group-major order (plane[g * precision + b]).
     /// Each stride group is untransposed into its own contiguous slice of the reconstructed `used_dims`-element vector.
     /// A value truncated to `precision` bit planes is reconstructed to the centre of its coarse cell (the most significant dropped
-    /// bit is set), not to the cell's lower edge, mirroring `LloydMax::transposedDequantLUT` on the quantized path.
+    /// bit is set), mirroring `LloydMax::transposedDequantLUT` on the quantized path - but only while the centre stays a bounded,
+    /// value-space-meaningful estimate: for a float that is sign-only truncation (`precision == 1`) or mantissa truncation
+    /// (`precision > exponent_bits`); once `precision` truncates exponent bits the bounded lower edge is kept instead of a
+    /// centre that would jump across binades. See the reconstruction block below for the full reasoning.
     template <typename RefT, typename CalcT, bool ref_is_const>
     ColumnPtr executeDistanceCalculation(
         const ColumnArray & col_y,
@@ -760,26 +763,40 @@ private:
                 }
             }
 
-            /// Round each cell to its centre by setting the most significant dropped bit.
+            /// Reconstruct each truncated cell by setting the most significant dropped bit (`centre_fill`), rounding to the coarse
+            /// cell's centre - but only where that is a bounded, value-space-meaningful approximation. The centre is applied:
             ///
-            /// For a floating-point element type at `precision >= 2` at least one exponent bit is retained, so an all-zero kept
-            /// prefix forces the exponent to (near) its minimum and denotes a value whose magnitude is below the reconstruction's
-            /// resolution - genuinely near zero. Such words are left at exact `0` instead of the generic centre, so a stored `0`
-            /// (and padded dimensions) reconstruct to `0` rather than a fake positive constant; this avoids injecting a spurious
-            /// direction that would otherwise make reduced-precision cosine distance report identical zero vectors as maximally
-            /// dissimilar. A word is in this all-zero cell exactly when it is still zero after the kept planes have been OR-ed on
-            /// top, because `centre_fill` lies strictly below those planes. Padding words stay zero (never read by the kernel).
+            ///  - `Int8` element type (the raw sibling of `...TransposedQuantized`): the code is a linear integer, so its centre
+            ///    is the bounded midpoint of the code range. It is applied to every word (including exact `0`), matching the
+            ///    `...TransposedQuantized` LUT which likewise reconstructs every truncated code to its cell centre.
             ///
-            /// The centre is instead applied unconditionally in two cases:
-            ///  - `precision == 1`: only the sign bit is kept, i.e. pure sign quantization, in which every non-negative value -
-            ///    including exact `0`, whose sign bit is also `0` - shares the all-zero kept prefix and is indistinguishable from a
-            ///    positive. Collapsing that cell to `0` would map every positive to `0` and defeat the sign quantization, so `0`
-            ///    takes the positive sign (`+centre`), as it must.
-            ///  - `Int8` element type: an integer code has no exponent, so an all-zero kept prefix is just a uniform range of small
-            ///    non-negative values rather than a near-zero magnitude; its `...TransposedQuantized` sibling likewise fills every
-            ///    truncated code, so the raw path keeps the same unconditional centre.
-            const bool collapse_zero_cell = precision >= 2 && !std::is_same_v<CalcT, Int8>;
-            if (centre_fill)
+            ///  - `precision == 1` for a float: only the sign bit is kept (pure sign quantization). The single dropped bit set is
+            ///    the top exponent bit, reconstructing a bounded +-2.0, so every value keeps just its sign as +-2.0. This is the
+            ///    fix for the degenerate 1-bit reconstruction; it is applied to every word - including exact `0`, whose sign bit
+            ///    is `0`, so it takes `+2.0` and stays distinguishable from a genuine positive instead of collapsing every
+            ///    positive back to `0` and defeating the sign quantization.
+            ///
+            ///  - `precision > exponent_bits` for a float: the whole exponent is kept and only mantissa bits are dropped, so the
+            ///    centre is the bounded midpoint within the value's own binade. An all-zero word then means sign `0` and exponent
+            ///    `0` (a genuine `+0` or subnormal), so it is left at exact `0` rather than a tiny fake positive; this keeps a
+            ///    stored `0` (and padded dimensions) at `0` and avoids injecting a spurious direction that would otherwise make
+            ///    reduced-precision cosine distance report identical zero vectors as maximally dissimilar. A word is in this
+            ///    all-zero cell exactly when it is still zero after the kept planes have been OR-ed on top, because `centre_fill`
+            ///    lies strictly below those planes. Padding words stay zero (never read by the kernel).
+            ///
+            /// For a float at `2 <= precision <= exponent_bits` the most significant dropped bit is an *exponent* bit, so setting
+            /// it is a multiplicative jump across many binades - not a usable approximation in value space, and (once squared in
+            /// the kernel) architecture-sensitive. There the bounded lower edge of the coarse exponent cell is kept instead (no
+            /// centre), as before this reconstruction change: a smaller `precision` then trades accuracy for speed without blowing
+            /// magnitudes up by orders of magnitude, as the function contract requires.
+            constexpr bool is_int8 = std::is_same_v<CalcT, Int8>;
+            /// BFloat16 and Float32 both carry an 8-bit exponent; Float64 carries 11. Unused for Int8.
+            constexpr size_t exponent_bits = std::is_same_v<CalcT, Float64> ? 11 : 8;
+
+            const bool apply_centre = is_int8 || precision == 1 || precision > exponent_bits;
+            const bool collapse_zero_cell = !is_int8 && precision > exponent_bits;
+
+            if (centre_fill && apply_centre)
             {
                 Word * words = reinterpret_cast<Word *>(block.data());
                 if (collapse_zero_cell)

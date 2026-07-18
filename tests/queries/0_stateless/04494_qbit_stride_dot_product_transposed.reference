@@ -13,8 +13,8 @@ Full-dimension strided search (3-arg form reads all stride groups)
 1	1360
 2	680
 Reduced precision on first 8 dims
-1	196
-2	448
+1	98
+2	224
 Nullable precision / dims propagate to a Nullable result
 Nullable(Float64)
 Nullable(Float64)

@@ -16,7 +16,7 @@
 3	6.4807
 4	6.7823
 -- BFloat16 reconstruction of +-1.0 at precisions 1, 8, 9, 16
-2	-2	1	-1	1.5	-1.5	1	-1
+2	-2	0.5	-0.5	1.5	-1.5	1	-1
 -- Float32 and Float64 reconstruction of +-1.0 at precision 1
 2	-2
 2	-2
@@ -30,3 +30,5 @@
 2	0	0
 -- Int8 keeps the unconditional centre for its all-zero cell
 32
+-- Exponent-truncation reconstruction stays bounded (no magnitude explosion)
+1.4	3.5
