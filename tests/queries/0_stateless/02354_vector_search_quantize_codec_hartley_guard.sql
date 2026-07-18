@@ -52,9 +52,11 @@ SELECT 'code_length_1152', length(vec.quantized) FROM quantize_1152 GROUP BY len
 -- Contract: the 144 sign bytes of the 1152 code equal the leading 144 sign bytes of the 2048 (zero-padded) code, proving
 -- the codec still zero-pads 1152 to 2048 rather than taking the exact order-9 Hartley path. If the codec silently started
 -- using `kroneckerFactorFor` directly, the signs would differ and this would return 0.
-SELECT 'signs_match_padded_2048',
-    (SELECT groupArray(hex(substring(vec.quantized, 1, 144))) FROM (SELECT id, vec FROM quantize_1152 ORDER BY id))
-    = (SELECT groupArray(hex(substring(vec.quantized, 1, 144))) FROM (SELECT id, vec FROM quantize_2048 ORDER BY id));
+-- The `vec.quantized` subcolumn is read directly from each table (it does not survive a `SELECT id, vec` subquery
+-- boundary under the old analyzer), then compared per id via a join, so the result does not depend on aggregation order.
+SELECT 'signs_match_padded_2048', min(a.code = b.code)
+FROM (SELECT id, hex(substring(vec.quantized, 1, 144)) AS code FROM quantize_1152) AS a
+ALL INNER JOIN (SELECT id, hex(substring(vec.quantized, 1, 144)) AS code FROM quantize_2048) AS b USING (id);
 
 DROP TABLE quantize_1152;
 DROP TABLE quantize_2048;
