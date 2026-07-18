@@ -426,11 +426,13 @@ private:
     /// `doInsertResultInto` visits the populated buckets in index order. When the fraction of populated bucket
     /// slots (`populated / bucket_count`) is at least this, scanning the whole index range and looking each up in
     /// the hash map is cheaper than collecting and sorting the populated buckets; below it (sparse data) the
-    /// collect-and-sort wins. The `timeseries_to_grid_range_scan_vs_std_sort` example measures the crossover density at
-    /// ~0.4; it depends on the bucket map's memory layout (~0.45 when buckets sit in index order, ~0.37 when
-    /// scattered as after a merge, so 0.4 is the middle). That example also shows comparison sorting beats a radix
-    /// sort here, so the sparse path uses `::sort` (pdqsort).
-    static constexpr double BUCKET_DENSITY_TO_ENABLE_RANGE_SCAN = 0.4;
+    /// collect-and-sort wins. The `timeseries_to_grid_range_scan_vs_std_sort` example measures the two strategies
+    /// over the production bucket map (`HashMap` with `TrivialHash`): the range scan still wins at density 0.35
+    /// (by ~6-8%) and loses at 0.30 (~9%), so the threshold is 0.35. With `TrivialHash` open addressing a cell's
+    /// position is determined by the key, not the insertion order, so the crossover does not depend on how the map
+    /// was filled (bulk adds or a merge). That example also shows comparison sorting beats a radix sort here, so
+    /// the sparse path uses `::sort` (pdqsort).
+    static constexpr double BUCKET_DENSITY_TO_ENABLE_RANGE_SCAN = 0.35;
 
     static constexpr UInt16 FORMAT_VERSION = FunctionImpl::FORMAT_VERSION;
 
