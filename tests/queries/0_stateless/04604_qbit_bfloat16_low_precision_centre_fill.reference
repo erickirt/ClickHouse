@@ -32,3 +32,5 @@
 32
 -- Exponent-truncation reconstruction stays bounded (no magnitude explosion)
 1.4	3.5
+-- Signed zero (-0.0) reconstructs to a zero, not a subnormal (mantissa-truncation regime)
+0	0	0	0

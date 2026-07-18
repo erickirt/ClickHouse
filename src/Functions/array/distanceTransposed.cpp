@@ -777,12 +777,14 @@ private:
             ///    positive back to `0` and defeating the sign quantization.
             ///
             ///  - `precision > exponent_bits` for a float: the whole exponent is kept and only mantissa bits are dropped, so the
-            ///    centre is the bounded midpoint within the value's own binade. An all-zero word then means sign `0` and exponent
-            ///    `0` (a genuine `+0` or subnormal), so it is left at exact `0` rather than a tiny fake positive; this keeps a
-            ///    stored `0` (and padded dimensions) at `0` and avoids injecting a spurious direction that would otherwise make
-            ///    reduced-precision cosine distance report identical zero vectors as maximally dissimilar. A word is in this
-            ///    all-zero cell exactly when it is still zero after the kept planes have been OR-ed on top, because `centre_fill`
-            ///    lies strictly below those planes. Padding words stay zero (never read by the kernel).
+            ///    centre is the bounded midpoint within the value's own binade. A word whose exponent and kept mantissa bits are
+            ///    all zero is the zero cell (a genuine `+0`/`-0` or subnormal), so it is left at exact zero rather than a tiny fake
+            ///    magnitude; this keeps a stored `0` (and padded dimensions) at `0` and avoids injecting a spurious direction that
+            ///    would otherwise make reduced-precision cosine distance report identical zero vectors as maximally dissimilar. A
+            ///    word is in this zero cell exactly when it is still zero *after masking off the sign bit* - so both `+0.0` (an
+            ///    all-zero word) and `-0.0` (only the sign bit kept) stay zero; `centre_fill` lies strictly below the kept planes,
+            ///    so any word outside the zero cell keeps at least one non-sign bit and is centred. Padding words stay zero (never
+            ///    read by the kernel).
             ///
             /// For a float at `2 <= precision <= exponent_bits` the most significant dropped bit is an *exponent* bit, so setting
             /// it is a multiplicative jump across many binades - not a usable approximation in value space, and (once squared in
@@ -801,8 +803,12 @@ private:
                 Word * words = reinterpret_cast<Word *>(block.data());
                 if (collapse_zero_cell)
                 {
+                    /// Detect the zero cell after masking off the sign bit: `+0.0` (an all-zero word) and `-0.0` (only the sign
+                    /// bit kept) are both the zero cell and must stay zero rather than gaining a spurious tiny magnitude from
+                    /// `centre_fill`, which would otherwise turn a stored `-0.0` into a non-zero negative subnormal.
+                    constexpr Word non_sign_mask = static_cast<Word>(~(Word(1) << (sizeof(Word) * 8 - 1)));
                     for (size_t i = 0; i < words_in_block; ++i)
-                        if (words[i] != 0)
+                        if ((words[i] & non_sign_mask) != 0)
                             words[i] |= centre_fill;
                 }
                 else

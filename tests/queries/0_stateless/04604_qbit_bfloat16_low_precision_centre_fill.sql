@@ -90,3 +90,16 @@ SELECT dotProductTransposed(v, first, 2) AS int8_zero_p2;
 SELECT '-- Exponent-truncation reconstruction stays bounded (no magnitude explosion)';
 SELECT round(L2DistanceTransposed([1, 2, 3]::QBit(Float64, 3), [1, 2, 3]::Array(Float64), 3), 1) AS f64_p3,
        round(L2DistanceTransposed([2, 2, 2]::QBit(Float32, 3), [0, 0, 0]::Array(Float32), 4), 1) AS f32_p4;
+
+-- In the mantissa-truncation regime (precision > exponent bits) the all-zero cell is collapsed back to zero, but the
+-- test for the zero cell must be made after masking off the sign bit: `-0.0` keeps only the sign bit, so a naive
+-- `word != 0` check would OR the centre fill into it and reconstruct a non-zero negative subnormal instead of a signed
+-- zero. Read the reconstructed first coordinate back through a dot product with a unit reference: a stored `-0.0` must
+-- reconstruct to exactly 0. For Float64 the subnormal is directly visible (before the fix this returned the subnormal
+-- -2^-1023 ~ -1.11e-308); for BFloat16/Float32 the SIMD kernels flush subnormals to zero, but the reconstruction was
+-- equally wrong. The reviewer's cosine repro of two identical signed-zero vectors is then 0 (identical, not dissimilar).
+SELECT '-- Signed zero (-0.0) reconstructs to a zero, not a subnormal (mantissa-truncation regime)';
+SELECT dotProductTransposed([-0.0]::QBit(Float64, 1), [1.0]::Array(Float64), 12) AS f64_neg_zero_dot,
+       dotProductTransposed([-0.0]::QBit(Float32, 1), [1.0]::Array(Float32), 9) AS f32_neg_zero_dot,
+       dotProductTransposed([-0.0]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_neg_zero_dot,
+       cosineDistanceTransposed([-0.0]::QBit(BFloat16, 1), [-0.0]::Array(BFloat16), 9) AS bf16_neg_zero_cos;
