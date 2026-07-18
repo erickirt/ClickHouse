@@ -3866,6 +3866,26 @@ function markBootstrapDirty(e) {
     bootstrap_dirty = true;
 }
 
+/// Set by `writeHistoryEntry` the moment it writes the current history entry WITHOUT `run=1`,
+/// cancelling the URL's deferred `run=1` auto-run if it is still pending: the live URL no longer
+/// requests an auto-run, so executing the deferred `postAll` anyway would run the shared query
+/// against a database, server/user or edited query/params the link never specified. Centralizing
+/// the cancellation in the history-write funnel (rather than at each trusted action that can end
+/// up clearing `run=1` — a database-panel click, a connection-field edit, a query/param edit, a
+/// tab switch) means no future caller needs to remember to set it. The funnel has two mouths:
+/// `writeHistoryEntry` for an entry that can be written, and `refreshCurrentHistoryEntry`'s bail
+/// for a current entry that CANNOT (during startup it can still belong to a tab of the previous
+/// page instance — `history.state` survives a reload — until `reconcileStartup` rebinds it); the
+/// bail applies the same `carries_run` rule, so the cancellation is not lost with the write.
+/// `bootstrap_dirty` cannot carry this
+/// signal: none of those actions is a workspace edit (the saved tabs must still be restored and
+/// reconciled as usual), and the pending window extends past `bootstrap_settled` (`reconcileStartup`
+/// keeps awaiting — tab activation, parameter reconciliation — after settling, and
+/// `markBootstrapDirty` ignores events from then on). The query itself is untouched: it stays in
+/// the editor, targeting the fresh selection/connection/edit, and the user can still run it
+/// explicitly.
+let deferred_run_cancelled = false;
+
 const current_url = new URL(window.location);
 const opened_locally = location.protocol == 'file:';
 
@@ -4071,6 +4091,60 @@ async function getServerStatus(server_address, user, password) {
 /// databases (those that still exist).
 let opened_databases = new Set();
 
+/// The database the user selected in the database panel. When set, it is passed as the
+/// default database (`&database=`) for queries run from the editor, so unqualified table
+/// names resolve against it. It is cleared when the connection identity changes (see
+/// `resetConnectionScopedState`), since it refers to a database on the previous connection; a
+/// connection-field edit that does not change the semantic identity — a cosmetic URL normalization
+/// or a password-only change — keeps it.
+/// The selection is committed synchronously on the panel click by `commitSelectedDatabase` (not
+/// after the table list finishes loading), so a `Run` issued before the load returns already
+/// targets it. It is a connection-scoped setting (like the server address and user), so it is
+/// seeded from the URL and serialized back into every history URL by `buildHistoryParams`: a
+/// shared or reloaded link — including an auto-run `run=1` link — then resolves unqualified names
+/// against the same database, instead of silently falling back to the server default. On a
+/// Back/Forward step, `window.onpopstate` restores it from the navigated URL — but only when that
+/// entry belongs to the current connection (server/user), since the connection itself is global
+/// and is not restored by history navigation; a cross-connection entry's database is left alone
+/// rather than imported into the live connection.
+let selected_database = current_url.searchParams.get('database');
+
+/// The (server, user) connection the page loaded with, captured after the startup block above
+/// seeded the connection fields from the URL and before any user edit. While no history entry
+/// with an authoritative connection stamp exists — the bootstrap window before the first history
+/// write, or a reload whose surviving `history.state` was written by a play.html predating the
+/// stamp — `resetConnectionScopedState` compares against it to decide whether a trusted connection
+/// edit must cancel a deferred startup auto-run (`defer_run_for_reconcile`), which is armed against
+/// this loaded connection. Once a stamped entry exists, that entry's own
+/// `connectionServer`/`connectionUser` stamp is authoritative.
+const initial_connection = {server: url_elem.value, user: user_elem.value};
+
+/// The (server, user) connection the current `selected_database` belongs to.
+/// `resetConnectionScopedState` compares the live connection against this — via the same
+/// `sameServerAddress` / `effectiveConnectionUser` identity the `window.onpopstate` restore gate
+/// uses — so an edit to a connection field that does not change the semantic identity keeps the
+/// selection instead of silently dropping it (and retargeting the next unqualified `Run` to the
+/// server default). It is refreshed wherever `selected_database` is set: here from the URL at load,
+/// on a panel click (`commitSelectedDatabase`), and on a Back/Forward restore (`window.onpopstate`).
+/// Null when nothing is selected.
+let selected_database_connection = null;
+
+/// Record (or clear, when nothing is selected) the connection `selected_database` belongs to. The
+/// connection fields are read live: `url_elem`/`user_elem` are already seeded from the URL by the
+/// startup block above, so the initial call below captures the connection the URL's `database=`
+/// was chosen for.
+function stampSelectedDatabaseConnection() {
+    selected_database_connection = selected_database === null
+        ? null
+        : {server: url_elem.value, user: user_elem.value};
+}
+stampSelectedDatabaseConnection();
+
+/// The server's current database (`currentDatabase()`), recorded while building the database
+/// panel. The highlight falls back to it when nothing is selected (e.g. after a history
+/// navigation to an entry that carried no `database=`), without re-querying `system.databases`.
+let server_current_database = null;
+
 let load_databases_request_num = 0;
 async function loadDatabases(server_address, user, password) {
     ++load_databases_request_num;
@@ -4116,11 +4190,18 @@ async function loadDatabases(server_address, user, password) {
             || a.database.localeCompare(b.database, undefined, { numeric: true });
     });
 
+    /// Record the server's current database so the highlight can fall back to it (see
+    /// `applySelectedDatabaseHighlight`) without re-querying `system.databases`.
+    server_current_database = (json.data.find(e => e.current) || {}).database ?? null;
+
     for (let elem of json.data) {
         let database = document.createElement('div');
         database.className = 'database';
         let database_link = document.createElement('button');
-        if (elem.current) database_link.className = 'current';
+        /// The database name is stamped as a data attribute (not read back from the button text,
+        /// which also carries the table-count badge) so `applySelectedDatabaseHighlight` can move
+        /// the `.current` class between rows without rebuilding the list.
+        database_link.dataset.database = elem.database;
         database_link.append(elem.database);
         database.appendChild(database_link);
         let tables = document.createElement('div');
@@ -4144,10 +4225,13 @@ async function loadDatabases(server_address, user, password) {
         let row_load_generation = 0;
 
         /// Reload the tables of this database, showing the hourglass (and hiding the refresh
-        /// button) while loading. `set_current` moves the current-database highlight to this row
-        /// (a manual open or refresh); restoring the previously expanded state passes false so
-        /// the highlight stays on the actual current database.
-        const refreshTables = (set_current = true) => {
+        /// button) while loading. `set_current` commits this database as the editor's selected
+        /// database (a manual open of a collapsed row); a refresh or a restore of the previously
+        /// expanded state passes false, so merely reloading a row's table list never silently
+        /// retargets editor queries to it. `quiet` (defaulting to a background restore, i.e.
+        /// `!set_current`) suppresses surfacing the load's error in the main result pane; an
+        /// explicit refresh overrides it to keep surfacing errors as before.
+        const refreshTables = (set_current = true, quiet = !set_current) => {
             const generation = ++row_load_generation;
             /// A load stays relevant only while its generation is still the latest for this row
             /// and the row is still attached to the document. Closing the whole database panel
@@ -4160,7 +4244,7 @@ async function loadDatabases(server_address, user, password) {
             hourglass.className = 'loading-hourglass';
             hourglass.textContent = '\u29D7';
             database_link.after(hourglass);
-            return loadTables(server_address, user, password, elem.database, database, set_current, is_current).then(ok => {
+            return loadTables(server_address, user, password, elem.database, database, set_current, is_current, quiet).then(ok => {
                 hourglass.remove();
                 /// Only restore the button while this load is still the current one for the row;
                 /// otherwise the row was collapsed (the button is detached) or a newer refresh owns it.
@@ -4171,7 +4255,11 @@ async function loadDatabases(server_address, user, password) {
 
         refresh_button.addEventListener('click', e => {
             e.stopPropagation();
-            if (database.dataset['opened']) refreshTables();
+            /// A refresh reloads this row's table list only. It must not commit the selection
+            /// (`set_current = false`), so refreshing an already-open database never silently
+            /// retargets the editor's default database to it; but it still surfaces its errors
+            /// (`quiet = false`), since it is an explicit user action, not a background restore.
+            if (database.dataset['opened']) refreshTables(false, false);
         });
 
         /// Open a collapsed database, or restore a previously expanded one on panel reopen.
@@ -4236,6 +4324,108 @@ async function loadDatabases(server_address, user, password) {
             openDatabase(false);
         }
     }
+
+    /// The selected database survives closing and reopening the panel (it is only cleared on a
+    /// connection change) and can be seeded from the URL, but the reopen path never re-runs a
+    /// `set_current` load, so the highlight would otherwise snap back to `currentDatabase()` and
+    /// the panel would show a different database than the one unqualified names actually resolve
+    /// against. Highlight the selected database (or fall back to the server's current one).
+    applySelectedDatabaseHighlight();
+}
+
+/// Move the `.current` highlight of the database panel to `selected_database` (or, when nothing
+/// is selected or the selection no longer exists, to the server's current database), without
+/// reloading the list. Used both while building the list in `loadDatabases` and after a history
+/// navigation changes `selected_database`, so the open panel always shows the database that the
+/// next run and unqualified names actually resolve against. A no-op when the panel is empty.
+function applySelectedDatabaseHighlight() {
+    const databases_elem = document.getElementById('databases');
+    if (!databases_elem) return;
+    const buttons = databases_elem.querySelectorAll('button[data-database]');
+    const has_selected = selected_database
+        && Array.from(buttons).some(b => b.dataset.database === selected_database);
+    /// When a database is explicitly selected, highlight it only while it is actually present in
+    /// the list, and otherwise highlight nothing: falling back to the server's current database
+    /// would make the panel claim one database while `postSingle`/`postMulti` still run against
+    /// the (still-set) selection — a stale panel relative to a navigated `database=`, or a
+    /// selection that has since disappeared from `system.databases`, would then lie about the next
+    /// run. The `null` target matches no row, so nothing is highlighted until an authoritative
+    /// reload brings the row back or the selection is cleared (on a connection change). Only fall
+    /// back to the server default when nothing is selected at all.
+    const target = selected_database ? (has_selected ? selected_database : null) : server_current_database;
+    for (const button of buttons) {
+        button.classList.toggle('current', button.dataset.database === target);
+    }
+}
+
+/// Canonicalize a database designation to the effective target it denotes on the live connection:
+/// an absent/empty value means "the server's default database" and is represented as `null`, and an
+/// explicit name equal to the server's current database denotes that same target — both run the
+/// query against the same database — so it collapses to `null` too. A database value can carry the
+/// explicit spelling of the current database even though `commitSelectedDatabase` only ever assigns
+/// the canonical form: the live selection is seeded verbatim from a shared/restored `?database=` URL
+/// (at load and in `window.onpopstate`), `commitSelectedDatabase` preserves that raw spelling on a
+/// no-op re-click (it returns early without canonicalizing), and a run snapshot (`tab.result.database`)
+/// keeps whatever the selection was at run time — so the `run=1` divergence checks
+/// (`writeHistoryEntry`, `tabReflectsRun`) must
+/// compare BOTH sides through this canonical form, or a semantically no-op interaction (clicking the
+/// already-highlighted current row) would make `null` look different from the snapshot's explicit
+/// spelling and spuriously drop `run=1` from a still-reproducible entry.
+/// `server_current_database` is `null` until the database list has loaded for the live connection;
+/// while it is unknown an explicit value is kept rather than risking a false collapse (fail safe —
+/// two spellings then compare raw, never two different databases comparing equal).
+function effectiveDatabase(database) {
+    const value = database || null;
+    return (server_current_database !== null && value === server_current_database) ? null : value;
+}
+
+/// Commit a database selection made in the panel: record it as the default database for editor
+/// queries (`selected_database`), move the panel highlight to it, and fold it into the current
+/// browser-history entry so a reload or shared link carries the new `database=` (and drops `run=1`
+/// once the selection no longer matches the database that produced the shown result — see
+/// `tabReflectsRun`). Called synchronously on the trusted panel click — before the table list is
+/// even requested — so a `Run` issued before the load returns already targets the just-clicked
+/// database, and so switching databases restamps the entry the same way a query or parameter edit
+/// does (`refreshCurrentHistoryEntry`) instead of leaving a stale `database=`/`run=1` in the URL.
+///
+/// A semantic no-op — clicking a database that resolves to the same effective target already
+/// selected, whether that target is held as `null` (nothing selected) or as an explicit
+/// `?database=<current>` spelling seeded verbatim from the URL — returns early WITHOUT touching
+/// `selected_database`: it must neither rewrite the current history entry nor canonicalize the live
+/// selection.
+///   - Not rewriting the entry: on a fresh `?run=1&database=<selected>#...` bootstrap load the tab
+///     still has no result, so the rewrite below would drop `run=1` and — via `writeHistoryEntry` —
+///     set `deferred_run_cancelled`, cancelling the deferred startup auto-run even though the target
+///     database is unchanged, so the shared query would never run.
+///   - Keeping the raw `selected_database`: collapsing an explicit `?database=<current>` spelling to
+///     `null` here would later, once a same-identity connection edit (a password change, or
+///     `http://h:8123` -> `http://h:8123/`) clears `server_current_database` in
+///     `resetConnectionScopedState`, make `effectiveDatabase(selected_database)` (now `null`) differ
+///     from the run snapshot's still-explicit `effectiveDatabase(tab.result.database)` — so
+///     `tabReflectsRun`/`writeHistoryEntry` would spuriously drop `run=1` and `database=` from a
+///     still-reproducible entry on the next history sync (e.g. a tab switch).
+///
+/// On a genuine change the selection is stored in canonical effective form (`effectiveDatabase`):
+/// selecting the server's already-current database while a different one was selected is identical
+/// to leaving the selection unset, so it collapses back to `null`.
+function commitSelectedDatabase(database) {
+    const new_selection = effectiveDatabase(database);
+    /// Whether the click actually changes the effective target database. Both sides are compared in
+    /// canonical form (`effectiveDatabase`) so that re-selecting the already-current database —
+    /// whether it is held as `null` (nothing selected) or as its explicit spelling seeded verbatim
+    /// from a `?database=` URL — is recognized as a no-op rather than a change. On a no-op nothing
+    /// below runs, so the live `selected_database` keeps its raw spelling (see the header comment).
+    const selection_changed = new_selection !== effectiveDatabase(selected_database);
+    if (!selection_changed) return;
+    selected_database = new_selection;
+    stampSelectedDatabaseConnection();
+    applySelectedDatabaseHighlight();
+    captureActiveTab();
+    /// The entry rewrite below drops `run=1` while the bootstrap tab has no result yet, which
+    /// itself cancels a still-deferred startup auto-run (see `deferred_run_cancelled` and
+    /// `writeHistoryEntry`) — firing it anyway would execute the shared query against a database
+    /// the link never asked for.
+    refreshCurrentHistoryEntry(getActiveTab());
 }
 
 function makeSVG(viewBox, ...paths)
@@ -4639,12 +4829,6 @@ async function toggleColumns(table, table_icon, database, table_name_str, server
 /// guard must be scoped to each container: a load is only superseded by a newer
 /// load of the same database, not by a concurrent load of a different one.
 let load_tables_request_nums = new WeakMap();
-/// The current-database highlight is a singleton, so the per-container token above is not
-/// enough to protect it: it tracks the latest manual database selection. If the user opens
-/// `a` and then `b` before `a` finishes loading, the highlight must end up on `b` regardless
-/// of which load's query returns first - otherwise a slower earlier open would steal it back.
-let current_selection_num = 0;
-
 /// Wire up a click-like activation on a table row or its addendum. Besides an ordinary left
 /// click, we also honor the gestures that conventionally open a link in a new tab: a middle
 /// click (which fires `auxclick`, not `click`), a Shift+click, or the platform's new-tab
@@ -4695,29 +4879,33 @@ function onTableActivate(elem, handler) {
     elem.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
 }
 
-async function loadTables(server_address, user, password, database, container, set_current = true, is_current = null) {
+async function loadTables(server_address, user, password, database, container, set_current = true, is_current = null, quiet = !set_current) {
     const request_num = (load_tables_request_nums.get(container) || 0) + 1;
     load_tables_request_nums.set(container, request_num);
 
-    /// Capture the latest-selection token synchronously, before awaiting, so that the most
-    /// recent click wins regardless of which load's query returns first. Restoring the
-    /// expanded state passes set_current = false and must not move the highlight.
-    const selection_num = set_current ? ++current_selection_num : 0;
+    /// Commit the database selection synchronously, on the trusted click — before the table list
+    /// query is even issued — so a `Run` fired before the load returns already targets the
+    /// just-clicked database. The async load below only repaints the list; the latest click always
+    /// wins because click handlers run to completion (nothing interleaves before the first await),
+    /// so no per-selection token is needed to arbitrate concurrent loads. A restore load
+    /// (set_current = false) is background panel maintenance and must not move the selection.
+    if (set_current) commitSelectedDatabase(database);
 
     /// Capture the connection generation before awaiting: an explicit (non-quiet) open/refresh
     /// whose connection is replaced while its `system.tables` query is in flight must not report
     /// its result into the main result pane (see `auxiliaryQuery`).
     const generation = connectionGeneration;
 
-    /// A restore load (set_current = false) is a background panel-maintenance query triggered by
-    /// merely reopening the panel, so it runs quietly: it must not overwrite the main result pane
-    /// with its own success or error. An explicit open/refresh (set_current = true) keeps
-    /// surfacing its error as before.
+    /// A restore load is a background panel-maintenance query triggered by merely reopening the
+    /// panel, so it runs quietly (`quiet = true`): it must not overwrite the main result pane with
+    /// its own success or error. An explicit open or refresh keeps surfacing its error as before
+    /// (`quiet = false`). `quiet` is decoupled from `set_current` so a refresh can reload the list
+    /// without committing the selection yet still report failures.
     let json = await auxiliaryQuery(server_address, user, password,
         `SELECT table, engine, total_rows, total_bytes FROM system.tables WHERE database = {database:String}
             ORDER BY table LIKE '.inner%', table`,
         '&param_database=' + encodeURIComponent(database),
-        !set_current, generation);
+        quiet, generation);
     if (!json) return false;
 
     if (request_num != load_tables_request_nums.get(container)) return false;
@@ -4726,13 +4914,6 @@ async function loadTables(server_address, user, password, database, container, s
     /// the table list of a row that is no longer open.
     if (is_current && !is_current()) return false;
 
-    /// A user click marks the database as current; only move the highlight if this is still
-    /// the user's latest selection, and never move it away from currentDatabase() on restore.
-    if (set_current && selection_num == current_selection_num) {
-        let current_elem = container.parentElement.querySelector('.current');
-        if (current_elem) current_elem.classList.remove('current');
-        container.firstChild.classList.add('current');
-    }
     let tables_elem = container.querySelector('.tables');
     while (tables_elem.firstChild) tables_elem.removeChild(tables_elem.firstChild);
 
@@ -5153,15 +5334,21 @@ const default_format = 'JSONStringsEachRowWithProgress';
 /// late response bails once the tab is re-run/cancelled/closed. `abortController` cancels the fetch.
 /// `queryStart` is the absolute character offset of `query` in the editor, threaded to
 /// `highlightQueryError` so a server-reported error position maps back to the statement that ran.
-/// `connection` is the { server, user, password } snapshot taken by `postOne`/`postAll` BEFORE the
-/// lexer preflight await: the shared connection inputs must not be re-read here, or a tab switch +
-/// connection edit during that await (or between the sequential statement groups of a "Run all")
-/// would send this run's already-snapshotted query to a different server or identity.
-async function postImpl(tab, posted_request_num, query, targetResultEl, abortController, paramValuesSnapshot, queryStart, connection)
+/// `query_database` and `connection` (the { url, user, password } tuple) are snapshotted by
+/// `postOne`/`postAll` BEFORE the lexer preflight await: the shared database/connection inputs must
+/// not be re-read here, or a tab switch + database/connection edit during that await (or between the
+/// sequential statement groups of a "Run all") would send this run's already-snapshotted query to a
+/// different database, server or identity.
+async function postImpl(tab, posted_request_num, query, targetResultEl, abortController, paramValuesSnapshot, query_database, connection, queryStart)
 {
+    /// The connection tuple (server address, user, password) is snapshotted once per run by the
+    /// caller and passed in, rather than read live from the inputs here. Otherwise, in a
+    /// multi-query run (where later statement groups start only after earlier ones finish), editing
+    /// the connection mid-run would send later statements to a different server/user while the saved
+    /// provenance still claims a single producing connection (see `postMulti`).
     const user = connection.user;
     const password = connection.password;
-    const server_address = connection.server;
+    const server_address = connection.url;
     let url = server_address +
         (server_address.indexOf('?') >= 0 ? '&' : '?') +
         /// Ask server to allow cross-domain requests.
@@ -5172,6 +5359,9 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
     /// We will put the result in the query cache, so it can be used when download is initiated later.
     /// But we don't use cached results, so the results that we get here, are always fresh.
     url += '&use_query_cache=1&enable_reads_from_query_cache=0&enable_writes_to_query_cache=1&query_cache_ttl=600&query_cache_nondeterministic_function_handling=save&query_cache_system_table_handling=ignore';
+
+    /// If the user selected a database in the panel, use it as the default database.
+    if (query_database) url += '&database=' + encodeURIComponent(query_database);
 
     for (const [name, value] of Object.entries(paramValuesSnapshot))
     {
@@ -5392,10 +5582,10 @@ function compactFailureSnapshot(reply)
 /// background run never disturbs the foreground.
 /// When `history_query_text` is provided, it overrides `query` for browser history/URL storage,
 /// preserving the full textarea content when running a selected query in multi-query mode.
-/// `paramValuesSnapshot` and `connection` are captured by the caller (`postOne`/`postAll`) BEFORE
-/// the lexer preflight await, so a tab switch during that await cannot rebind this run to another
-/// tab's parameters or to freshly edited connection fields.
-async function postSingle(tab, posted_request_num, query, history_query_text, paramValuesSnapshot, queryStart, connection)
+/// `paramValuesSnapshot`, `connection` and `query_database` are captured by the caller
+/// (`postOne`/`postAll`) BEFORE the lexer preflight await, so a tab switch during that await cannot
+/// rebind this run to another tab's parameters, database, or freshly edited connection fields.
+async function postSingle(tab, posted_request_num, query, history_query_text, paramValuesSnapshot, queryStart, connection, query_database)
 {
     /// Per-run start time: tabs execute concurrently, so a shared global would be overwritten
     /// by whichever tab launched last and misreport the elapsed time of the others.
@@ -5407,6 +5597,16 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     /// absent, `query` IS the whole launched text. `saveHistory` needs this to decide whether the
     /// entry may carry `run=1` (see the full-editor requirement there).
     const ran_full_editor = history_query_text === undefined;
+    /// The database, server address and user this run executes against are snapshotted by the caller
+    /// (`postOne`/`postAll`) BEFORE the lexer preflight await, together with the connection tuple and
+    /// parameter values, and threaded in — never re-read from the live inputs here. A tab switch +
+    /// database/connection edit during that await must not retarget this already-snapshotted run.
+    /// They are kept for the saved result snapshot and a later download so both reproduce the result
+    /// against the database and server/user that produced it (see `writeHistoryEntry`/
+    /// `materializeResult`). The password authenticates this run only; it is never persisted (see the
+    /// `last_url_for_download` docs).
+    const query_url = connection.url;
+    const query_user = connection.user;
 
     tab.downloadVisible = false;
     tab.copyVisible = false;
@@ -5415,7 +5615,7 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     if (active()) { paintDownloadCopy(tab); progressEl.start(); }
 
     tab.controller = new AbortController();
-    const result = await postImpl(tab, posted_request_num, query, el, tab.controller, paramValuesSnapshot, queryStart, connection);
+    const result = await postImpl(tab, posted_request_num, query, el, tab.controller, paramValuesSnapshot, query_database, connection, queryStart);
 
     if (result.cancelled) return;
 
@@ -5452,6 +5652,9 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
                 elapsed_ns: 1e6 * (performance.now() - query_start),
                 params: paramValuesSnapshot,
                 fullEditor: ran_full_editor,
+                database: query_database,
+                url: query_url,
+                user: query_user,
             }, undefined, tab);
         }
         updateTabIndicator(tab);
@@ -5474,6 +5677,14 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
     tab.copyVisible = result.is_raw;
     tab.downloadQuery = query;
     tab.downloadParams = paramValuesSnapshot;
+    /// Record the database and connection this run produced its result against, so a later download
+    /// (possibly after switching tabs, so `paintDownloadCopy` mirrors these into the shared
+    /// `last_*_for_download`) reproduces the result against the same database/server/user rather than
+    /// whatever connection happens to be live then. A fresh run's connection is always known, so the
+    /// result is reproducible (unlike a legacy restored snapshot; see `materializeResult`).
+    tab.downloadDatabase = query_database;
+    tab.downloadUrl = query_url;
+    tab.downloadUser = query_user;
 
     if (result.is_raw || result.is_image) {
         el.elapsedNs = 1e6 * (performance.now() - query_start);
@@ -5519,6 +5730,9 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
         elapsed_ns: el.elapsedNs,
         params: paramValuesSnapshot,
         fullEditor: ran_full_editor,
+        database: query_database,
+        url: query_url,
+        user: query_user,
     }, undefined, tab);
 }
 
@@ -5528,17 +5742,26 @@ async function postSingle(tab, posted_request_num, query, history_query_text, pa
 /// `parsed` is an array of { query, is_select } objects from splitAllQueries; `editorText` is the
 /// full editor content captured at launch (used as the tab's saved query — must NOT be re-read
 /// from the shared editor at completion, which by then may hold another tab's text).
-/// `paramValuesSnapshot` and `connection` are captured by the caller before the lexer preflight
-/// await (see `postSingle`); every statement group of this run uses the same snapshot, so a
-/// connection edit mid-run cannot reroute the later groups to a different server or identity.
+/// `paramValuesSnapshot`, `connection` and `query_database` are captured by the caller before the
+/// lexer preflight await (see `postSingle`); every statement group of this run uses the same values,
+/// so a database/connection edit mid-run cannot reroute the later groups to a different database,
+/// server or identity.
 /// `ranFullEditor` says whether `parsed` covers EVERY statement of the launched editor ("Run all",
 /// or a selection spanning all statements) — only then may the history entry carry `run=1`,
 /// because its URL hash is the full editor text (see `saveHistory`).
-async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText, connection, ranFullEditor)
+async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, editorText, connection, ranFullEditor, query_database)
 {
     /// Per-run start time, as in `postSingle`: concurrent tabs must not share it.
     const query_start = performance.now();
     const active = () => tab.id === activeTabId;
+    /// See `postSingle`: the database, server address and user are snapshotted by the caller before
+    /// the lexer preflight await and threaded in; every statement group of this run uses the same
+    /// values (groups run sequentially, so without a single snapshot editing the connection between
+    /// groups would split one run across different servers/users while the saved provenance still
+    /// claims a single producing connection). Kept for the saved result snapshot (see
+    /// `writeHistoryEntry`); the password authenticates this run's requests only.
+    const query_url = connection.url;
+    const query_user = connection.user;
 
     tab.downloadVisible = false;
     tab.copyVisible = false;
@@ -5637,7 +5860,7 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
         const promises = group.indices.map(i => {
             const ac = new AbortController();
             tab.multiControllers.push(ac);
-            return postImpl(tab, posted_request_num, parsed[i].query, resultElements[i], ac, paramValuesSnapshot, parsed[i].queryStart, connection)
+            return postImpl(tab, posted_request_num, parsed[i].query, resultElements[i], ac, paramValuesSnapshot, query_database, connection, parsed[i].queryStart)
                 .then(result => ({ index: i, result }));
         });
 
@@ -5725,6 +5948,9 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
         elapsed_ns: tab.finalStats.elapsedNs,
         params: paramValuesSnapshot,
         fullEditor: ranFullEditor,
+        database: query_database,
+        url: query_url,
+        user: query_user,
     }, parsed[0].query, tab);
 }
 
@@ -5931,7 +6157,9 @@ async function restoreMultiQuery(snapshot, tab, matToken) {
 /// by `token` (a snapshot of `activation_num`): a newer activation/run bumps it and this bails
 /// after the tokenization await, so a slow restore never applies on top of a newer activation.
 /// It does NOT touch the result DOM — the result lives in the tab's own panel and is rendered
-/// separately by `materializeResult` (once, lazily) so switching keeps it intact.
+/// separately by `materializeResult` (once, lazily) so switching keeps it intact. The producing
+/// database/connection and the download-action targets are likewise restored per tab by
+/// `materializeResult`, not here (this only touches the shared editor).
 async function restoreEditor(state, token) {
     if (token === undefined) token = activation_num;
     query_area.value = state.query;
@@ -6120,9 +6348,19 @@ async function materializeResult(tab) {
         if (is_table) el._changeTableLayout();
     }
 
-    /// A result is shown for this tab, so its download/copy actions apply to this query.
+    /// A result is shown for this tab, so its download/copy actions apply to this query — unless the
+    /// snapshot predates the producing-connection record (`download_reproducible` is false): its
+    /// producing connection is unknown, so keep Download hidden until the query is rerun on the
+    /// current connection (a rerun stamps a fresh, reproducible snapshot). Copy stays available: it
+    /// copies the already-fetched result client-side and hits no server. The producing
+    /// database/server/user are recorded on the tab so `paintDownloadCopy` targets the download at
+    /// the connection that produced the result (see the download handler / `last_url_for_download`).
+    const download_reproducible = result.url !== undefined && result.user !== undefined;
+    tab.downloadDatabase = result.database || '';
+    tab.downloadUrl = result.url ?? '';
+    tab.downloadUser = result.user ?? '';
     tab.progressPhase = 'done';
-    tab.downloadVisible = true;
+    tab.downloadVisible = download_reproducible;
     tab.copyVisible = is_raw;
     if (is_raw) {
         el.elapsedNs = result.elapsed_ns;
@@ -6360,6 +6598,9 @@ function tabRuntimeDefaults() {
         colorModes: {},         /// per-column color modes for this tab's result (shared with its element)
         downloadQuery: '',      /// query the download button should re-run for this tab
         downloadParams: {},
+        downloadDatabase: '',   /// database the download should target (the producing connection)
+        downloadUrl: '',        /// server address the download reproduces against (producing connection)
+        downloadUser: '',       /// user the download reproduces against (producing connection)
         downloadVisible: false, /// whether the download / copy buttons apply to this tab
         copyVisible: false,
         launchQuery: undefined, /// editor text snapshotted when this tab's run was launched (see `saveHistory`)
@@ -6449,6 +6690,12 @@ function paintDownloadCopy(tab) {
     document.getElementById('copy-div').style.display = tab.copyVisible ? 'block' : 'none';
     last_query_for_download = tab.downloadQuery || '';
     last_params_for_download = tab.downloadParams || {};
+    /// Target the download at the database and connection that produced this tab's result (see the
+    /// download handler / `last_url_for_download`), so switching tabs and downloading reproduces the
+    /// active tab's own result rather than whatever the previous tab or the live inputs point at.
+    last_database_for_download = tab.downloadDatabase || '';
+    last_url_for_download = tab.downloadUrl || '';
+    last_user_for_download = tab.downloadUser || '';
 }
 
 /// Repaint the shared chrome (Run/Stop button, favicon, progress bar, logo, download/copy) from
@@ -6971,14 +7218,17 @@ async function persist() {
 
 /// ----- Browser history + URL ----------------------------------------------------
 
-/// Build the query-string parameters (user/run/url/param_*/tab) shared by history
-/// entries. Connection settings are global; the active tab name is appended so a
-/// shared URL can be reconciled against saved tabs on load.
+/// Build the query-string parameters (user/run/url/database/param_*/tab) shared by history
+/// entries. The active tab name is appended so a shared URL can be reconciled against saved tabs
+/// on load. The connection identity (`user`, `server_address`, `database`) is passed in rather
+/// than read from the live globals: a run-produced entry must carry the connection the query
+/// actually ran against — captured in the result snapshot — not whatever the panel/connection has
+/// since been switched to while the query was in flight (see `writeHistoryEntry`), so a shared or
+/// reloaded `run=1` URL reproduces the displayed result instead of replaying against a different
+/// database or server.
 /// `fromRun` marks an entry that a genuine run produced (see `writeHistoryEntry`).
-function buildHistoryParams(params, tabName, fromRun, colorModes) {
+function buildHistoryParams(params, tabName, fromRun, colorModes, user, server_address, database) {
     const out = [];
-    const user = user_elem.value;
-    const server_address = url_elem.value;
     if (user) out.push('user=' + encodeURIComponent(user));
     /// Only carry `run=1` for an entry whose query/params were produced by a genuine run and
     /// still match it (`fromRun`). `saveHistory` sets it on the run itself; the editor-only
@@ -6991,6 +7241,10 @@ function buildHistoryParams(params, tabName, fromRun, colorModes) {
     /// `DROP`/`INSERT`), because startup treats a `run=1` URL as authoritative.
     if (run_immediately && fromRun) out.push('run=1');
     if (server_address != location.origin) out.push('url=' + encodeURIComponent(server_address));
+    /// The selected database is a connection-scoped setting (like `user`/`url`): carry it so a
+    /// shared or reloaded link resolves unqualified table names against the same database, and an
+    /// auto-run `run=1` link reproduces the run instead of hitting the server default database.
+    if (database) out.push('database=' + encodeURIComponent(database));
     for (const [name, value] of Object.entries(params || {})) {
         /// Serialize every parameter, including empty strings: an empty value is valid for a
         /// String parameter and must be distinguishable from "absent" on load (read back with
@@ -7004,6 +7258,88 @@ function buildHistoryParams(params, tabName, fromRun, colorModes) {
     }
     if (tabName) out.push('tab=' + encodeURIComponent(tabName));
     return out;
+}
+
+/// Compare two server addresses for connection identity, tolerating cosmetic differences that
+/// address the same endpoint (a root-path trailing slash, an explicit default port) while still
+/// separating endpoints that differ in the request target. Used by the history restore gate
+/// (`window.onpopstate`) so re-typing e.g. `http://h:8123` as `http://h:8123/` does not stop
+/// restoring an entry produced on the same server. The query string IS significant: the request URL
+/// is built by concatenating `url_elem.value` and preserving any existing `?...` (see `postImpl`),
+/// so `http://h:8123/?cluster=a` and `http://h:8123/?cluster=b` are different endpoints (a different
+/// cluster/namespace/settings) and must not share a restored `database=`. The trailing slash is
+/// collapsed for the ROOT path only: `postImpl` sends the path verbatim, so a non-root
+/// `/clickhouse` and `/clickhouse/` can be different routes/namespaces on a proxied deployment and
+/// are compared exactly (only the root path, where the URL parser already yields `/` for both `origin`
+/// and `origin/`, is treated as equivalent). Relative addresses (e.g. `/clickhouse`) are resolved
+/// against the current page so they parse; both operands come from the same `url_elem.value` field,
+/// so this is symmetric. Falls back to an exact string compare when a value does not parse as a URL.
+function sameServerAddress(a, b) {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+    try {
+        const ua = new URL(a, location.href);
+        const ub = new URL(b, location.href);
+        /// Root path only: '' and '/' are the same root; every other path is compared verbatim.
+        const rootNormalized = (p) => (p === '/' || p === '') ? '/' : p;
+        return ua.protocol === ub.protocol
+            && ua.host === ub.host
+            && rootNormalized(ua.pathname) === rootNormalized(ub.pathname)
+            && ua.search === ub.search;
+    } catch (e) {
+        return false;
+    }
+}
+
+/// The effective user of a connection. The user can be given either in the explicit `user` field
+/// or embedded in the server URL's userinfo (`http://alice@host:8123/`), and the request sends the
+/// field value only when it is non-empty (see `postImpl`), otherwise the URL userinfo authenticates
+/// the request. The selected database is a namespace on (server, user), so the identity must fold in
+/// the userinfo user: `sameServerAddress` compares the endpoint (`host`, not the authority), so
+/// `http://alice@host:8123/` and `http://bob@host:8123/` look like the same server there and must be
+/// separated by their user. The field takes precedence over the userinfo, mirroring how the request
+/// is built. The userinfo may be percent-encoded, so decode it (falling back to the raw value on a
+/// malformed escape) before comparing.
+function effectiveConnectionUser(serverAddress, fieldUser) {
+    if (fieldUser) return fieldUser;
+    try {
+        const raw = new URL(serverAddress, location.href).username;
+        try { return decodeURIComponent(raw); } catch (e) { return raw; }
+    } catch (e) {
+        return '';
+    }
+}
+
+/// Has the live target moved away from the connection/selection the query that produced this run
+/// snapshot (`tab.result`) actually ran against? Compared with the SAME semantic identity as the
+/// restore gate (`window.onpopstate`) and the connection-change invalidation
+/// (`resetConnectionScopedState`): `sameServerAddress` + `effectiveConnectionUser`, with the
+/// selected database a namespace on that pair. So a cosmetic-only URL difference (a root-path
+/// trailing slash, a default port) or a password-only change is not a divergence, matching those
+/// gates, and the databases are compared in canonical effective form (`effectiveDatabase`) so a
+/// snapshot carrying the explicit spelling of the server's current database (a shared/restored
+/// `?database=` URL) is not a divergence from the collapsed `null` live selection — both denote
+/// the same target. (When the snapshot ran against a DIFFERENT server whose database name happens
+/// to match the live server's current one, the collapse cannot mask it: the connection comparisons
+/// below still flag the divergence.) Used by `writeHistoryEntry` to decide whether a run entry may
+/// keep describing the producing snapshot (and carry `run=1`), and by `refreshCurrentHistoryEntry`
+/// to make the same call when the entry cannot be written at all.
+function liveDivergedFromRun(run_snapshot) {
+    /// A snapshot saved before the producing connection was recorded (a legacy tab restored from
+    /// persistence) carries no `url`/`user`, so the connection it ran against is UNKNOWN. It cannot
+    /// be proven reproducible on the live connection, so it always counts as diverged (fail
+    /// closed): `run=1` is dropped and the live connection is stamped, never claiming the legacy
+    /// result is reproducible on the current server — which would otherwise auto-run the old query
+    /// on the wrong one on reload/share. A fresh run always records `url`/`user` (empty strings for
+    /// the default same-origin connection), so only pre-upgrade snapshots take this branch.
+    const snapshot_connection_known = !!run_snapshot
+        && run_snapshot.url !== undefined && run_snapshot.user !== undefined;
+    return !!run_snapshot && (
+           !snapshot_connection_known
+        || effectiveDatabase(selected_database) !== effectiveDatabase(run_snapshot.database)
+        || !sameServerAddress(run_snapshot.url, url_elem.value)
+        || effectiveConnectionUser(run_snapshot.url, run_snapshot.user)
+            !== effectiveConnectionUser(url_elem.value, user_elem.value));
 }
 
 /// Write a browser-history entry + URL derived from the tab. The top-level query/params
@@ -7021,12 +7357,60 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
     const sameTab = cur && cur.tabId === tab.id;
     const unchanged = sameTab && cur.query === tab.query;
 
+    /// The connection-scoped identity carried by this entry — the selected database, server address
+    /// and user, serialized into the URL and stamped into the state — must describe the connection
+    /// the entry is reproducible against. Three cases:
+    ///   - A run-produced entry (`fromRun`, i.e. carrying `run=1`) whose live connection STILL
+    ///     matches the connection the query ran against: use the producing snapshot verbatim so the
+    ///     `run=1` URL reloads/shares the exact producing query. The run resolves asynchronously, so
+    ///     the live values, though semantically equal here, may differ cosmetically.
+    ///   - A run-produced entry whose live connection or `selected_database` has since DIVERGED (the
+    ///     panel selection or the connection inputs were switched while the query was still in
+    ///     flight): describe the LIVE page instead, and drop `run=1` (below). Stamping the producing
+    ///     connection here would rewrite the current URL/history back to the old target, so reloading
+    ///     or sharing the finished link would silently discard the user's newer live edits and reopen
+    ///     the page on the wrong server/database. The producing connection is still kept in the result
+    ///     snapshot (`tab.result.{url,user,database}`) for rendering, download and Back/Forward
+    ///     restore, so nothing about the displayed result is lost.
+    ///   - An editor-only entry (`fromRun` false): no reproducible run, so use the live connection.
+    ///   - A legacy snapshot predating the url/user snapshot (unknown producing connection): treated
+    ///     as diverged, so `run=1` is dropped and the live connection is stamped (fail closed) rather
+    ///     than claiming the legacy result is reproducible on the live server (see below).
+    const run_snapshot = fromRun ? tab.result : null;
+    /// See `liveDivergedFromRun` for the identity semantics (an unknown producing connection —
+    /// a legacy snapshot without `url`/`user` — always counts as diverged, fail closed).
+    const live_diverged = liveDivergedFromRun(run_snapshot);
+    const use_snapshot = !!run_snapshot && !live_diverged;
+    const entry_database = use_snapshot ? run_snapshot.database : selected_database;
+    const entry_server = use_snapshot ? run_snapshot.url : url_elem.value;
+    const entry_user = use_snapshot ? run_snapshot.user : user_elem.value;
+    const carries_run = fromRun && !live_diverged;
+    /// This write just made the current entry stop requesting the deferred startup auto-run (see
+    /// `deferred_run_cancelled` above `reconcileStartup`): every editor-only writer that can drop
+    /// `run=1` — a query/param edit, a tab switch, a database-panel click, a connection-field edit,
+    /// and any future one — funnels through `writeHistoryEntry`, so no caller needs to remember to
+    /// cancel it individually. Setting it once the gate has already fired (e.g. from `saveHistory`,
+    /// when the deferred run itself completes) is harmless: the flag is never consulted again after
+    /// `reconcileStartup` has made its decision.
+    if (!carries_run) deferred_run_cancelled = true;
+
     const state = {
         query: tab.query,
         params: tab.params,
         result: tab.result || null,
         tabId: tab.id,
         tabName: tab.title,
+        /// Stamp the connection identity (server address and user) this entry is reproducible against
+        /// (the producing connection for a matching run entry, the live one otherwise; see above) so
+        /// `window.onpopstate` can restore this entry's `database=` selection only while the live
+        /// connection still matches (see the restore gate there). These values survive a page
+        /// reload, unlike the earlier `connectionGeneration` counter, which reset to `0` on reload
+        /// and could then both restore a different connection's database and stop restoring the live
+        /// connection's. The password is deliberately never serialized (here or in the URL), so it
+        /// is not part of the identity: the selected database is a namespace on (server, user) and
+        /// survives re-authentication with a different password on the same server/user.
+        connectionServer: entry_server,
+        connectionUser: entry_user,
     };
     const title = "ClickHouse Query: " + (titleForDoc || tab.query);
     /// Once the tab has materialized, its live `colorModes` object is the authoritative palette:
@@ -7042,7 +7426,12 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         color_modes = tab.colorModes;
         if (tab.result) tab.result.color_modes = tab.colorModes;
     }
-    const history_params = buildHistoryParams(tab.params, tab.title, fromRun, color_modes);
+    /// `carries_run` (rather than the raw `fromRun`) drops `run=1` when the live connection/database
+    /// diverged from the one the displayed result was produced against: auto-running the live target
+    /// on reload would not reproduce it (and must not fire a write against the wrong server/database).
+    /// The producing user/server/database are serialized into the URL and stamped into the state so
+    /// Back/Forward can restore this entry's `database=` only while the live connection still matches.
+    const history_params = buildHistoryParams(tab.params, tab.title, carries_run, color_modes, entry_user, entry_server, entry_database);
     let history_url = window.location.pathname;
     if (history_params.length > 0) history_url += '?' + history_params.join('&');
     history_url += '#' + toBase64(tab.query);
@@ -7069,10 +7458,21 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
 /// the tab is clean; a "Run selected" result stores only the selected statement, so it compares
 /// unequal to the full editor and conservatively drops the marker (its URL hash is the whole
 /// editor and could not reproduce that single-statement result anyway).
+/// The selected database is part of "what would re-run": a `run=1` URL also carries `database=`
+/// from the live selection, so if the panel selection has moved away from the database that
+/// produced the result, re-running would hit a different database. Drop the marker in that case
+/// (comparing in canonical effective form — `effectiveDatabase` — so an absent/empty selection
+/// means the server default and an explicit spelling of the server's current database, as carried
+/// by a shared/restored `?database=` snapshot, denotes that same target), so a database-only
+/// selection change never leaves a shared/reloaded `run=1` link auto-running against the wrong
+/// one, while a semantically no-op click on the already-current row keeps the marker. A snapshot
+/// produced on a different SERVER is out of scope here: `writeHistoryEntry`'s `live_diverged`
+/// compares the connections and drops `run=1` regardless of what this database check says.
 function tabReflectsRun(tab) {
     return !!(tab && tab.result && tab.result.ran
         && tab.query === tab.result.query
-        && JSON.stringify(tab.params || {}) === JSON.stringify(tab.result.params || {}));
+        && JSON.stringify(tab.params || {}) === JSON.stringify(tab.result.params || {})
+        && effectiveDatabase(selected_database) === effectiveDatabase(tab.result.database));
 }
 
 /// Refresh the current browser-history entry in place from the given tab's captured editor
@@ -7085,7 +7485,19 @@ function tabReflectsRun(tab) {
 /// stays reproducible from a shared `run=1` link.
 ///
 /// When an entry already exists it must belong to this tab — refreshing another tab's entry
-/// would clobber it, so bail in that case. When there is NO state yet we still seed one: a
+/// would clobber it, so bail in that case. The bail must still make the deferred-run decision,
+/// though: `history.state` survives a reload, so during startup the current entry can still
+/// belong to a tab of the PREVIOUS page instance while the active tab is only the fresh
+/// bootstrap tab (`reconcileStartup` rebinds them later). A trusted mutation in that window — a
+/// database-panel click, a connection edit, a tab operation — reaches this bail instead of
+/// `writeHistoryEntry`, yet it moved the live target away from what the deferred `run=1`
+/// auto-run was armed for, so it must cancel that run exactly as the entry write would have
+/// (see `deferred_run_cancelled` above `reconcileStartup`). The same `carries_run` rule as
+/// `writeHistoryEntry` is applied: cancel unless the tab still reflects a run whose producing
+/// connection matches the live one. Setting the flag on a post-startup bail is harmless — it is
+/// never consulted again after `reconcileStartup` has made its decision.
+///
+/// When there is NO state yet we still seed one: a
 /// fresh load leaves `history.state` null until the first `syncHistory`/`postAll`, and the very
 /// first trusted edit can land before `reconcileStartup` runs any of those (the no-saved-tabs
 /// bare-URL path and the dirty-startup merge never call them). That initial entry is the page's
@@ -7097,7 +7509,10 @@ function tabReflectsRun(tab) {
 function refreshCurrentHistoryEntry(tab) {
     if (!tab) return;
     const cur = history.state;
-    if (cur && cur.tabId !== tab.id) return;
+    if (cur && cur.tabId !== tab.id) {
+        if (!(tabReflectsRun(tab) && !liveDivergedFromRun(tab.result))) deferred_run_cancelled = true;
+        return;
+    }
     writeHistoryEntry(tab, undefined, /*forceReplace=*/ true, /*fromRun=*/ tabReflectsRun(tab));
 }
 
@@ -7139,6 +7554,15 @@ function saveHistory(stateData, titleForDoc, tab) {
         /// from the editor text in tab.query); used for rendering/graph-detection/downloads.
         query: stateData.resultQuery ?? stateData.query,
         params: stateData.params,    /// the params that produced this result
+        /// The default database in effect when this result was produced, so navigating back to
+        /// this entry (or reloading its `run=1` URL) reproduces the run and download against the
+        /// same database rather than the current panel selection or the server default.
+        database: stateData.database,
+        /// The server address and user that produced this result, so a download after navigating
+        /// back to this entry reproduces it against the same connection even when the live
+        /// connection has since changed. The password is deliberately never stored in history.
+        url: stateData.url,
+        user: stateData.user,
         format: stateData.format,
         ok: stateData.ok,
         data: stateData.data,
@@ -7269,6 +7693,53 @@ window.onpopstate = function(event) {
     /// newer entry that `writeHistoryEntry` last recorded, not at this one).
     tab.lastSavedQuery = event.state.query;
     if (event.state.params) tab.params = event.state.params;
+    /// Restore the connection-scoped selected database from the navigated URL — but ONLY when the
+    /// entry still belongs to the live connection. The connection (server address and user) was just
+    /// restored from this entry above, so a stamped entry normally passes this gate; the check still
+    /// matters as a correctness guard — it fails closed for an unstamped legacy entry (see below) and
+    /// for the edge where the entry's connection could not be reproduced — so we never import an
+    /// entry's `database=` into a connection it does not belong to (e.g. replaying a server-B entry's
+    /// `database=` against server A). Match on the entry's stamped server address and user
+    /// (`writeHistoryEntry`) — a durable identity that survives a reload and never collides across
+    /// connections, unlike the earlier process-local `connectionGeneration` counter (it reset to `0`
+    /// on reload, so afterwards it could both restore a different connection's database into the live
+    /// connection and stop restoring the live connection's own entries). The user is compared as an
+    /// EFFECTIVE user (`effectiveConnectionUser`) that folds in any userinfo embedded in the server
+    /// URL, so `http://alice@host:8123/` and `http://bob@host:8123/` with an empty user field are kept
+    /// distinct even though `sameServerAddress` sees the same endpoint; without this a Back/Forward
+    /// could restore one user's selection into another user's session on the same host. Server
+    /// addresses are compared via `sameServerAddress`, tolerating
+    /// cosmetic differences (a root-path trailing slash, a default port) but keeping the query string
+    /// significant, since it is part of the request target (a different cluster/namespace/settings).
+    /// The password is never part of the identity — it is never serialized and is unknowable after a
+    /// reload — so a same server/user entry restores its database even across a password change: the
+    /// selected database is a namespace on (server, user), and wrong credentials fail loud on the next
+    /// run rather than exposing another server's data.
+    /// `location` already reflects the navigated entry here (and after the restamp above); an absent
+    /// `database=` means the server default.
+    ///
+    /// An entry with no stamp (`connectionServer` undefined — written before this feature) cannot be
+    /// proven to belong to the live connection, and it carries no `database=` of its own (it ran
+    /// against the server default of whatever connection was live then). Leaving the current, newer
+    /// `selected_database` in place would silently send the next `Run` to that database while the
+    /// displayed entry/URL describe a server-default query. Fail closed: drop the selection so
+    /// Back/Forward to such an entry targets the server default it actually represents.
+    if (event.state.connectionServer === undefined) {
+        if (selected_database !== null) {
+            selected_database = null;
+            stampSelectedDatabaseConnection();
+            applySelectedDatabaseHighlight();
+        }
+    } else if (sameServerAddress(event.state.connectionServer, url_elem.value)
+        && effectiveConnectionUser(event.state.connectionServer, event.state.connectionUser)
+            === effectiveConnectionUser(url_elem.value, user_elem.value)) {
+        selected_database = new URL(location.href).searchParams.get('database');
+        /// The gate above confirmed the entry belongs to the live connection, so record it as the
+        /// connection this restored selection belongs to (keeps `resetConnectionScopedState`'s later
+        /// identity comparison meaningful after a history navigation).
+        stampSelectedDatabaseConnection();
+        applySelectedDatabaseHighlight();
+    }
     /// Does this entry carry a genuine result snapshot (modern nested or legacy flat)? An entry
     /// written while its tab was mid-run does NOT: a run nulls `tab.result` at launch and only
     /// reinstalls it on completion, and a background run that finishes in another tab reinstalls
@@ -7285,7 +7756,8 @@ window.onpopstate = function(event) {
     /// the live stream keeps rendering into its own panel and a completed result stays shown. A
     /// genuinely result-less entry whose tab also has no result falls through to the plain
     /// time-travel below, and an entry that DOES carry a snapshot keeps the documented
-    /// abort-and-re-render behavior.
+    /// abort-and-re-render behavior. (The connection-scoped `selected_database` was restored from
+    /// the navigated URL just above, regardless of which path we take here.)
     if (!entry_has_result && (tab.inFlight || tab.result)) {
         activateTab(tab.id).then(scheduleSave);
         return;
@@ -7305,6 +7777,7 @@ window.onpopstate = function(event) {
             ran: true,
             query: flat.query,
             params: flat.params || {},
+            database: flat.database,
             format: flat.format,
             ok: flat.ok,
             data: flat.data ?? null,
@@ -7460,7 +7933,12 @@ async function postOne()
     /// reason: these inputs are shared, and re-reading them after the preflight await (as
     /// `postImpl` used to) would let a tab switch + connection edit during it send this run's
     /// snapshotted query to the newly entered server or identity.
-    const connection = { server: url_elem.value, user: user_elem.value, password: password_elem.value };
+    const connection = { url: url_elem.value, user: user_elem.value, password: password_elem.value };
+    /// Snapshot the selected database at launch too (see the connection above): the panel selection
+    /// is shared, so re-reading it after the preflight await would let a mid-await database change
+    /// retarget this run. It is threaded through to `postImpl` (the request URL) and the saved
+    /// result snapshot so a reload/download reproduces the run against the same database.
+    const query_database = selected_database;
     /// Bump `activation_num` so a concurrent, still-awaiting `activateTab` restore bails instead of
     /// overwriting the editor after this run starts; the run itself is no longer gated on it.
     ++activation_num;
@@ -7528,9 +8006,9 @@ async function postOne()
                 /// The run covered the whole editor only when the selection spanned EVERY
                 /// statement; only such an entry may keep `run=1` (see `saveHistory`).
                 await postMulti(tab, my_run, selected, paramValuesSnapshot, editor_text, connection,
-                                /*ranFullEditor=*/ selected.length === parsed.length);
+                                /*ranFullEditor=*/ selected.length === parsed.length, query_database);
             } else {
-                await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart, connection);
+                await postSingle(tab, my_run, selected[0].query, editor_text, paramValuesSnapshot, selected[0].queryStart, connection, query_database);
             }
             launched = true;
         }
@@ -7549,7 +8027,7 @@ async function postOne()
         /// When the launched text held several statements, preserve the full textarea content in
         /// history/URL even though only the query under the cursor ran (so refresh restores all
         /// queries).
-        await postSingle(tab, my_run, under.query, under.isMulti ? editor_text : undefined, paramValuesSnapshot, under.queryStart, connection);
+        await postSingle(tab, my_run, under.query, under.isMulti ? editor_text : undefined, paramValuesSnapshot, under.queryStart, connection, query_database);
     }
 
     /// Reset the run/favicon state only if this run still owns its tab's in-flight state; a newer
@@ -7570,9 +8048,10 @@ async function postAll()
     /// text below.
     const param_values_at_launch = resolveRunParams(params_restore_pending, tab);
     const param_sources = Object.assign({}, tab.params || {}, param_values_at_launch);
-    /// See `postOne`: the connection context is snapshotted at launch so a tab switch +
-    /// connection edit during the preflight await cannot reroute this run.
-    const connection = { server: url_elem.value, user: user_elem.value, password: password_elem.value };
+    /// See `postOne`: the connection context and selected database are snapshotted at launch so a tab
+    /// switch + connection/database edit during the preflight await cannot reroute this run.
+    const connection = { url: url_elem.value, user: user_elem.value, password: password_elem.value };
+    const query_database = selected_database;
     ++activation_num;
     const my_run = ++tab.reqNum;
     const launch_interaction = editorInteractionGen;   /// see `postOne`
@@ -7597,7 +8076,7 @@ async function postAll()
 
     if (parsed.length > 1) {
         beginFlight(tab, launch_interaction);
-        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text, connection, /*ranFullEditor=*/ true);
+        await postMulti(tab, my_run, parsed, paramValuesSnapshot, editor_text, connection, /*ranFullEditor=*/ true, query_database);
     } else {
         const under = await getQueryUnderCursor(editor_text, sel_start);
         if (my_run !== tab.reqNum) return;
@@ -7606,7 +8085,7 @@ async function postAll()
             if (under.selStart !== null) query_area.setSelectionRange(under.selStart, under.selEnd);
             focusEditorForRun();
         }
-        await postSingle(tab, my_run, under.query, undefined, paramValuesSnapshot, under.queryStart, connection);
+        await postSingle(tab, my_run, under.query, undefined, paramValuesSnapshot, under.queryStart, connection, query_database);
     }
 
     if (my_run === tab.reqNum) endFlight(tab);
@@ -8934,12 +9413,87 @@ function resetConnectionScopedState() {
     completionWords = [];
     closeCompletions();
     opened_databases.clear();
+    /// The selected database is a namespace on the SEMANTIC connection identity
+    /// (`sameServerAddress` + `effectiveConnectionUser`) — the same identity the `window.onpopstate`
+    /// restore gate uses. This handler fires on every `input` in a connection field, including edits
+    /// that do NOT change that identity: a cosmetic URL normalization (a root-path trailing slash or
+    /// a default port — the query string stays significant) or a password-only change (the password is
+    /// authentication, not part of the resource identity). Dropping the selection then would retarget
+    /// the next unqualified `Run` to the server default while history navigation still treats the
+    /// entry as valid — the two would disagree. So clear it only when the identity actually changed
+    /// relative to where it was chosen (`selected_database_connection`); keep it otherwise. An unset
+    /// stamp (no selection) fails the check the safe way, matching the previous unconditional clear.
+    const identity_changed = selected_database_connection === null
+        || !sameServerAddress(selected_database_connection.server, url_elem.value)
+        || effectiveConnectionUser(selected_database_connection.server, selected_database_connection.user)
+            !== effectiveConnectionUser(url_elem.value, user_elem.value);
+    const cleared_selection = selected_database !== null && identity_changed;
+    if (cleared_selection) {
+        selected_database = null;
+        selected_database_connection = null;
+    }
+    server_current_database = null;
     /// A panel that is already open keeps showing the previous connection's databases, and every
     /// row handler closes over the url/user/password captured when the list was loaded, so
     /// clicking a row (or its refresh button) would keep querying the previous server. Close the
     /// panel so it is rebuilt against the new connection on the next open; this also detaches the
     /// rows, dropping any in-flight table load through its `isConnected` check.
     if (databases_toggle.dataset['opened']) closeDatabases();
+    /// Restamp the current history entry whenever the live connection moved, so its URL stops
+    /// describing the previous target. Two ways it can go stale:
+    ///   - A selection was just cleared above: the entry/URL may still carry the old `database=` (and
+    ///     its `run=1` marker), so a reload or copied link would resurrect the selection we just
+    ///     invalidated (and possibly auto-run it against the new connection).
+    ///   - No selection was set, but the entry is a run entry (`run=1`) stamped for the previous
+    ///     server (`connectionServer`), which is the case even for a server-default run that carries
+    ///     no `database=` at all. Editing the connection from server A to server B then leaves the
+    ///     live page on B while the current entry still says `run=1`/`url=A`; reloading or sharing it
+    ///     would auto-execute the old query against A — the same stale-target hazard the `database=`
+    ///     restamp addresses. The database-clear branch never fires here (there is nothing to clear),
+    ///     so detect the connection divergence directly from the entry's stamp.
+    /// Compared with the SAME (`sameServerAddress`, `effectiveConnectionUser`) identity as the restore
+    /// gate (`window.onpopstate`) and `writeHistoryEntry`'s `live_diverged`, so a cosmetic URL edit (a
+    /// root-path trailing slash, a default port) or a password-only change keeps the identity and does
+    /// NOT churn the entry. An entry without a `connectionServer` stamp (one written by a play.html
+    /// predating the stamp) gives no producing connection to compare against here; it is covered by
+    /// the bootstrap term below instead. When it did diverge, restamp from the active tab exactly as
+    /// `commitSelectedDatabase` does — `writeHistoryEntry` then drops `run=1` and rewrites `url=`/`user=`
+    /// for the live target (or, for a still-matching run entry, keeps the producing snapshot verbatim).
+    const current_entry = history.state;
+    const connection_diverged = current_entry
+        && current_entry.connectionServer !== undefined
+        && (!sameServerAddress(current_entry.connectionServer, url_elem.value)
+            || effectiveConnectionUser(current_entry.connectionServer, current_entry.connectionUser)
+                !== effectiveConnectionUser(url_elem.value, user_elem.value));
+    /// Before the first history write there is no entry to compare against, yet a deferred startup
+    /// auto-run may already be armed (`defer_run_for_reconcile`) against the connection the page
+    /// loaded with (`initial_connection`). A trusted connection edit in that window must cancel the
+    /// run just as it would once an entry existed — otherwise a fresh server-default `?run=1#...`
+    /// link (no `database=`, so `cleared_selection` stays false; no `history.state`, so
+    /// `connection_diverged` stays false) would auto-execute the shared query against the just-edited
+    /// server/user the link never named. An entry that EXISTS but carries no `connectionServer`
+    /// stamp — `history.state` survives a reload, so a `?run=1#...` reload from an entry written by
+    /// a play.html predating the stamp lands here — is the same case: there is no authoritative
+    /// connection stamp yet, only the connection the page loaded with, so fall back to
+    /// `initial_connection` for it too. Without that, neither term fires (`connection_diverged` by
+    /// its `connectionServer !== undefined` guard, this one by `!current_entry`) and the deferred
+    /// run would still execute against the edited connection. Compared with the SAME
+    /// (`sameServerAddress`, `effectiveConnectionUser`) identity, so a cosmetic edit (a root-path
+    /// trailing slash, a default port) or a password-only change neither churns the entry nor
+    /// suppresses the legitimate auto-run.
+    const bootstrap_connection_diverged = (!current_entry || current_entry.connectionServer === undefined)
+        && (!sameServerAddress(initial_connection.server, url_elem.value)
+            || effectiveConnectionUser(initial_connection.server, initial_connection.user)
+                !== effectiveConnectionUser(url_elem.value, user_elem.value));
+    if (cleared_selection || connection_diverged || bootstrap_connection_diverged) {
+        captureActiveTab();
+        /// The restamp seeds/refreshes the current entry through `refreshCurrentHistoryEntry` →
+        /// `writeHistoryEntry`, which drops `run=1` while the bootstrap tab has no result yet and
+        /// thereby cancels a still-deferred startup auto-run (see `deferred_run_cancelled` and
+        /// `writeHistoryEntry`) — left uncancelled, it would still execute the shared query against
+        /// the just-edited server/user rather than the one the link specified.
+        refreshCurrentHistoryEntry(getActiveTab());
+    }
 }
 
 [url_elem, user_elem, password_elem].forEach(el => el.addEventListener('input', (e) => {
@@ -10218,7 +10772,7 @@ async function reconcileStartup() {
         /// the hash, the editor, and the bootstrap tab, and the trailing `scheduleSave` would
         /// persist it straight back to `IndexedDB` as the sole tab — resurrecting the pruned blank
         /// tab (now nameless). Reset the bootstrap tab to a genuinely fresh empty one: drop the hash
-        /// as well, and clear the editor exactly as `restoreFromHistory` does (blank the textarea
+        /// as well, and clear the editor exactly as `restoreEditor` does (blank the textarea
         /// and dispatch a synthetic 'input' event, which resyncs the syntax backdrop and parameter
         /// inputs and mirrors the empty text into the active tab's query). This matches a first-ever
         /// visit precisely, so the next reload sees a single blank tab with no `?tab=` or hash and
@@ -10319,8 +10873,12 @@ async function reconcileStartup() {
     /// run by the user, so the stale `run=1` must not execute it; just sync the restored tab
     /// into the URL instead (with the `run=1` directive already dropped above). Likewise on a
     /// blank stale-reload echo (`stale_blank_reload_bare`): the URL is a stale echo of a pruned
-    /// blank tab, so its `run=1` must not auto-run whatever query the fallback tab restored.
-    if (defer_run_for_reconcile && !stale_blank_reload_bare && query_area.value && !preserve_local_query && !bootstrap_dirty) {
+    /// blank tab, so its `run=1` must not auto-run whatever query the fallback tab restored. Any
+    /// trusted action during the startup window that made `writeHistoryEntry` drop `run=1` from the
+    /// live entry — a database selection, a connection edit, a query/param edit, a tab switch — also
+    /// cancels the run (`deferred_run_cancelled`): running anyway would execute the shared query
+    /// against a target or edit the live URL no longer requests it for.
+    if (defer_run_for_reconcile && !deferred_run_cancelled && !stale_blank_reload_bare && query_area.value && !preserve_local_query && !bootstrap_dirty) {
         postAll();   /// saves history itself on completion
     } else if (activated) {
         syncHistory();   /// reflect the restored active tab in the URL (replaceState)
@@ -10416,6 +10974,20 @@ document.getElementById('copy-div').addEventListener('click', function() {
 // Download functionality
 let last_query_for_download = '';
 let last_params_for_download = {};
+/// The default database that produced the downloadable result (snapshotted at run time and on
+/// restore), so Download stays tied to the displayed result even if the panel selection changes.
+let last_database_for_download = '';
+/// The server address and user that produced the downloadable result, snapshotted alongside the
+/// query/params/database (at run time and on history restore) so Download reproduces the shown
+/// result against the connection that produced it, not the current live connection: after running
+/// on one server and then switching the connection — or navigating Back to an entry produced on
+/// another server while the live connection stays elsewhere — Download would otherwise re-run the
+/// query on the live server and could export different data than the result on screen. The
+/// password is intentionally not snapshotted (it must never be stored in browser history); the
+/// live password is used, so a mismatched connection surfaces as a visible authentication error
+/// rather than silently exporting data from the wrong server.
+let last_url_for_download = '';
+let last_user_for_download = '';
 
 // Toggle download dropdown
 document.getElementById('download-div').addEventListener('click', function(e) {
@@ -10538,10 +11110,15 @@ document.getElementById('download-button').addEventListener('click', async funct
 
     const extension = formatExtensions[format] || format.toLowerCase();
 
-    // Get current values
-    const user = user_elem.value;
+    // Reproduce the shown result against the connection that produced it, not the current live
+    // connection: after switching servers (or navigating Back to an entry produced elsewhere),
+    // the live connection may differ from the one behind the visible result. The password is not
+    // snapshotted (never stored in history), so the live password is used — a mismatched
+    // connection then surfaces as a visible authentication error rather than silently exporting
+    // data from the wrong server.
+    const user = last_user_for_download;
     const password = password_elem.value;
-    const server_address = url_elem.value;
+    const server_address = last_url_for_download || url_elem.value;
     const query = last_query_for_download;
 
     if (!query) {
@@ -10559,6 +11136,7 @@ document.getElementById('download-button').addEventListener('click', async funct
         '&http_response_headers=' + encodeURIComponent(`{'Content-Disposition':'attachment; filename="result.${encodeURIComponent(extension)}"'}`);
     if (user) url += '&user=' + encodeURIComponent(user);
     if (password) url += '&password=' + encodeURIComponent(password);
+    if (last_database_for_download) url += '&database=' + encodeURIComponent(last_database_for_download);
 
     for (const [name, value] of Object.entries(last_params_for_download))
     {
