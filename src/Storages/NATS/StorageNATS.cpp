@@ -643,14 +643,19 @@ void StorageNATS::threadFunc()
         unsubscribeConsumers();
 
     const UInt64 cycle_epoch = stream_control.currentCancelEpoch();
-    const bool run_cycle = stream_control.claimCycle(last_seen_refresh_epoch);
+    const UInt64 refresh_epoch = last_seen_refresh_epoch.load();
+    const bool run_cycle = consumers_connection && consumers_connection->isConnected()
+        && stream_control.claimCycle(last_seen_refresh_epoch);
 
     try
     {
-        if (num_views && consumers_connection && consumers_connection->isConnected() && run_cycle)
+        if (num_views && run_cycle)
         {
             if (!consumers_ready && !subscribeConsumers())
             {
+                /// Give back a REFRESH permit consumed by `claimCycle`, so the refresh still
+                /// runs once subscribing succeeds, even if the table is stopped by then.
+                last_seen_refresh_epoch.store(refresh_epoch);
                 unsubscribeConsumers();
                 streaming_task->scheduleAfter(RESCHEDULE_MS);
                 return;
