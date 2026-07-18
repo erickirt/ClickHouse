@@ -103,3 +103,15 @@ SELECT dotProductTransposed([-0.0]::QBit(Float64, 1), [1.0]::Array(Float64), 12)
        dotProductTransposed([-0.0]::QBit(Float32, 1), [1.0]::Array(Float32), 9) AS f32_neg_zero_dot,
        dotProductTransposed([-0.0]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_neg_zero_dot,
        cosineDistanceTransposed([-0.0]::QBit(BFloat16, 1), [-0.0]::Array(BFloat16), 9) AS bf16_neg_zero_cos;
+
+-- The mantissa-truncation regime must also carve out the non-finite cell: `+-inf` has an all-ones exponent and a zero
+-- kept mantissa, so a naive centre fill would OR the most significant dropped mantissa bit into it and turn `+-inf` into
+-- a `NaN` (0x7F80 -> 0x7FC0 for BFloat16 at precision 9), changing the IEEE category of a legitimate input. A stored
+-- `+-inf` must reconstruct to `+-inf`, so its dot product with a unit reference stays `+-inf` (before the fix this
+-- returned `nan`). This is the reviewer's exact BFloat16 `p = 9` repro, plus Float32/Float64.
+SELECT '-- Infinity stays infinite (not NaN) in the mantissa-truncation regime';
+SELECT dotProductTransposed([inf]::QBit(Float64, 1), [1.0]::Array(Float64), 12) AS f64_pos_inf_dot,
+       dotProductTransposed([-inf]::QBit(Float64, 1), [1.0]::Array(Float64), 12) AS f64_neg_inf_dot,
+       dotProductTransposed([inf]::QBit(Float32, 1), [1.0]::Array(Float32), 9) AS f32_pos_inf_dot,
+       dotProductTransposed([inf]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_pos_inf_dot,
+       dotProductTransposed([-inf]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_neg_inf_dot;

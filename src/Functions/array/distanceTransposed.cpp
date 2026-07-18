@@ -784,7 +784,9 @@ private:
             ///    word is in this zero cell exactly when it is still zero *after masking off the sign bit* - so both `+0.0` (an
             ///    all-zero word) and `-0.0` (only the sign bit kept) stay zero; `centre_fill` lies strictly below the kept planes,
             ///    so any word outside the zero cell keeps at least one non-sign bit and is centred. Padding words stay zero (never
-            ///    read by the kernel).
+            ///    read by the kernel). The non-finite cell (all exponent bits set) is carved out for the same reason: `+-inf` has
+            ///    a zero kept mantissa, so OR-ing `centre_fill` would flip it to a `NaN` and change the IEEE category of a
+            ///    legitimate input; it (and any stored `NaN` payload) is left untouched so `+-inf` stays infinite.
             ///
             /// For a float at `2 <= precision <= exponent_bits` the most significant dropped bit is an *exponent* bit, so setting
             /// it is a multiplicative jump across many binades - not a usable approximation in value space, and (once squared in
@@ -801,15 +803,33 @@ private:
             if (centre_fill && apply_centre)
             {
                 Word * words = reinterpret_cast<Word *>(block.data());
-                if (collapse_zero_cell)
+                if constexpr (is_int8)
                 {
-                    /// Detect the zero cell after masking off the sign bit: `+0.0` (an all-zero word) and `-0.0` (only the sign
-                    /// bit kept) are both the zero cell and must stay zero rather than gaining a spurious tiny magnitude from
-                    /// `centre_fill`, which would otherwise turn a stored `-0.0` into a non-zero negative subnormal.
-                    constexpr Word non_sign_mask = static_cast<Word>(~(Word(1) << (sizeof(Word) * 8 - 1)));
+                    /// Int8 has no exponent; every truncated code is centred unconditionally (matching the quantized LUT).
                     for (size_t i = 0; i < words_in_block; ++i)
-                        if ((words[i] & non_sign_mask) != 0)
+                        words[i] |= centre_fill;
+                }
+                else if (collapse_zero_cell)
+                {
+                    /// Two IEEE categories are carved out of the midpoint rule (the quantized LUT likewise only reconstructs
+                    /// finite cells), both detected after masking off the sign bit:
+                    ///  - the zero cell: `+0.0` (an all-zero word) and `-0.0` (only the sign bit kept) must stay zero rather than
+                    ///    gain a spurious tiny magnitude from `centre_fill`, which would otherwise turn a stored `-0.0` into a
+                    ///    non-zero negative subnormal;
+                    ///  - the non-finite cell (all exponent bits set): `+-inf` has a zero kept mantissa, so OR-ing `centre_fill`
+                    ///    would flip it to a `NaN` and change the IEEE category of a legitimate input. Leaving it untouched keeps
+                    ///    `+-inf` infinite (and preserves a stored `NaN` payload).
+                    /// Only the finite, non-zero words in between are centred. `exponent_bits` is only meaningful for a float, so
+                    /// this branch (and its `exponent_mask`) is guarded from the `Int8` instantiation by `is_int8` above.
+                    constexpr Word non_sign_mask = static_cast<Word>(~(Word(1) << (sizeof(Word) * 8 - 1)));
+                    constexpr Word exponent_mask
+                        = static_cast<Word>(((Word(1) << exponent_bits) - 1) << (sizeof(Word) * 8 - 1 - exponent_bits));
+                    for (size_t i = 0; i < words_in_block; ++i)
+                    {
+                        const Word magnitude = words[i] & non_sign_mask;
+                        if (magnitude != 0 && (magnitude & exponent_mask) != exponent_mask)
                             words[i] |= centre_fill;
+                    }
                 }
                 else
                 {
