@@ -4147,21 +4147,40 @@ let run_immediately = current_url.searchParams.has("run");
 /// snapshot and the trailing `syncHistory` would otherwise re-stamp the URL with the wrong set.
 const color_modes_from_url = current_url.searchParams.get('color_modes');
 let url_color_modes = null;
+/// True when the param was PRESENT in the URL but could not be decoded into a map (invalid JSON, or a
+/// JSON primitive/array rather than an object). Startup reconciliation must then leave the saved/display
+/// color state untouched (honoring the `/* ignore malformed */` contract below) instead of treating it
+/// as an authoritative empty set, so a shared link like `?color_modes=not-json` cannot silently wipe
+/// persisted colors. `null` `url_color_modes` alone cannot tell "absent" (clear) from "malformed" (skip).
+let color_modes_url_malformed = false;
 if (color_modes_from_url) {
     /// Normalize into a prototype-less map (`nullProtoMap`): the parsed object otherwise carries the
     /// `Object` prototype, so a column named `toString` (etc.) would read as colored before any action.
-    try { url_color_modes = nullProtoMap(JSON.parse(color_modes_from_url)); } catch (e) { /* ignore malformed */ }
-    if (url_color_modes) { column_color_modes = url_color_modes; }
+    /// Parse and type-check first: `nullProtoMap` of a non-object (a JSON number/string) returns a
+    /// truthy empty map, which would otherwise be mistaken for an authoritative "no colors" set.
+    let parsed = null;
+    try { parsed = JSON.parse(color_modes_from_url); } catch (e) { /* ignore malformed */ }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        url_color_modes = nullProtoMap(parsed);
+        column_color_modes = url_color_modes;
+    } else { color_modes_url_malformed = true; }
 }
 
 /// Restore the pinned columns from the URL, so a shared/bookmarked link keeps them. Kept around
 /// for the same startup reconciliation as the color modes above.
 const pinned_columns_from_url = current_url.searchParams.get('pinned_columns');
 let url_pinned_columns = null;
+/// Present-but-undecodable, as for `color_modes_url_malformed` above: distinguishes a malformed
+/// `?pinned_columns=not-json` link (leave persisted pins untouched) from a truly absent param (clear).
+let pinned_columns_url_malformed = false;
 if (pinned_columns_from_url) {
-    /// Normalize into a prototype-less map, as for the color modes above.
-    try { url_pinned_columns = nullProtoMap(JSON.parse(pinned_columns_from_url)); } catch (e) { /* ignore malformed */ }
-    if (url_pinned_columns) { pinned_columns = url_pinned_columns; }
+    /// Normalize into a prototype-less map, as for the color modes above (parse and type-check first).
+    let parsed = null;
+    try { parsed = JSON.parse(pinned_columns_from_url); } catch (e) { /* ignore malformed */ }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        url_pinned_columns = nullProtoMap(parsed);
+        pinned_columns = url_pinned_columns;
+    } else { pinned_columns_url_malformed = true; }
 }
 
 let url_elem = document.getElementById('url');
@@ -9879,35 +9898,40 @@ async function reconcileStartup() {
     /// persists them the same way, so both must survive a shared link.
     if (activated && url_query && !preserve_local_query && !bootstrap_dirty) {
         /// The URL is authoritative for the shared display state, so it wins over the matched saved
-        /// tab's snapshot BOTH ways: a param present sets the globals to the link's set, and a param
+        /// tab's snapshot: a param PRESENT-AND-DECODED sets the globals to the link's set, and a param
         /// ABSENT clears them to the empty set. `buildHistoryParams` serializes the empty state by
         /// omitting the param, so a shared link with no `pinned_columns` / `color_modes` means "no
         /// pins / no colors" and must override the saved tab's persisted set rather than inherit it —
         /// otherwise the saved values would survive and the trailing `syncHistory` would re-stamp
-        /// them back into the URL. Kept symmetric for pinned columns and color modes, since the
-        /// feature persists both the same way.
-        pinned_columns = url_pinned_columns || Object.create(null);
-        column_color_modes = url_color_modes || Object.create(null);
+        /// them back into the URL. A param PRESENT-BUT-MALFORMED (`*_url_malformed`) is the third case:
+        /// it is neither an authoritative set nor an authoritative empty, so honor the parse-time
+        /// `/* ignore malformed */` contract and leave that field's restored saved-tab value (and its
+        /// persisted snapshot) untouched — a `?pinned_columns=not-json` link must not wipe persisted
+        /// state. The subsequent `syncHistory` then re-stamps the URL with the preserved value, cleaning
+        /// the malformed param out. Handled per field, since one param can be valid and the other not.
+        /// Mirror the reasserted state onto the active tab too, so the globals and the tab's persisted
+        /// display state agree — the same invariant `saveHistory` establishes on a run and the state
+        /// `activateTab` / Back-Forward reads back when the tab is revisited (a stale snapshot would
+        /// otherwise resurrect the overridden pins/colors on a tab switch). A tab with a result keeps
+        /// them in its result SNAPSHOT; a RESULT-LESS tab has no snapshot, so keep them at the top level
+        /// of the tab, which `captureActiveTab`/`activateTab` and the history writers (`writeHistoryEntry`)
+        /// carry, so a shared link's pins/colors survive a tab switch or Back/Forward until a run
+        /// materializes a snapshot. Kept symmetric for pinned columns and color modes.
+        const active = getActiveTab();
+        if (!pinned_columns_url_malformed) {
+            pinned_columns = url_pinned_columns || Object.create(null);
+            if (active && active.result) { active.result.pinned_columns = pinned_columns; }
+            else if (active) { active.pinned_columns = pinned_columns; }
+        }
+        if (!color_modes_url_malformed) {
+            column_color_modes = url_color_modes || Object.create(null);
+            if (active && active.result) { active.result.color_modes = column_color_modes; }
+            else if (active) { active.color_modes = column_color_modes; }
+        }
         /// Re-lay-out every rendered result table so its columns match the reasserted state.
         /// `applyColumnColors` also refreshes the pinned-column layout, and is a no-op for results
         /// with no column header (raw/chart/transposed) or when nothing was rendered yet.
         for (const el of document.querySelectorAll('query-result')) { el.applyColumnColors(); }
-        /// Mirror the authoritative state onto the active tab too, so the globals and the tab's
-        /// persisted display state agree — the same invariant `saveHistory` establishes on a run and
-        /// the state `activateTab` / Back-Forward reads back when the tab is revisited (a stale
-        /// snapshot would otherwise resurrect the overridden pins/colors on a tab switch). A tab with
-        /// a result keeps them in its result SNAPSHOT; a RESULT-LESS tab has no snapshot, so keep them
-        /// at the top level of the tab, which `captureActiveTab`/`activateTab` and the history writers
-        /// (`writeHistoryEntry`) carry, so a shared link's pins/colors survive a tab switch or
-        /// Back/Forward (not only a copy/reload) until a run materializes a snapshot.
-        const active = getActiveTab();
-        if (active && active.result) {
-            active.result.pinned_columns = pinned_columns;
-            active.result.color_modes = column_color_modes;
-        } else if (active) {
-            active.pinned_columns = pinned_columns;
-            active.color_modes = column_color_modes;
-        }
     }
 
     /// Auto-run only when the URL is still authoritative. On a stale reload
