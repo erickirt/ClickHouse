@@ -10254,6 +10254,21 @@ async function reconcileStartup() {
                     if (match.lastSavedQuery !== url_query) {
                         /// The URL holds a query this tab was never synced to (a fresh/shared
                         /// link for an existing tab name): the URL wins, substitute it.
+                        /// Carry the tab's saved pins/colors up to the top level BEFORE dropping its
+                        /// result snapshot. A run-backed tab keeps its display state only inside the
+                        /// snapshot, so once `result` is null `restoreFromHistory` (which reads
+                        /// `state.result || state`) would otherwise restore an empty set. The startup
+                        /// reconcile below deliberately leaves the persisted display state untouched
+                        /// when the URL param is MALFORMED (the `/* ignore malformed */` contract), so
+                        /// without this carrier a `?pinned_columns=not-json` / `?color_modes=not-json`
+                        /// link would find the state already wiped here and the trailing save would
+                        /// make that wipe durable. The tab level is exactly where a result-less tab
+                        /// keeps them (see `activateTab` / `writeHistoryEntry`), so activation and the
+                        /// reconcile both recover the saved set for the valid/absent cases too.
+                        if (match.result) {
+                            match.pinned_columns = match.result.pinned_columns;
+                            match.color_modes = match.result.color_modes;
+                        }
                         match.query = url_query;
                         match.result = null;
                     } else {
