@@ -26,6 +26,7 @@
 #include <boost/algorithm/string/case_conv.hpp>
 
 #include <charconv>
+#include <Poco/String.h>
 #include <string_view>
 
 #include <Common/StringUtils.h>
@@ -126,7 +127,9 @@ CompressionMethod chooseHTTPCompressionMethod(const std::string & list)
         {"br", CompressionMethod::Brotli},
 #endif
         {"lz4", CompressionMethod::Lz4},
+#if USE_SNAPPY
         {"snappy", CompressionMethod::Snappy},
+#endif
         {"gzip", CompressionMethod::Gzip},
         {"deflate", CompressionMethod::Zlib},
         {"xz", CompressionMethod::Xz},
@@ -135,10 +138,31 @@ CompressionMethod chooseHTTPCompressionMethod(const std::string & list)
 #endif
     };
 
+    /// `*` is the wildcard: matches every content-coding not explicitly listed (RFC 9110 §12.5.3).
+    double star_q = -1.0;
+    for (const auto & entry : entries)
+    {
+        if (Poco::icompare(entry.coding, std::string_view("*")) == 0)
+            star_q = entry.q_value;
+    }
+
     for (const auto & [name, method] : preferred)
+    {
+        bool listed = false;
         for (const auto & entry : entries)
-            if (entry.q_value > 0.0 && entry.coding == name)
-                return method;
+        {
+            if (Poco::icompare(entry.coding, name) == 0)
+            {
+                listed = true;
+                if (entry.q_value > 0.0)
+                    return method;
+                break;
+            }
+        }
+        /// `*;q=N` (N > 0) covers every coding the client did not explicitly list.
+        if (!listed && star_q > 0.0)
+            return method;
+    }
 
     return CompressionMethod::None;
 }

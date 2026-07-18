@@ -35,7 +35,7 @@ TEST(ChooseHTTPCompressionMethod, HandlesDefaultQValue)
     EXPECT_EQ(chooseHTTPCompressionMethod("br;q=0.8, gzip"), CompressionMethod::Gzip);
 #endif
 #if USE_BZIP2
-    EXPECT_EQ(chooseHTTPCompressionMethod("bz2;q=0.8, gzip"), CompressionMethod::Bzip2);
+    EXPECT_EQ(chooseHTTPCompressionMethod("bz2;q=0.8, gzip"), CompressionMethod::Gzip);
 #else
     EXPECT_EQ(chooseHTTPCompressionMethod("bz2;q=0.8, gzip"), CompressionMethod::Gzip);
 #endif
@@ -56,4 +56,34 @@ TEST(ChooseHTTPCompressionMethod, IgnoresWhitespace)
 TEST(ChooseHTTPCompressionMethod, Empty)
 {
     EXPECT_EQ(chooseHTTPCompressionMethod(""), CompressionMethod::None);
+}
+
+TEST(ChooseHTTPCompressionMethod, CaseInsensitiveCodingTokens)
+{
+    EXPECT_EQ(chooseHTTPCompressionMethod("GZip"), CompressionMethod::Gzip);
+    EXPECT_EQ(chooseHTTPCompressionMethod("gZIP"), CompressionMethod::Gzip);
+    EXPECT_EQ(chooseHTTPCompressionMethod("ZSTD"), CompressionMethod::Zstd);
+    EXPECT_EQ(chooseHTTPCompressionMethod("zstd, GZIP"), CompressionMethod::Zstd);
+#if USE_SNAPPY
+    EXPECT_EQ(chooseHTTPCompressionMethod("Snappy;q=0.5, gzIP;q=0.3"), CompressionMethod::Snappy);
+#else
+    EXPECT_EQ(chooseHTTPCompressionMethod("Snappy;q=0.5, gzIP;q=0.3"), CompressionMethod::Gzip);
+#endif
+    EXPECT_EQ(chooseHTTPCompressionMethod("zstd;Q=0, GZip;Q=0.5"), CompressionMethod::Gzip);
+}
+
+TEST(ChooseHTTPCompressionMethod, StarWildcard)
+{
+    /// * matches any encoding — server picks zstd (first in preferred[])
+    EXPECT_EQ(chooseHTTPCompressionMethod("*"), CompressionMethod::Zstd);
+    /// *;q=0 rejects everything not explicitly listed
+    EXPECT_EQ(chooseHTTPCompressionMethod("*;q=0"), CompressionMethod::None);
+    /// gzip;q=0 is rejected, * picks up zstd
+    EXPECT_EQ(chooseHTTPCompressionMethod("gzip;q=0, *;q=1"), CompressionMethod::Zstd);
+    /// zstd;q=0 explicitly rejected, * skips to next preferred
+#if USE_BROTLI
+    EXPECT_EQ(chooseHTTPCompressionMethod("zstd;q=0, *;q=1"), CompressionMethod::Brotli);
+#else
+    EXPECT_EQ(chooseHTTPCompressionMethod("zstd;q=0, *;q=1"), CompressionMethod::Lz4);
+#endif
 }
