@@ -73,4 +73,14 @@ exclude = [
   # `file:test.db?param1=value1&param2=value2`) that lychee reads as file:// URLs.
   # `test.db` is only ever an example database name, never a real link target.
   "test\\.db",
+  # Placeholder S3 buckets used in table engine/function examples. These are
+  # illustrative object paths, not real downloadable datasets.
+  "clickhouse-public-datasets\\.s3\\.amazonaws\\.com/my-bucket/",
+  "clickhouse-public-datasets\\.s3\\.amazonaws\\.com/my-test-bucket-768/",
+  # Local and placeholder hosts used in setup instructions and connection
+  # examples. They are not expected to resolve from the link checker.
+  "^https?://localhost(?::[0-9]+)?(?:/|$)",
+  "^https?://hostname(?::[0-9]+)?(?:/|$)",
+  "^https?://proxy(?::[0-9]+)?(?:/|$)",
+  "^https://abc\\.def\\.clickhouse\\.cloud(?:/|$)",
 ]
