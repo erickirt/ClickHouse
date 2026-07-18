@@ -44,40 +44,41 @@ namespace FailPoints
     extern const char plain_object_storage_copy_temp_target_file_fail_on_file_move[];
 }
 
-MetadataStorageFromPlainObjectStorageValidateDirectoryOperation::MetadataStorageFromPlainObjectStorageValidateDirectoryOperation(
+MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation::MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation(
     std::filesystem::path path_,
-    std::optional<std::string> expected_remote_path_,
+    std::string expected_remote_path_,
     std::shared_ptr<InMemoryDirectoryTree> fs_tree_)
     : path(std::move(path_))
     , expected_remote_path(std::move(expected_remote_path_))
     , fs_tree(std::move(fs_tree_))
 {
-    chassert(path.empty() || path.string().ends_with('/'));
 }
 
-void MetadataStorageFromPlainObjectStorageValidateDirectoryOperation::validateDirectoryNotPresent()
+void MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation::execute()
 {
     const auto remote_info = fs_tree->getDirectoryRemoteInfo(path);
+
+    if (!remote_info)
+        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' was removed concurrently, cannot reuse its remote path '{}'", path, expected_remote_path);
+
+    if (remote_info->remote_path != expected_remote_path)
+        throw Exception(ErrorCodes::INCORRECT_DATA, "Directory '{}' was recreated concurrently, its remote path changed from '{}' to '{}'", path, expected_remote_path, remote_info->remote_path);
+}
+
+MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation::MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation(
+    std::filesystem::path path_,
+    std::shared_ptr<InMemoryDirectoryTree> fs_tree_)
+    : path(std::move(path_))
+    , fs_tree(std::move(fs_tree_))
+{
+}
+
+void MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation::execute()
+{
+    const auto remote_info = fs_tree->getDirectoryRemoteInfo(path);
+
     if (remote_info)
         throw Exception(ErrorCodes::DIRECTORY_ALREADY_EXISTS, "Directory '{}' was created concurrently with remote path '{}'", path, remote_info->remote_path);
-}
-
-void MetadataStorageFromPlainObjectStorageValidateDirectoryOperation::validateDirectoryPresent()
-{
-    const auto remote_info = fs_tree->getDirectoryRemoteInfo(path);
-    if (!remote_info)
-        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' was removed concurrently, cannot reuse its remote path '{}'", path, expected_remote_path.value());
-
-    if (remote_info->remote_path != expected_remote_path.value())
-        throw Exception(ErrorCodes::INCORRECT_DATA, "Directory '{}' was recreated concurrently, its remote path changed from '{}' to '{}'", path, expected_remote_path.value(), remote_info->remote_path);
-}
-
-void MetadataStorageFromPlainObjectStorageValidateDirectoryOperation::execute()
-{
-    if (expected_remote_path)
-        validateDirectoryPresent();
-    else
-        validateDirectoryNotPresent();
 }
 
 MetadataStorageFromPlainObjectStorageCreateDirectoryOperation::MetadataStorageFromPlainObjectStorageCreateDirectoryOperation(

@@ -427,12 +427,12 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createDirectory
         if (auto committed_info = metadata_storage.fs_tree->getDirectoryRemoteInfo(path))
         {
             uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = committed_info->remote_path, .etag = "", .files = {}});
-            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryOperation>(normalized_path, committed_info->remote_path, metadata_storage.fs_tree));
+            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation>(normalized_path, committed_info->remote_path, metadata_storage.fs_tree));
         }
         else
         {
             uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
-            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryOperation>(normalized_path, /*expected_remote_path=*/std::nullopt, metadata_storage.fs_tree));
+            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation>(normalized_path, metadata_storage.fs_tree));
         }
     }
 
@@ -460,12 +460,12 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createDirectory
         if (auto committed_info = metadata_storage.fs_tree->getDirectoryRemoteInfo(path))
         {
             uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = committed_info->remote_path, .etag = "", .files = {}});
-            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryOperation>(normalized_path, committed_info->remote_path, metadata_storage.fs_tree));
+            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation>(normalized_path, committed_info->remote_path, metadata_storage.fs_tree));
         }
         else
         {
             uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
-            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryOperation>(normalized_path, /*expected_remote_path=*/std::nullopt, metadata_storage.fs_tree));
+            operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation>(normalized_path, metadata_storage.fs_tree));
         }
     }
 
@@ -587,7 +587,7 @@ ObjectStorageKey MetadataStorageFromPlainRewritableObjectStorageTransaction::gen
 
     if (const auto directory_remote_info = metadata_storage.fs_tree->getDirectoryRemoteInfo(parent_path))
     {
-        operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryOperation>(normalizeDirectoryPath(parent_path), directory_remote_info->remote_path, metadata_storage.fs_tree));
+        operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation>(normalizeDirectoryPath(parent_path), directory_remote_info->remote_path, metadata_storage.fs_tree));
         return ObjectStorageKey::createAsAbsolute(metadata_storage.layout->constructFileObjectKey(directory_remote_info->remote_path, normalized_path.filename()));
     }
 

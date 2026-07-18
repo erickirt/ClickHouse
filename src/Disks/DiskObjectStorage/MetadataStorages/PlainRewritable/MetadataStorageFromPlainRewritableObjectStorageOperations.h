@@ -13,20 +13,31 @@
 namespace DB
 {
 
-class MetadataStorageFromPlainObjectStorageValidateDirectoryOperation final : public IMetadataOperation
+class MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation final : public IMetadataOperation
 {
 private:
     const std::filesystem::path path;
-    const std::optional<std::string> expected_remote_path;
+    const std::string expected_remote_path;
     const std::shared_ptr<InMemoryDirectoryTree> fs_tree;
 
-    void validateDirectoryNotPresent();
-    void validateDirectoryPresent();
+public:
+    MetadataStorageFromPlainObjectStorageValidateDirectoryPresentOperation(
+        std::filesystem::path path_,
+        std::string expected_remote_path_,
+        std::shared_ptr<InMemoryDirectoryTree> fs_tree_);
+
+    void execute() override;
+};
+
+class MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation final : public IMetadataOperation
+{
+private:
+    const std::filesystem::path path;
+    const std::shared_ptr<InMemoryDirectoryTree> fs_tree;
 
 public:
-    MetadataStorageFromPlainObjectStorageValidateDirectoryOperation(
+    MetadataStorageFromPlainObjectStorageValidateDirectoryMissingOperation(
         std::filesystem::path path_,
-        std::optional<std::string> expected_remote_path_,
         std::shared_ptr<InMemoryDirectoryTree> fs_tree_);
 
     void execute() override;
