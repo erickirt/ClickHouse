@@ -713,12 +713,12 @@ private:
         VectorWithMemoryTracking<CalcT> block(block_size * padded_array_size);
         auto block_row = [&](size_t r) -> CalcT * { return block.data() + r * padded_array_size; };
 
-        /// Round a truncated value to the centre of its coarse cell: pre-fill every word with the most significant dropped bit and
-        /// OR the `precision` kept bit planes on top (the direct analogue of `top | (1 << (7 - precision))` in
-        /// `LloydMax::transposedDequantLUT`). Zero-filling the dropped bits would reconstruct the cell's lower edge, which biases
-        /// every value towards zero and degenerates at low precision: e.g. for BFloat16 at precision 1 only the sign bit survives,
-        /// so every value would be reconstructed as +-0.0 and the distance would be the same for every row. When `precision` covers
-        /// the whole word, no bits of the word are dropped and the fill is zero.
+        /// A value truncated to `precision` bit planes is rounded to the centre of its coarse cell by setting the most significant
+        /// dropped bit (the direct analogue of `top | (1 << (7 - precision))` in `LloydMax::transposedDequantLUT`). Zero-filling the
+        /// dropped bits would instead reconstruct the cell's lower edge, which biases every value towards zero and degenerates at low
+        /// precision: e.g. for BFloat16 at precision 1 only the sign bit survives, so every value would be reconstructed as +-0.0 and
+        /// the distance would be the same for every row. When `precision` covers the whole word, no bits are dropped and the fill is
+        /// zero. `centre_fill` is a single bit strictly below the `precision` kept planes.
         const Word centre_fill = precision < sizeof(Word) * 8 ? static_cast<Word>(Word(1) << (sizeof(Word) * 8 - 1 - precision)) : Word(0);
 
 #if USE_SIMSIMD
@@ -739,8 +739,9 @@ private:
         for (size_t base_row = 0; base_row < input_rows_count; base_row += block_size)
         {
             const size_t rows_in_block = std::min(block_size, input_rows_count - base_row);
+            const size_t words_in_block = rows_in_block * padded_array_size;
 
-            std::fill_n(reinterpret_cast<Word *>(block.data()), rows_in_block * padded_array_size, centre_fill);
+            memset(block.data(), 0, words_in_block * sizeof(CalcT));
 
             /// Untranspose, for each stride group, its `precision` bit planes into that group's slice of every row of the block
             for (size_t group = 0; group < num_groups; ++group)
@@ -756,6 +757,41 @@ private:
                         untranspose_kernel(
                             src, reinterpret_cast<Word *>(block_row(r) + group * padded_group), padded_group, bit_mask);
                     }
+                }
+            }
+
+            /// Round each cell to its centre by setting the most significant dropped bit.
+            ///
+            /// For a floating-point element type at `precision >= 2` at least one exponent bit is retained, so an all-zero kept
+            /// prefix forces the exponent to (near) its minimum and denotes a value whose magnitude is below the reconstruction's
+            /// resolution - genuinely near zero. Such words are left at exact `0` instead of the generic centre, so a stored `0`
+            /// (and padded dimensions) reconstruct to `0` rather than a fake positive constant; this avoids injecting a spurious
+            /// direction that would otherwise make reduced-precision cosine distance report identical zero vectors as maximally
+            /// dissimilar. A word is in this all-zero cell exactly when it is still zero after the kept planes have been OR-ed on
+            /// top, because `centre_fill` lies strictly below those planes. Padding words stay zero (never read by the kernel).
+            ///
+            /// The centre is instead applied unconditionally in two cases:
+            ///  - `precision == 1`: only the sign bit is kept, i.e. pure sign quantization, in which every non-negative value -
+            ///    including exact `0`, whose sign bit is also `0` - shares the all-zero kept prefix and is indistinguishable from a
+            ///    positive. Collapsing that cell to `0` would map every positive to `0` and defeat the sign quantization, so `0`
+            ///    takes the positive sign (`+centre`), as it must.
+            ///  - `Int8` element type: an integer code has no exponent, so an all-zero kept prefix is just a uniform range of small
+            ///    non-negative values rather than a near-zero magnitude; its `...TransposedQuantized` sibling likewise fills every
+            ///    truncated code, so the raw path keeps the same unconditional centre.
+            const bool collapse_zero_cell = precision >= 2 && !std::is_same_v<CalcT, Int8>;
+            if (centre_fill)
+            {
+                Word * words = reinterpret_cast<Word *>(block.data());
+                if (collapse_zero_cell)
+                {
+                    for (size_t i = 0; i < words_in_block; ++i)
+                        if (words[i] != 0)
+                            words[i] |= centre_fill;
+                }
+                else
+                {
+                    for (size_t i = 0; i < words_in_block; ++i)
+                        words[i] |= centre_fill;
                 }
             }
 

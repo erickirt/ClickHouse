@@ -53,3 +53,26 @@ SELECT dotProductTransposed(v, first, 1), dotProductTransposed(v, second, 1);
 SELECT '-- Int8 reconstruction of 100 and -100 at precision 1 (cell centre +-64, not 0/-128)';
 WITH [100, -100]::QBit(Int8, 2) AS v, [1, 0]::Array(Int8) AS first, [0, 1]::Array(Int8) AS second
 SELECT dotProductTransposed(v, first, 1), dotProductTransposed(v, second, 1);
+
+-- A stored 0 must stay 0 at reduced precision, otherwise the generic centre fill turns an all-zero float cell into a
+-- positive constant, injecting a fake direction into zero or padded dimensions (so reduced-precision cosine distance
+-- would report identical zero vectors as maximally dissimilar). At precision >= 2 the retained exponent bits mark the
+-- all-zero cell as genuinely near-zero, so a float type keeps it at exact 0; the reviewer's repro then yields 0, not 1.
+SELECT '-- Zero cell: reduced-precision cosine of identical zero BFloat16 vectors is 0, not 1';
+SELECT cosineDistanceTransposed([0.0]::QBit(BFloat16, 1), [0.0]::Array(BFloat16), 8) AS bf16_zero_cos_p8;
+
+-- The first coordinate is exactly 0: at precision >= 2 every float type reconstructs it to 0; at precision 1 (pure sign
+-- quantization) it shares the positive sign and reconstructs to the positive centre, as sign quantization requires.
+SELECT '-- Zero coordinate reconstructs to 0 at precision >= 2 (to +centre at precision 1) for BFloat16, Float32, Float64';
+WITH [0.0, 1.0]::QBit(BFloat16, 2) AS v, [1.0, 0.0]::Array(BFloat16) AS first
+SELECT dotProductTransposed(v, first, 1) AS bf16_p1, dotProductTransposed(v, first, 2) AS bf16_p2, dotProductTransposed(v, first, 8) AS bf16_p8;
+WITH [0.0, 1.0]::QBit(Float32, 2) AS v, [1.0, 0.0]::Array(Float32) AS first
+SELECT dotProductTransposed(v, first, 1) AS f32_p1, dotProductTransposed(v, first, 2) AS f32_p2, dotProductTransposed(v, first, 16) AS f32_p16;
+WITH [0.0, 1.0]::QBit(Float64, 2) AS v, [1.0, 0.0]::Array(Float64) AS first
+SELECT dotProductTransposed(v, first, 1) AS f64_p1, dotProductTransposed(v, first, 2) AS f64_p2, dotProductTransposed(v, first, 32) AS f64_p32;
+
+-- Int8 has no exponent, so an all-zero kept prefix is a uniform range of small non-negative codes, not a near-zero
+-- magnitude: the raw Int8 path keeps the unconditional centre for its all-zero cell (0 -> +centre), unchanged.
+SELECT '-- Int8 keeps the unconditional centre for its all-zero cell';
+WITH [0, 100]::QBit(Int8, 2) AS v, [1, 0]::Array(Int8) AS first
+SELECT dotProductTransposed(v, first, 2) AS int8_zero_p2;

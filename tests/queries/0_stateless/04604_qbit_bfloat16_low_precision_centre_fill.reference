@@ -22,3 +22,11 @@
 2	-2
 -- Int8 reconstruction of 100 and -100 at precision 1 (cell centre +-64, not 0/-128)
 64	-64
+-- Zero cell: reduced-precision cosine of identical zero BFloat16 vectors is 0, not 1
+0
+-- Zero coordinate reconstructs to 0 at precision >= 2 (to +centre at precision 1) for BFloat16, Float32, Float64
+2	0	0
+2	0	0
+2	0	0
+-- Int8 keeps the unconditional centre for its all-zero cell
+32
