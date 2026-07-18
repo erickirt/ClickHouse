@@ -779,12 +779,12 @@ private:
             ///  - `precision > exponent_bits` for a float: the whole exponent is kept and only mantissa bits are dropped, so the
             ///    centre is the bounded midpoint within the value's own binade. A word whose exponent and kept mantissa bits are
             ///    all zero is the zero cell (a genuine `+0`/`-0` or subnormal), so it is left at exact zero rather than a tiny fake
-            ///    magnitude; this keeps a stored `0` (and padded dimensions) at `0` and avoids injecting a spurious direction that
-            ///    would otherwise make reduced-precision cosine distance report identical zero vectors as maximally dissimilar. A
-            ///    word is in this zero cell exactly when it is still zero *after masking off the sign bit* - so both `+0.0` (an
-            ///    all-zero word) and `-0.0` (only the sign bit kept) stay zero; `centre_fill` lies strictly below the kept planes,
-            ///    so any word outside the zero cell keeps at least one non-sign bit and is centred. Padding words stay zero (never
-            ///    read by the kernel). The non-finite cell (all exponent bits set) is carved out for the same reason: `+-inf` has
+            ///    magnitude; this keeps a stored `0` at `0` and avoids injecting a spurious direction that would otherwise make
+            ///    reduced-precision cosine distance report identical zero vectors as maximally dissimilar. A word is in this zero
+            ///    cell exactly when it is still zero *after masking off the sign bit* - so both `+0.0` (an all-zero word) and
+            ///    `-0.0` (only the sign bit kept) stay zero; `centre_fill` lies strictly below the kept planes, so any word
+            ///    outside the zero cell keeps at least one non-sign bit and is centred. The non-finite cell (all exponent bits
+            ///    set) is carved out for the same reason: `+-inf` has
             ///    a zero kept mantissa, so OR-ing `centre_fill` would flip it to a `NaN` and change the IEEE category of a
             ///    legitimate input; it (and any stored `NaN` payload) is left untouched so `+-inf` stays infinite.
             ///
@@ -803,11 +803,20 @@ private:
             if (centre_fill && apply_centre)
             {
                 Word * words = reinterpret_cast<Word *>(block.data());
+                /// Centre only the `used_dims` real lanes of each row. A non-strided `QBit` whose `dimension` is not a multiple
+                /// of 8 leaves a padded tail (`[used_dims, padded_array_size)`) in every row; it was `memset` to zero and the
+                /// distance kernel is asked for exactly `used_dims` elements, so leaving the tail zero (instead of OR-ing
+                /// `centre_fill` into it) keeps the padding unable to contribute to any distance, independent of how a given
+                /// kernel handles trailing lanes.
                 if constexpr (is_int8)
                 {
                     /// Int8 has no exponent; every truncated code is centred unconditionally (matching the quantized LUT).
-                    for (size_t i = 0; i < words_in_block; ++i)
-                        words[i] |= centre_fill;
+                    for (size_t r = 0; r < rows_in_block; ++r)
+                    {
+                        Word * row = words + r * padded_array_size;
+                        for (size_t d = 0; d < used_dims; ++d)
+                            row[d] |= centre_fill;
+                    }
                 }
                 else if (collapse_zero_cell)
                 {
@@ -824,17 +833,25 @@ private:
                     constexpr Word non_sign_mask = static_cast<Word>(~(Word(1) << (sizeof(Word) * 8 - 1)));
                     constexpr Word exponent_mask
                         = static_cast<Word>(((Word(1) << exponent_bits) - 1) << (sizeof(Word) * 8 - 1 - exponent_bits));
-                    for (size_t i = 0; i < words_in_block; ++i)
+                    for (size_t r = 0; r < rows_in_block; ++r)
                     {
-                        const Word magnitude = words[i] & non_sign_mask;
-                        if (magnitude != 0 && (magnitude & exponent_mask) != exponent_mask)
-                            words[i] |= centre_fill;
+                        Word * row = words + r * padded_array_size;
+                        for (size_t d = 0; d < used_dims; ++d)
+                        {
+                            const Word magnitude = row[d] & non_sign_mask;
+                            if (magnitude != 0 && (magnitude & exponent_mask) != exponent_mask)
+                                row[d] |= centre_fill;
+                        }
                     }
                 }
                 else
                 {
-                    for (size_t i = 0; i < words_in_block; ++i)
-                        words[i] |= centre_fill;
+                    for (size_t r = 0; r < rows_in_block; ++r)
+                    {
+                        Word * row = words + r * padded_array_size;
+                        for (size_t d = 0; d < used_dims; ++d)
+                            row[d] |= centre_fill;
+                    }
                 }
             }
 

@@ -36,3 +36,7 @@
 0	0	0	0
 -- Infinity stays infinite (not NaN) in the mantissa-truncation regime
 inf	-inf	inf	inf	-inf
+-- Odd (non-multiple-of-8) dimensions: padded lanes never contribute
+2	0	0
+2	0
+64	-64	64

@@ -115,3 +115,25 @@ SELECT dotProductTransposed([inf]::QBit(Float64, 1), [1.0]::Array(Float64), 12) 
        dotProductTransposed([inf]::QBit(Float32, 1), [1.0]::Array(Float32), 9) AS f32_pos_inf_dot,
        dotProductTransposed([inf]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_pos_inf_dot,
        dotProductTransposed([-inf]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_neg_inf_dot;
+
+-- The centre fill must never reach the padded tail of a non-strided QBit whose dimension is not a multiple of 8. Such a
+-- QBit untransposes into a buffer padded up to the next multiple of 8, and the distance kernel is asked for exactly
+-- `dimension` elements. The reconstruction now centres only the real lanes, so the padded tail stays at the zero it was
+-- initialised to and can never contribute to a distance. These odd-dimension (3 and 5) cases exercise the precision == 1
+-- and raw-Int8 paths (which centre every real lane unconditionally) on the padded shape and pin the exact results:
+--   - BFloat16 precision 1 is pure sign quantization: +value -> +2.0, -value -> -2.0.
+--   - Int8 precision 1 keeps the sign and centres to +-64.
+-- cosineDistanceTransposed of a vector against its own reconstruction is 0 only if the padded lanes add nothing to either
+-- the dot product or the norm, so it is the sharpest guard against padding leaking into the accumulation.
+SELECT '-- Odd (non-multiple-of-8) dimensions: padded lanes never contribute';
+WITH [1.0, -1.0, 0.5]::QBit(BFloat16, 3) AS v
+SELECT dotProductTransposed(v, [1.0, 1.0, 1.0]::Array(BFloat16), 1) AS bf16_dim3_dot,
+       L2DistanceTransposed(v, [2.0, -2.0, 2.0]::Array(BFloat16), 1) AS bf16_dim3_l2,
+       round(cosineDistanceTransposed(v, [2.0, -2.0, 2.0]::Array(BFloat16), 1), 4) AS bf16_dim3_cos;
+WITH [1.0, -1.0, 1.0, -1.0, 1.0]::QBit(BFloat16, 5) AS v
+SELECT dotProductTransposed(v, [1.0, 1.0, 1.0, 1.0, 1.0]::Array(BFloat16), 1) AS bf16_dim5_dot,
+       round(cosineDistanceTransposed(v, [2.0, -2.0, 2.0, -2.0, 2.0]::Array(BFloat16), 1), 4) AS bf16_dim5_cos;
+WITH [100, -100, 50]::QBit(Int8, 3) AS v
+SELECT dotProductTransposed(v, [1, 0, 0]::Array(Int8), 1) AS int8_dim3_first,
+       dotProductTransposed(v, [0, 1, 0]::Array(Int8), 1) AS int8_dim3_second,
+       dotProductTransposed(v, [1, 1, 1]::Array(Int8), 1) AS int8_dim3_dot;
