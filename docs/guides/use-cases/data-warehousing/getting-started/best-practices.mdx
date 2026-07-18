@@ -142,7 +142,7 @@ Most Iceberg read optimizations are on by default. The settings below control pa
 | [use_iceberg_partition_pruning](/operations/settings/settings#use_iceberg_partition_pruning)       | 25.1  | `1` from 25.6 | Skips data files using partition metadata in manifests                                                         |
 | [use_iceberg_metadata_files_cache](/operations/settings/settings#use_iceberg_metadata_files_cache) | 25.4  | `1`           | Caches manifest lists and metadata JSON in memory                                                              |
 | [iceberg_metadata_staleness_ms](/operations/settings/settings#iceberg_metadata_staleness_ms)       | 26.3  | `0`           | Query setting. Use cached metadata when fresher than this window instead of calling the catalog on every query |
-| [iceberg_enable_version_hint](/operations/settings/settings#iceberg_enable_version_hint)           | 25.6  | —             | Reads `version-hint.text` for faster metadata resolution on direct path access                                 |
+| [iceberg_use_version_hint](/sql-reference/table-functions/iceberg#writes-into-iceberg-table)      | 25.6  | —             | Reads `version-hint.text` for faster metadata resolution on direct path access                                 |
 
 #### Cut catalog latency {#iceberg-catalog-latency}
 
@@ -263,7 +263,7 @@ On earlier versions, confirm connectivity with `SHOW TABLES FROM my_lake` and in
 SHOW CREATE TABLE my_lake.`db.table`;
 ```
 
-If catalog tables don't appear in `system.tables`, enable [show_data_lake_catalogs_in_system_tables](/operations/settings/settings#show_data_lake_catalogs_in_system_tables) (25.8+). Catalog tables are hidden from system introspection by default.
+If catalog tables don't appear in `system.tables`, enable [show_remote_databases_in_system_tables](/operations/settings/settings#show_remote_databases_in_system_tables) (25.8+). Catalog tables are hidden from system introspection by default. On versions before 26.6, use its former name, `show_data_lake_catalogs_in_system_tables`.
 
 ### See which files are read {#debug-files}
 
