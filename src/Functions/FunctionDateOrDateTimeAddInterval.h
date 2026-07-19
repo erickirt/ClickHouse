@@ -647,23 +647,33 @@ struct SubtractIntervalImpl : public Transform
 {
     using Transform::Transform;
 
-    template <typename T>
-    NO_SANITIZE_UNDEFINED auto execute(T t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl & utc_time_zone, UInt16 scale) const
+    /// Wraps like the raw negation used to (delta == INT64_MIN stays INT64_MIN), but reports the
+    /// overflow so the checked fast-path guards run on a defined value instead of UB.
+    static bool negate(Int64 delta, Int64 & negated)
     {
-        /// Signed integer overflow is Ok.
-        return Transform::execute(t, -delta, time_zone, utc_time_zone, scale);
+        return !__builtin_sub_overflow(Int64{0}, delta, &negated);
+    }
+
+    template <typename T>
+    auto execute(T t, Int64 delta, const DateLUTImpl & time_zone, const DateLUTImpl & utc_time_zone, UInt16 scale) const
+    {
+        Int64 negated = 0;
+        negate(delta, negated);
+        return Transform::execute(t, negated, time_zone, utc_time_zone, scale);
     }
 
     template <bool fixed_offset, typename T>
-    NO_SANITIZE_UNDEFINED auto executeWithOffsetMode(
+    auto executeWithOffsetMode(
         T t,
         Int64 delta,
         const DateLUTImpl & time_zone,
         const DateLUTImpl & utc_time_zone,
         UInt16 scale) const
     {
-        /// Signed integer overflow is Ok.
-        return Transform::template executeWithOffsetMode<fixed_offset>(t, -delta, time_zone, utc_time_zone, scale);
+        Int64 negated = 0;
+        if (!negate(delta, negated))
+            return Transform::template executeWithOffsetMode<false>(t, negated, time_zone, utc_time_zone, scale);
+        return Transform::template executeWithOffsetMode<fixed_offset>(t, negated, time_zone, utc_time_zone, scale);
     }
 
     template <typename T>

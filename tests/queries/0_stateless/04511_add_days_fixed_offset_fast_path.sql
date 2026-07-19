@@ -56,6 +56,11 @@ SELECT addWeeks(materialize(toDateTime64('1969-12-28 23:59:59.999', 3, 'UTC')), 
 SELECT addDays(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), 9223372036854775807) AS x, reinterpretAsInt64(x);
 SELECT subtractDays(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), 9223372036854775807) AS x, reinterpretAsInt64(x);
 SELECT addWeeks(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), 9223372036854775807) AS x, reinterpretAsInt64(x);
+-- Subtracting INT64_MIN: the negation wraps, and the wrapped delta must take the calendar path.
+SELECT subtractDays(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), CAST('-9223372036854775808', 'Int64')) AS x, reinterpretAsInt64(x);
+SELECT subtractWeeks(toDateTime64('2020-01-01 00:00:00', 0, 'UTC'), CAST('-9223372036854775808', 'Int64')) AS x, reinterpretAsInt64(x);
+SELECT subtractWeeks(materialize(toDateTime64('2020-01-01 00:00:00', 0, 'UTC')), CAST('-9223372036854775808', 'Int64')) AS x, reinterpretAsInt64(x);
+SELECT subtractWeeks(toDateTime('2020-01-01 00:00:00', 'UTC'), CAST('-9223372036854775808', 'Int64')) AS x, toUInt32(x);
 -- DateTime whose result leaves the LUT range.
 SELECT addDays(toDateTime('2020-01-01 00:00:00', 'UTC'), 10000000) AS x, toUInt32(x);
 SELECT addWeeks(toDateTime('2020-01-01 00:00:00', 'UTC'), 10000000) AS x, toUInt32(x);
