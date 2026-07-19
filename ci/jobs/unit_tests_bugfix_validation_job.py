@@ -604,7 +604,30 @@ def main():
         )
         return
 
-    # All touched tests passed on the before-binary — the test does not catch the bug.
+    # A "pass" only refutes the bug if the touched suite actually ran. `unit_tests_dbms`
+    # is built from `gtest*.cpp` only (see `grep_gtest_sources` in `src/CMakeLists.txt`),
+    # while `_UNIT_TEST_FILE_RE` also matches standalone `*.cpp`/`*.cc`/`*.cxx` test files
+    # under `tests/` (e.g. `test_hive_catalog_url_parsing.cpp`). If a bugfix touches such a
+    # file, its suite is derived but never compiled into the binary, so the filter matches
+    # zero cases and the before-binary exits cleanly without printing a "[ RUN ]" marker.
+    # That is not a refutation — the test was never executed. Treat it as inconclusive
+    # instead of falsely reporting that the test fails to catch the bug.
+    if not before_run_started_a_test(before_result):
+        before_result.set_status(Result.Status.ERROR)
+        before_result.set_info(
+            "The before-binary ran no touched test (no gtest '[ RUN ]' marker) yet exited "
+            "cleanly — the touched suite is not compiled into `unit_tests_dbms`, which is "
+            "built from `gtest*.cpp` sources only. This is inconclusive — NOT a refutation."
+        )
+        results.append(before_result)
+        finalize(
+            results,
+            "Bugfix validation inconclusive: none of the touched unit tests are compiled "
+            "into `unit_tests_dbms` (e.g. a standalone, non-`gtest*.cpp` test file).",
+        )
+        return
+
+    # All touched tests ran and passed on the before-binary — the test does not catch the bug.
     before_result.set_status(Result.Status.FAIL)
     before_result.set_info(
         "Failed to reproduce the bug: all touched unit tests PASS on the before-binary "

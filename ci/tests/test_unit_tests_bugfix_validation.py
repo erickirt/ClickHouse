@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from ci.jobs.unit_tests_bugfix_validation_job import (
     _UNIT_TEST_FILE_RE,
+    before_run_started_a_test,
     build_gtest_filter,
     derive_test_suites,
     get_changed_unit_test_files,
@@ -313,6 +314,38 @@ def test_determine_merge_base_uses_pr_head_not_git_head(monkeypatch):
     for c in merge_base_cmds:
         assert "deadbeefprheadsha" in c
         assert "merge-base HEAD " not in c
+
+
+# --------------------------------------------------------------------------
+# before_run_started_a_test: the "[ RUN ]"-marker guard. A clean before-run
+# that executed no touched test (marker absent) must NOT be treated as a
+# refutation — `unit_tests_dbms` is built from `gtest*.cpp` only, so a touched
+# standalone test file matches `_UNIT_TEST_FILE_RE` yet is never compiled, and
+# the filter then matches zero cases (exit 0, no "[ RUN ]"). That is
+# inconclusive, not a "failed to reproduce".
+# --------------------------------------------------------------------------
+class _FakeResult:
+    def __init__(self, files):
+        self.files = files
+
+
+def test_before_run_started_a_test_detects_run_marker(tmp_path):
+    log = tmp_path / "gtest.log"
+    log.write_text("[==========] Running 1 test.\n[ RUN      ] Suite.Case\n[       OK ]\n")
+    assert before_run_started_a_test(_FakeResult([str(log)])) is True
+
+
+def test_before_run_started_a_test_no_marker_is_inconclusive(tmp_path):
+    # A suite that is not compiled into `unit_tests_dbms` matches zero cases: the
+    # binary runs and exits cleanly without ever printing a "[ RUN ]" marker.
+    log = tmp_path / "gtest.log"
+    log.write_text("[==========] Running 0 tests from 0 test suites.\n[  PASSED  ] 0 tests.\n")
+    assert before_run_started_a_test(_FakeResult([str(log)])) is False
+
+
+def test_before_run_started_a_test_handles_no_files():
+    assert before_run_started_a_test(_FakeResult(None)) is False
+    assert before_run_started_a_test(_FakeResult([])) is False
 
 
 if __name__ == "__main__":
