@@ -655,11 +655,11 @@ static const ActionsDAG::Node * convertRuntimeFilterToKeyConditionDAG(
             "Index analysis engaged on join key '{}': pruning by exact IN-set of {} value(s)",
             column_name, exact_values->size());
 
-        ColumnWithTypeAndName set_values(exact_values, target_type, "__rf_in_values_" + column_name);
+        ColumnWithTypeAndName set_values(exact_values, target_type, "__runtime_filter_in_values_" + column_name);
         auto future_set = std::make_shared<FutureSetFromTuple>(
             CityHash_v1_0_2::uint128{}, ASTPtr{}, ColumnsWithTypeAndName{set_values}, /*transform_null_in=*/false, SizeLimits{});
         auto set_column = ColumnConst::create(ColumnSet::create(1, std::move(future_set)), 0);
-        const auto & set_node = dag.addColumn(std::move(set_column), std::make_shared<DataTypeSet>(), "__rf_in_set_" + column_name);
+        const auto & set_node = dag.addColumn(std::move(set_column), std::make_shared<DataTypeSet>(), "__runtime_filter_in_set_" + column_name);
 
         auto in_func = FunctionFactory::instance().get("in", context);
         return &dag.addFunction(in_func, {&key_casted, &set_node}, {});
@@ -671,9 +671,9 @@ static const ActionsDAG::Node * convertRuntimeFilterToKeyConditionDAG(
         column_name, range->toString());
 
     const auto & min_node = dag.addColumn(
-        target_type->createColumnConst(1, range->left), target_type, "__rf_min_" + column_name);
+        target_type->createColumnConst(1, range->left), target_type, "__runtime_filter_min_" + column_name);
     const auto & max_node = dag.addColumn(
-        target_type->createColumnConst(1, range->right), target_type, "__rf_max_" + column_name);
+        target_type->createColumnConst(1, range->right), target_type, "__runtime_filter_max_" + column_name);
 
     auto ge_func = FunctionFactory::instance().get("greaterOrEquals", context);
     auto le_func = FunctionFactory::instance().get("lessOrEquals", context);
