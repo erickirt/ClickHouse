@@ -20,9 +20,8 @@ GENERATOR = "ci/jobs/scripts/docs/autogenerate/autogenerate_docs.py"
 # A stable branch, force-pushed each run, so the bot keeps a single open PR that
 # always carries exactly one commit off the latest master.
 BRANCH = "robot/docs-autogen"
-# The label the docs check exempts from the generated-region and read-only-copy
-# guards (see ci/jobs/docs_job_mintlify.py). It also skips the changelog
-# requirement.
+# The label the docs check exempts from the generated-region guard (see
+# ci/jobs/docs_job_mintlify.py). It also skips the changelog requirement.
 # The label is provisioned once in the repository as part of the rollout (it
 # already exists); the workflow only attaches it, so it stays the single source
 # of truth for the label's color and description.
@@ -65,11 +64,13 @@ def _open_bot_pr():
     repository, or "" if none.
 
     `gh pr list --head` matches by bare branch name, so a fork PR opened from a
-    branch also named BRANCH would show up too. Filter to non-cross-repository
-    PRs so we only ever act on the bot's own PR in the base repo, never someone
-    else's fork PR."""
+    branch also named BRANCH would show up too. The same head branch can also
+    have multiple open PRs when their base branches differ. Scope to the base
+    branch and filter to non-cross-repository PRs so we only ever act on the
+    bot's own PR to the intended base."""
     return Shell.get_output(
-        f"gh pr list --head {BRANCH} --state open --json number,isCrossRepository"
+        f"gh pr list --head {BRANCH} --base {BASE_BRANCH} --state open"
+        " --json number,isCrossRepository"
         " --jq 'map(select(.isCrossRepository == false)) | .[0].number // empty'"
     ).strip()
 
@@ -123,7 +124,7 @@ def open_or_refresh_pr():
     if not pr:
         # First run: no bot PR yet -- create it with the label.
         return Shell.check(
-            f"gh pr create --base master --head {BRANCH} "
+            f"gh pr create --base {BASE_BRANCH} --head {BRANCH} "
             f"--title {shlex.quote(TITLE)} --body {shlex.quote(BODY)} --label {LABEL}",
             verbose=True,
         )
