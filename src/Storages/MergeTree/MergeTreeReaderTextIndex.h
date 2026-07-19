@@ -102,7 +102,7 @@ private:
     using TextIndexGranulePtr = std::shared_ptr<const MergeTreeIndexGranuleText>;
 
     MergeTreeIndexWithCondition index;
-    const MergeTreeIndexConditionText * condition_text = nullptr;
+    std::shared_ptr<MergeTreeIndexConditionText> condition_text;
     std::vector<TextSearchQueryPtr> search_queries;
     TextIndexGranulePtr granule;
     PostingsBlocksMap postings_blocks;

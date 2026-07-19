@@ -60,7 +60,7 @@ MergeTreeReaderTextIndex::MergeTreeReaderTextIndex(
         main_reader_->all_mark_ranges,
         main_reader_->settings)
     , index(std::move(index_))
-    , condition_text(assert_cast<const MergeTreeIndexConditionText *>(index.condition_template->generateUnsubstituted().get()))
+    , condition_text(std::dynamic_pointer_cast<MergeTreeIndexConditionText>(index.condition_template->generateUnsubstituted()))
 {
     search_queries.reserve(columns_.size());
     for (const auto & column : columns_)
@@ -85,7 +85,7 @@ MergeTreeReaderTextIndex::MergeTreeReaderTextIndex(
     MergeTreeIndexDeserializationState state
     {
         .version = index_format.version,
-        .condition = condition_text,
+        .condition = condition_text.get(),
         .part = *data_part,
         .index = *index.index,
         .readable_ranges = nullptr,
