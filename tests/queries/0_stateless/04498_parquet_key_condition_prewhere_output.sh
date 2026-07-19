@@ -30,5 +30,5 @@ ${CLICKHOUSE_LOCAL} -q "SELECT count() FROM file('${FILE}') PREWHERE indexHint(s
 # The original AST-fuzzer shape: \`match\` with the column as the (non-constant) pattern.
 ${CLICKHOUSE_LOCAL} -q "SELECT count() FROM file('${FILE}') PREWHERE indexHint(match('x', s)) WHERE indexHint(match('y', s)) SETTINGS enable_analyzer = 0;"
 
-# The new analyzer accepts the same query and must keep returning correct results.
+# The analyzer accepts the same query and must keep returning correct results.
 ${CLICKHOUSE_LOCAL} -q "SELECT count() FROM file('${FILE}') PREWHERE indexHint(s = 'x') WHERE indexHint(s = 'y') SETTINGS enable_analyzer = 1;"
