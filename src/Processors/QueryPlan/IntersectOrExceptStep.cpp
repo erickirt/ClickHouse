@@ -144,4 +144,9 @@ void IntersectOrExceptStep::describePipeline(FormatSettings & settings) const
     IQueryPlanStep::describePipeline(processors, settings);
 }
 
+QueryPlanStepPtr IntersectOrExceptStep::clone() const
+{
+    return std::make_unique<IntersectOrExceptStep>(*this);
+}
+
 }
