@@ -1,4 +1,4 @@
-#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/InMemoryDirectoryTree.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Metadata/FsSnapshot.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/MetadataStorageFromPlainRewritableObjectStorage.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/MetadataStorageFromPlainRewritableObjectStorageOperations.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableLayout.h>
@@ -113,10 +113,12 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
         if (!has_data && !has_metadata)
         {
             LOG_DEBUG(log, "Loaded metadata (empty)");
-            fs_tree->apply(std::move(remote_layout));
+            fs.applyLayout(std::move(remote_layout));
             return;
         }
     }
+
+    const auto read_snapshot = fs.takeReadOnlySnapshot();
 
     ThreadPoolCallbackRunnerLocal<void> runner(pool, ThreadName::PLAIN_REWRITABLE_META_LOAD);
     try
@@ -138,18 +140,6 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
             if (!remote_path.has_value())
                 continue;
 
-            if (do_not_load_unchanged_directories)
-            {
-                if (auto directory_info = fs_tree->lookupDirectoryIfNotChanged(remote_path.value(), file->metadata->etag))
-                {
-                    /// Already loaded.
-                    std::lock_guard guard(remote_layout_mutex);
-                    auto & [local_path, remote_info] = directory_info.value();
-                    remote_layout[local_path] = std::move(remote_info);
-                    continue;
-                }
-            }
-
             /// Passing by reference:
             /// log: Created before runner, so it will be destroyed after
             /// settings: Same as log
@@ -157,7 +147,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
             /// remote_layout_mutex: Same
             /// In any case we have a try {} catch (...) around runner usage, so exceptions will call runner.waitForAllToFinish() first
             /// Thus the order of destruction of the variables is not important
-            runner.enqueueAndKeepTrack([remote_path, object_path = file->getPath(), metadata = file->metadata, &log, &settings, this, &remote_layout, &remote_layout_mutex]
+            runner.enqueueAndKeepTrack([remote_path, object_path = file->getPath(), metadata = file->metadata, read_snapshot, do_not_load_unchanged_directories, &log, &settings, this, &remote_layout, &remote_layout_mutex]
             {
                 DB::setThreadName(ThreadName::PLAIN_REWRITABLE_META_LOAD);
 
@@ -175,6 +165,17 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
                     {
                         auto read_buf = object_storage->readObject(object, settings);
                         readStringUntilEOF(local_path, *read_buf);
+                    }
+
+                    if (do_not_load_unchanged_directories)
+                    {
+                        if (const auto known_info = read_snapshot->getDirectoryRemoteInfo(local_path);
+                            known_info && known_info->remote_path == remote_path.value() && known_info->etag == metadata->etag)
+                        {
+                            std::lock_guard guard(remote_layout_mutex);
+                            remote_layout[local_path] = known_info.value();
+                            return;
+                        }
                     }
 
                     /// Load the list of files inside the directory.
@@ -245,7 +246,7 @@ void MetadataStorageFromPlainRewritableObjectStorage::load(bool is_initial_load,
     runner.waitForAllToFinishAndRethrowFirstError();
 
     LOG_DEBUG(log, "Loaded metadata for {} directories", remote_layout.size());
-    fs_tree->apply(std::move(remote_layout));
+    fs.applyLayout(std::move(remote_layout));
     previous_refresh.restart();
 }
 
@@ -254,7 +255,7 @@ MetadataStorageFromPlainRewritableObjectStorage::MetadataStorageFromPlainRewrita
     , metrics(createPlainRewritableMetrics(object_storage->getType()))
     , storage_path_prefix(std::move(storage_path_prefix_))
     , storage_path_full(fs::path(object_storage->getRootPrefix()) / storage_path_prefix)
-    , fs_tree(std::make_shared<InMemoryDirectoryTree>(metrics->directory_map_size, metrics->file_count))
+    , fs(metrics->directory_map_size, metrics->file_count)
     , layout(std::make_shared<PlainRewritableLayout>(object_storage->getCommonKeyPrefix()))
 {
     load(/*is_initial_load=*/true, /*do_not_load_unchanged_directories=*/false);
@@ -277,24 +278,28 @@ void MetadataStorageFromPlainRewritableObjectStorage::refresh(UInt64 not_sooner_
     if (!previous_refresh.compareAndRestart(0.001 * static_cast<double>(not_sooner_than_milliseconds)))
         return;
 
-    std::unique_lock lock(load_mutex, std::defer_lock);
-    if (lock.try_lock())
+    std::unique_lock load_lock(load_mutex, std::defer_lock);
+    if (load_lock.try_lock())
+    {
+        std::unique_lock metadata_lock(metadata_mutex);
         load(/*is_initial_load=*/false, /*do_not_load_unchanged_directories=*/true);
+    }
 }
 
 bool MetadataStorageFromPlainRewritableObjectStorage::existsFile(const std::string & path) const
 {
-    return fs_tree->existsFile(path);
+    return fs.takeReadOnlySnapshot()->existsFile(path);
 }
 
 bool MetadataStorageFromPlainRewritableObjectStorage::existsDirectory(const std::string & path) const
 {
-    return fs_tree->existsDirectory(path).first;
+    return fs.takeReadOnlySnapshot()->existsDirectory(path).first;
 }
 
 bool MetadataStorageFromPlainRewritableObjectStorage::existsFileOrDirectory(const std::string & path) const
 {
-    return existsFile(path) || existsDirectory(path);
+    const auto tree = fs.takeReadOnlySnapshot();
+    return tree->existsFile(path) || tree->existsDirectory(path).first;
 }
 
 uint64_t MetadataStorageFromPlainRewritableObjectStorage::getFileSize(const std::string & path) const
@@ -307,7 +312,7 @@ uint64_t MetadataStorageFromPlainRewritableObjectStorage::getFileSize(const std:
 
 std::optional<uint64_t> MetadataStorageFromPlainRewritableObjectStorage::getFileSizeIfExists(const std::string & path) const
 {
-    if (auto remote_info = fs_tree->getFileRemoteInfo(path))
+    if (auto remote_info = fs.takeReadOnlySnapshot()->getFileRemoteInfo(path))
         return remote_info->bytes_size;
 
     return std::nullopt;
@@ -315,7 +320,7 @@ std::optional<uint64_t> MetadataStorageFromPlainRewritableObjectStorage::getFile
 
 std::vector<std::string> MetadataStorageFromPlainRewritableObjectStorage::listDirectory(const std::string & path) const
 {
-    return fs_tree->listDirectory(path);
+    return fs.takeReadOnlySnapshot()->listDirectory(path);
 }
 
 DirectoryIteratorPtr MetadataStorageFromPlainRewritableObjectStorage::iterateDirectory(const std::string & path) const
@@ -338,17 +343,19 @@ StoredObjects MetadataStorageFromPlainRewritableObjectStorage::getStorageObjects
 
 std::optional<StoredObjects> MetadataStorageFromPlainRewritableObjectStorage::getStorageObjectsIfExist(const std::string & path) const
 {
-    const auto object_size = getFileSizeIfExists(path);
-    if (!object_size)
+    const auto tree = fs.takeReadOnlySnapshot();
+
+    const auto file_remote_info = tree->getFileRemoteInfo(path);
+    if (!file_remote_info)
         return std::nullopt;
 
     const auto normalized_path = normalizePath(path);
-    const auto directory_remote_info = fs_tree->getDirectoryRemoteInfo(normalized_path.parent_path());
+    const auto directory_remote_info = tree->getDirectoryRemoteInfo(normalized_path.parent_path());
     if (!directory_remote_info)
         return std::nullopt;
 
     auto object_key = layout->constructFileObjectKey(directory_remote_info->remote_path, normalized_path.filename());
-    return StoredObjects{StoredObject(object_key, path, object_size.value())};
+    return StoredObjects{StoredObject(object_key, path, file_remote_info->bytes_size)};
 }
 
 Poco::Timestamp MetadataStorageFromPlainRewritableObjectStorage::getLastModified(const std::string & path) const
@@ -361,7 +368,9 @@ Poco::Timestamp MetadataStorageFromPlainRewritableObjectStorage::getLastModified
 
 std::optional<Poco::Timestamp> MetadataStorageFromPlainRewritableObjectStorage::getLastModifiedIfExists(const String & path) const
 {
-    if (auto [exists, remote_info] = fs_tree->existsDirectory(path); exists)
+    const auto tree = fs.takeReadOnlySnapshot();
+
+    if (auto [exists, remote_info] = tree->existsDirectory(path); exists)
     {
         if (remote_info)
             return Poco::Timestamp::fromEpochTime(remote_info->last_modified);
@@ -370,7 +379,7 @@ std::optional<Poco::Timestamp> MetadataStorageFromPlainRewritableObjectStorage::
         return Poco::Timestamp::fromEpochTime(0);
     }
 
-    if (auto remote_info = fs_tree->getFileRemoteInfo(path))
+    if (auto remote_info = tree->getFileRemoteInfo(path))
         return Poco::Timestamp::fromEpochTime(remote_info->last_modified);
 
     return std::nullopt;
@@ -378,10 +387,11 @@ std::optional<Poco::Timestamp> MetadataStorageFromPlainRewritableObjectStorage::
 
 MetadataStorageFromPlainRewritableObjectStorageTransaction::MetadataStorageFromPlainRewritableObjectStorageTransaction(MetadataStorageFromPlainRewritableObjectStorage & metadata_storage_)
     : metadata_storage(metadata_storage_)
-    , uncommitted_fs_tree(std::make_shared<InMemoryDirectoryTree>(CurrentMetrics::end(), CurrentMetrics::end()))
+    , write_set(std::make_shared<FsSnapshot>())
+    , read_set(metadata_storage.fs.takeReadWriteSnapshot())
     , preconditions(std::make_shared<TransactionPreconditions>())
 {
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, metadata_storage.fs_tree));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, write_set));
 }
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::commit(const TransactionCommitOptionsVariant & options)
@@ -391,7 +401,15 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::commit(const Tr
 
     {
         std::unique_lock lock(metadata_storage.metadata_mutex);
+
+        /// 1. Setup up-to-date fs into write set.
+        write_set->setRoot(metadata_storage.fs.takeReadWriteSnapshot()->getRoot());
+
+        /// 2. Execute all operations on top of write set.
         operations.commit();
+
+        /// 3. Exchange metadata with updated fs.
+        metadata_storage.fs.applySnapshot(write_set);
     }
 
     operations.finalize();
@@ -407,8 +425,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createMetadataF
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageWriteFileOperation>(
         path,
         objects.front(),
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics));
 }
@@ -422,31 +440,27 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createDirectory
         return;
     }
 
-    if (!uncommitted_fs_tree->getDirectoryRemoteInfo(path))
+    if (const auto snapshot_info = read_set->getDirectoryRemoteInfo(path))
     {
-        if (auto committed_info = metadata_storage.fs_tree->getDirectoryRemoteInfo(path))
-        {
-            preconditions->checkDirectoryPresent(normalized_path, committed_info->remote_path);
-            uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = committed_info->remote_path, .etag = "", .files = {}});
-        }
-        else
-        {
-            preconditions->checkDirectoryMissing(normalized_path);
-            uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
-        }
+        preconditions->checkDirectoryPresent(normalized_path, snapshot_info->remote_path);
+    }
+    else
+    {
+        preconditions->checkDirectoryMissing(normalized_path);
+        read_set->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
     }
 
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageCreateDirectoryOperation>(
         /*recursive=*/false,
         std::move(normalized_path),
-        uncommitted_fs_tree->getDirectoryRemoteInfo(path)->remote_path,
+        read_set->getDirectoryRemoteInfo(path)->remote_path,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics));
 
     preconditions = std::make_shared<TransactionPreconditions>();
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, metadata_storage.fs_tree));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, write_set));
 }
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::createDirectoryRecursive(const std::string & path)
@@ -458,48 +472,50 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createDirectory
         return;
     }
 
-    if (!uncommitted_fs_tree->getDirectoryRemoteInfo(path))
+    if (const auto snapshot_info = read_set->getDirectoryRemoteInfo(path))
     {
-        if (auto committed_info = metadata_storage.fs_tree->getDirectoryRemoteInfo(path))
-        {
-            preconditions->checkDirectoryPresent(normalized_path, committed_info->remote_path);
-            uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = committed_info->remote_path, .etag = "", .files = {}});
-        }
-        else
-        {
-            preconditions->checkDirectoryMissing(normalized_path);
-            uncommitted_fs_tree->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
-        }
+        preconditions->checkDirectoryPresent(normalized_path, snapshot_info->remote_path);
+    }
+    else
+    {
+        preconditions->checkDirectoryMissing(normalized_path);
+        read_set->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
     }
 
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageCreateDirectoryOperation>(
         /*recursive=*/true,
         std::move(normalized_path),
-        uncommitted_fs_tree->getDirectoryRemoteInfo(path)->remote_path,
+        read_set->getDirectoryRemoteInfo(path)->remote_path,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics));
 
     preconditions = std::make_shared<TransactionPreconditions>();
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, metadata_storage.fs_tree));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, write_set));
 }
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::moveDirectory(const std::string & path_from, const std::string & path_to)
 {
-    if (uncommitted_fs_tree->existsDirectory(path_from).first)
-        uncommitted_fs_tree->moveDirectory(path_from, path_to);
+    auto [exists_from, from_info] = read_set->existsDirectory(path_from);
+    if (exists_from && !read_set->existsDirectory(path_to).first && !read_set->existsFile(path_to))
+    {
+        if (from_info)
+            preconditions->checkDirectoryPresent(normalizeDirectoryPath(path_from), from_info->remote_path);
+
+        read_set->moveDirectory(path_from, path_to);
+    }
 
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageMoveDirectoryOperation>(
         normalizeDirectoryPath(path_from),
         normalizeDirectoryPath(path_to),
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics));
 
     preconditions = std::make_shared<TransactionPreconditions>();
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, metadata_storage.fs_tree));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, write_set));
 }
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::unlinkFile(const std::string & path, bool if_exists, bool /*should_remove_objects*/)
@@ -507,8 +523,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::unlinkFile(cons
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageUnlinkMetadataFileOperation>(
         path,
         if_exists,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics,
         removed_objects));
@@ -517,36 +533,51 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::unlinkFile(cons
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::removeDirectory(const std::string & path)
 {
     if (!normalizePath(path).empty())
-        if (uncommitted_fs_tree->existsDirectory(path).first)
-            uncommitted_fs_tree->unlinkTree(path);
+    {
+        if (auto [exists, info] = read_set->existsDirectory(path); exists)
+        {
+            if (info)
+                preconditions->checkDirectoryPresent(normalizeDirectoryPath(path), info->remote_path);
+
+            if (read_set->listDirectory(path).empty())
+                read_set->removeDirectory(path);
+        }
+    }
 
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageRemoveDirectoryOperation>(
         normalizeDirectoryPath(path),
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics));
 
     preconditions = std::make_shared<TransactionPreconditions>();
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, metadata_storage.fs_tree));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, write_set));
 }
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::removeRecursive(const std::string & path, const ShouldRemoveObjectsPredicate & /*should_remove_objects*/)
 {
     if (!normalizePath(path).empty())
-        if (uncommitted_fs_tree->existsDirectory(path).first)
-            uncommitted_fs_tree->unlinkTree(path);
+    {
+        if (auto [exists, info] = read_set->existsDirectory(path); exists)
+        {
+            if (info)
+                preconditions->checkDirectoryPresent(normalizeDirectoryPath(path), info->remote_path);
+
+            read_set->removeDirectory(path);
+        }
+    }
 
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageRemoveRecursiveOperation>(
         path,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics,
         removed_objects));
 
     preconditions = std::make_shared<TransactionPreconditions>();
-    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, metadata_storage.fs_tree));
+    operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation>(preconditions, write_set));
 }
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::createHardLink(const std::string & path_from, const std::string & path_to)
@@ -554,8 +585,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createHardLink(
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageCopyFileOperation>(
         path_from,
         path_to,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics));
 }
@@ -566,8 +597,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::moveFile(const 
         /*replaceable=*/false,
         path_from,
         path_to,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics,
         removed_objects));
@@ -579,8 +610,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::replaceFile(con
         /*replaceable=*/true,
         path_from,
         path_to,
+        write_set,
         metadata_storage.object_storage,
-        metadata_storage.fs_tree,
         metadata_storage.layout,
         metadata_storage.metrics,
         removed_objects));
@@ -594,13 +625,10 @@ ObjectStorageKey MetadataStorageFromPlainRewritableObjectStorageTransaction::gen
 
     /// Materialize virtual parent.
     const auto parent_path = normalized_path.parent_path();
-    if (uncommitted_fs_tree->existsVirtualDirectory(parent_path) || metadata_storage.fs_tree->existsVirtualDirectory(parent_path))
+    if (const auto [parent_exists, parent_info] = read_set->existsDirectory(parent_path); parent_exists && !parent_info)
         createDirectoryRecursive(parent_path);
 
-    if (const auto directory_remote_info = uncommitted_fs_tree->getDirectoryRemoteInfo(parent_path))
-        return ObjectStorageKey::createAsAbsolute(metadata_storage.layout->constructFileObjectKey(directory_remote_info->remote_path, normalized_path.filename()));
-
-    if (const auto directory_remote_info = metadata_storage.fs_tree->getDirectoryRemoteInfo(parent_path))
+    if (const auto directory_remote_info = read_set->getDirectoryRemoteInfo(parent_path))
     {
         preconditions->checkDirectoryPresent(normalizeDirectoryPath(parent_path), directory_remote_info->remote_path);
         return ObjectStorageKey::createAsAbsolute(metadata_storage.layout->constructFileObjectKey(directory_remote_info->remote_path, normalized_path.filename()));
