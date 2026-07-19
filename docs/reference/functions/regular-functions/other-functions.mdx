@@ -28,9 +28,9 @@ Introduced in: v20.1.0
 Returns the fully qualified domain name of the ClickHouse server.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -171,9 +171,9 @@ If the session user has been switched using the EXECUTE AS command, this functio
 Alias: authUser()
         
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -282,9 +282,9 @@ Returns a monotonically increasing sequence number of the [block](/resources/dev
 The returned block number is updated on a best-effort basis, i.e. it may not be fully accurate.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -343,9 +343,9 @@ Introduced in: v20.3.0
 
 Returns the uncompressed size in bytes of a block of values on disk.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -383,9 +383,9 @@ In ClickHouse, queries are processed in [blocks](/resources/develop-contribute/i
 This function returns the size (row count) of the block the function is called on.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -429,9 +429,9 @@ If executed in the context of a distributed table, this function generates a nor
 Otherwise it produces a constant value.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -550,9 +550,9 @@ See [Training and applying models](https://catboost.ai/docs/features/training.ht
 
 The model file must be located inside the [`user_files`](/reference/settings/server-settings/settings#user_files_path) directory, like for the [`file`](/reference/functions/regular-functions/files#file) function.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -662,11 +662,11 @@ Converts a colour from the **OKLCH** perceptual colour space to the familiar **s
 
 If `L` is outside the range `[0...1]`, `C` is negative, or `H` is outside the range `[0...360]`, the result is implementation-defined.
 
-:::note
+<Note>
 **OKLCH** is a cylindrical version of the OKLab colour space.
 It's three coordinates are `L` (the lightness in the range `[0...1]`), `C` (chroma `>= 0`) and `H` (hue in degrees  from `[0...360]`).
 OKLab/OKLCH is designed to be perceptually uniform while remaining cheap to compute.
-:::
+</Note>
 
 The conversion is the inverse of [`colorSRGBToOKLCH`](#colorSRGBToOKLCH):
 
@@ -729,11 +729,11 @@ Converts a colour encoded in the **sRGB** colour space to the perceptually unifo
 
 If any input channel is outside `[0...255]` or the gamma value is non-positive, the behaviour is implementation-defined.
 
-:::note
+<Note>
 **OKLAB** is a perceptually uniform color space.
 Its three coordinates are `L` (the lightness in the range `[0...1]`), `a (Green-Red axis)` and `b (Blue-Yellow axis)`.
 OKLab is designed to be perceptually uniform while remaining cheap to compute.
-:::
+</Note>
 
 The conversion consists of two stages:
 1) sRGB to Linear sRGB
@@ -777,11 +777,11 @@ Converts a colour encoded in the **sRGB** colour space to the perceptually unifo
 
 If any input channel is outside `[0...255]` or the gamma value is non-positive, the behaviour is implementation-defined.
 
-:::note
+<Note>
 **OKLCH** is a cylindrical version of the OKLab colour space.
 It's three coordinates are `L` (the lightness in the range `[0...1]`), `C` (chroma `>= 0`) and `H` (the hue in degrees from `[0...360]`).
 OKLab/OKLCH is designed to be perceptually uniform while remaining cheap to compute.
-:::
+</Note>
 
 The conversion consists of three stages:
 1) sRGB to Linear sRGB
@@ -829,9 +829,9 @@ This function is most useful in debugging scenarios.
 It was created for compatibility with MySQL's `CONNECTION_ID` function.
 It is not typically used in production queries.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -867,19 +867,19 @@ Introduced in: v20.8.0
 
 Returns the number of decimal digits needed to represent a value.
 
-:::note
+<Note>
 This function takes into account the scales of decimal values i.e., it calculates the result over the underlying integer type which is `(value * scale)`.
 
 For example:
 - `countDigits(42) = 2`
 - `countDigits(42.000) = 5`
 - `countDigits(0.04200) = 4`
-:::
+</Note>
 
-:::tip
+<Tip>
 You can check decimal overflow for `Decimal64` with `countDigits(x) > 18`,
 although it is slower than [`isDecimalOverflow`](#isDecimalOverflow).
-:::
+</Tip>
 
 **Syntax**
 
@@ -921,9 +921,9 @@ Useful in table engine parameters of `CREATE TABLE` queries where you need to sp
 Also see the [`SET` statement](/reference/statements/use).
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -973,9 +973,9 @@ Introduced in: v21.9.0
 
 Returns an array of the setting profiles for the current user.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1011,9 +1011,9 @@ Introduced in: v25.2.0
 
 Returns current Query id.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1050,9 +1050,9 @@ Introduced in: v21.9.0
 Returns an array of the roles which are assigned to the current user.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1096,9 +1096,9 @@ Please use `currentDatabase` instead.
 Also see the [`SET` statement](/reference/statements/use).
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1138,9 +1138,9 @@ Returns the name of the current user.
 In case of a distributed query, the name of the user who initiated the query is returned.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1190,9 +1190,9 @@ Introduced in: v21.9.0
 
 Returns an array of default setting profile names for the current user.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1229,9 +1229,9 @@ Introduced in: v21.9.0
 Returns an array of default roles for the current user.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1444,9 +1444,9 @@ Introduced in: v22.11.0
 
 Returns the value of `display_name` from [config](/concepts/features/configuration/server-config/configuration-files) or the server's Fully Qualified Domain Name (FQDN) if not set.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1482,9 +1482,9 @@ Introduced in: v1.1.0
 
 Outputs a detailed description of the internal structure of a column and its data type.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1520,9 +1520,9 @@ Introduced in: v21.9.0
 
 Returns an array of setting profile names which are enabled for the current user.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1559,9 +1559,9 @@ Introduced in: v21.9.0
 Returns an array of the roles which are enabled for the current user.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1636,9 +1636,9 @@ The file content is not interpreted.
 Also see the [`file`](/reference/functions/table-functions/file) table function.
         
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1671,9 +1671,9 @@ Returns the amount of free space in the filesystem hosting the database persiste
 The returned value is always smaller than the total free space ([`filesystemUnreserved`](/reference/functions/regular-functions/other-functions#filesystemUnreserved)) because some space is reserved for the operating system.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1710,9 +1710,9 @@ Introduced in: v20.1.0
 Returns the capacity of the filesystem in bytes.
 Needs the [path](/reference/settings/server-settings/settings#path) to the data directory to be configured.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -1749,9 +1749,9 @@ Introduced in: v22.12.0
 Returns the total amount of free space on the filesystem hosting the database persistence (previously `filesystemFree`).
 See also [`filesystemAvailable`](#filesystemAvailable).
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2335,9 +2335,9 @@ Introduced in: v23.5.0
 
 Generates random table structure in the format `column1_name column1_type, column2_name column2_type, ...`.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2396,9 +2396,9 @@ The server should be configured with Keeper.
 The series are stored in Keeper nodes under the path, which can be configured in [`series_keeper_path`](/reference/settings/server-settings/settings#series_keeper_path) in the server configuration.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2489,10 +2489,12 @@ Gets the value of an HTTP header.
 If there is no such header or the current request is not performed via the HTTP interface, the function returns an empty string.
 Certain HTTP headers (e.g., `Authorization`, `Authentication` and `X-ClickHouse-*`) are restricted.
 
-:::note Setting `allow_get_client_http_header` is required
+<Info>
+**Setting `allow_get_client_http_header` is required**
+
 The function requires the setting `allow_get_client_http_header` to be enabled.
 The setting is not enabled by default for security reasons, because some headers, such as `Cookie`, could contain sensitive info.
-:::
+</Info>
 
 HTTP headers are case-insensitive per RFC 9110.
 If the function is used in the context of a distributed query, it returns non-empty result only on the initiator node.
@@ -2540,9 +2542,9 @@ Returns the value of a macro from the server configuration file.
 Macros are defined in the [`<macros>`](/reference/settings/server-settings/settings#macros) section of the configuration file and can be used to distinguish servers by convenient names even if they have complicated hostnames.
 If the function is executed in the context of a distributed table, it generates a normal column with values relevant to each shard.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2612,9 +2614,9 @@ Introduced in: v25.6.0
 
 Returns the current value of a MergeTree setting.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2650,9 +2652,9 @@ Introduced in: v21.11.0
 
 Returns a string with the OS kernel version.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2689,9 +2691,9 @@ Introduced in: v21.10.0
 Returns the server's port number for a given protocol.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2728,9 +2730,9 @@ Introduced in: v25.6.0
 Returns the currently set value, given a server setting name.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2766,9 +2768,9 @@ Introduced in: v20.7.0
 
 Returns the current value of a setting.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2809,9 +2811,9 @@ Introduced in: v24.10.0
 
 Returns the current value of a setting or returns the default value specified in the second argument if the setting is not set in the current profile.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -2992,9 +2994,9 @@ For elements in a nested data structure, the function checks for the existence o
 For the nested data structure itself, the function returns `0`.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3116,9 +3118,9 @@ If the function executes in the context of a distributed table, it generates a n
 Otherwise it produces a constant value.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3294,9 +3296,7 @@ During index analysis, the argument of this function is assumed to not be wrappe
 This allows you to select data in index ranges by the corresponding condition but without further filtering by this condition.
 The index in ClickHouse is sparse and using `indexHint` will yield more data than specifying the same condition directly.
 
-<details>
-<summary>Explanation</summary>
-
+<Accordion title="Explanation">
 When you run:
 
 ```sql
@@ -3325,7 +3325,7 @@ It returns all 8,192 rows, including rows where `key = 456`, `key = 789`, etc. (
 - Which granules does my condition select?
 - How many rows are in those granules?
 - Is my index being used effectively?
-</details>
+</Accordion>
 
 Note: It is not possible to optimize a query with the `indexHint` function. The `indexHint` function does not optimize the query, as it does not provide any additional information for the query analysis. Having an expression inside the `indexHint` function is not anyhow better than without the `indexHint` function. The `indexHint` function can be used only for introspection and debugging purposes and it does not improve performance. If you see the usage of `indexHint` by anyone other than ClickHouse contributors, it is likely a mistake and you should remove it.
     
@@ -3370,9 +3370,9 @@ Other parameters of a query can be extracted from field `initial_query_id` in [`
 
 In contrast to [`queryID`](/reference/functions/regular-functions/other-functions#queryID) function, `initialQueryID` returns the same results on different shards.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3413,9 +3413,9 @@ Introduced in: v25.4.0
 Returns the start time of the initial current query.
 `initialQueryStartTime` returns the same results on different shards.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3513,9 +3513,9 @@ For example, expressions over [literals](/reference/syntax#literals) are constan
 This function is mostly intended for development, debugging and demonstration.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3630,13 +3630,13 @@ Introduced in: v18.16.0
 Allows you to extract data from a table the same way as from a dictionary.
 Gets data from Join tables using the specified join key.
 
-:::note
+<Note>
 Only supports tables created with the `ENGINE = Join(ANY, LEFT, <join_keys>)` [statement](/reference/engines/table-engines/special/join).
-:::
+</Note>
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3707,13 +3707,13 @@ Allows you to extract data from a table the same way as from a dictionary.
 Gets data from Join tables using the specified join key.
 Unlike [`joinGet`](#joinGet) it returns `NULL` when the key is missing.
 
-:::note
+<Note>
 Only supports tables created with the `ENGINE = Join(ANY, LEFT, <join_keys>)` [statement](/reference/engines/table-engines/special/join).
-:::
+</Note>
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3755,9 +3755,9 @@ Introduced in: v18.12.0
 Returns the position of a value in the dictionary of a [LowCardinality](/reference/data-types/lowcardinality) column. Positions start at 1. Since LowCardinality have per-part dictionaries, this function may return different positions for the same value in different parts.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -3815,9 +3815,9 @@ If the block is smaller or larger than the dictionary size, the result will be t
 Since LowCardinality have per-part dictionaries, this function may return different dictionary values in different parts.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -4225,9 +4225,9 @@ Features:
 - Preserves the overall query structure and SQL syntax
 - Produces different results for different rows
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -4535,9 +4535,9 @@ Introduced in: v21.4.0
 
 Computes the [partition ID](/reference/engines/table-engines/mergetree-family/custom-partitioning-key).
 
-:::note
+<Note>
 This function is slow and should not be called for large numbers of rows.
-:::
+</Note>
 
 **Syntax**
 
@@ -4596,9 +4596,9 @@ Other parameters of a query can be extracted from field `query_id` in the [`syst
 
 In contrast to [`initialQueryID`](#initialQueryID) function, `queryID` can return different results on different shards.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -4639,9 +4639,9 @@ Introduced in: v22.7.0
 Returns the current ClickHouse server revision.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -4678,9 +4678,9 @@ Introduced in: v1.1.0
 Returns a unique row number for each row processed.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -4743,9 +4743,9 @@ For each [block](/resources/develop-contribute/introduction/architecture#block) 
 The returned number starts from 0 for each block.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -4804,11 +4804,13 @@ Introduced in: v1.1.0
 
 Accumulates the states of an aggregate function for each row of a data block.
 
-:::warning Deprecated
+<Warning>
+**Deprecated**
+
 The state is reset for each new block of data.
 Due to this error-prone behavior the function has been deprecated, and you are advised to use [window functions](/reference/functions/window-functions/index) instead.
 You can use setting [`allow_deprecated_error_prone_window_functions`](/reference/settings/session-settings#allow_deprecated_error_prone_window_functions) to allow usage of this function.
-:::
+</Warning>
 
 **Syntax**
 
@@ -4859,16 +4861,20 @@ The start time is included in the event, while the end time is excluded.
 Columns with a start time and an end time must be of the same data type.
 The function calculates the total number of active (concurrent) events for each event start time.
 
-:::tip Requirements
+<Tip>
+**Requirements**
+
 Events must be ordered by the start time in ascending order.
 If this requirement is violated the function raises an exception.
 Every data block is processed separately.
 If events from different data blocks overlap then they can not be processed correctly.
-:::
+</Tip>
 
-:::warning Deprecated
+<Warning>
+**Deprecated**
+
 It is advised to use [window functions](/reference/functions/window-functions/index) instead.
-:::
+</Warning>
 
 **Syntax**
 
@@ -4909,13 +4915,15 @@ Introduced in: v1.1.0
 Calculates the difference between two consecutive row values in the data block.
 Returns `0` for the first row, and for subsequent rows the difference to the previous row.
 
-:::warning Deprecated
+<Warning>
+**Deprecated**
+
 Only returns differences inside the currently processed data block.
 Because of this error-prone behavior, the function is deprecated.
 It is advised to use [window functions](/reference/functions/window-functions/index) instead.
 
 You can use setting [`allow_deprecated_error_prone_window_functions`](/reference/settings/session-settings#allow_deprecated_error_prone_window_functions) to allow usage of this function.
-:::
+</Warning>
 
 The result of the function depends on the affected data blocks and the order of data in the block.
 The order of rows during calculation of `runningDifference()` can differ from the order of rows returned to the user.
@@ -5011,13 +5019,15 @@ Introduced in: v1.1.0
 
 Calculates the difference between consecutive row values in a data block, but unlike [`runningDifference`](#runningDifference), it returns the actual value of the first row instead of `0`.
 
-:::warning Deprecated
+<Warning>
+**Deprecated**
+
 Only returns differences inside the currently processed data block.
 Because of this error-prone behavior, the function is deprecated.
 It is advised to use [window functions](/reference/functions/window-functions/index) instead.
 
 You can use setting `allow_deprecated_error_prone_window_functions` to allow usage of this function.
-:::
+</Warning>
 
 **Syntax**
 
@@ -5063,9 +5073,9 @@ Returns the random and unique UUID (v4) generated when the server is first start
 The UUID is persisted, i.e. the second, third, etc. server start return the same UUID.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -5102,9 +5112,9 @@ Introduced in: v21.9.0
 Returns the total number of shards for a distributed query.
 If a query is not distributed then constant value `0` is returned.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -5146,9 +5156,9 @@ Returns the index of a shard which processes a part of data in a distributed que
 Indices begin from `1`.
 If a query is not distributed then a constant value `0` is returned.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -5229,9 +5239,9 @@ However, it can be useful in the following scenarios:
 2. **Debugging**: If you need to examine the state of the system or the execution of a query at a specific point in time, you can use `sleep()` to introduce a pause, allowing you to inspect or collect relevant information.
 3. **Simulation**: In some cases, you may want to simulate real-world scenarios where delays or pauses occur, such as network latency or external system dependencies.
 
-:::warning
+<Warning>
 It's important to use the `sleep()` function judiciously and only when necessary, as it can potentially impact the overall performance and responsiveness of your ClickHouse system.
-:::
+</Warning>
 
 For security reasons, the function can only be executed in the default user profile (with `allow_sleep` enabled).
 
@@ -5279,9 +5289,9 @@ It allows you to simulate delays or introduce pauses in the processing of each r
 2. **Debugging**: If you need to examine the state of the system or the execution of a query for each row processed, you can use `sleepEachRow()` to introduce pauses, allowing you to inspect or collect relevant information.
 3. **Simulation**: In some cases, you may want to simulate real-world scenarios where delays or pauses occur for each row processed, such as when dealing with external systems or network latencies.
 
-:::warning
+<Warning>
 Like the `sleep()` function, it's important to use `sleepEachRow()` judiciously and only when necessary, as it can significantly impact the overall performance and responsiveness of your ClickHouse system, especially when dealing with large result sets.
-:::
+</Warning>
 
 **Syntax**
 
@@ -5403,9 +5413,9 @@ If executed in the context of a distributed table, this function generates a nor
 Otherwise it produces a constant value.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -5478,9 +5488,9 @@ Introduced in: v1.1.0
 Returns the internal name of the data type of the given value.
 Unlike function [`toTypeName`](#toTypeName), the returned data type potentially includes internal wrapper columns like `Const` and `LowCardinality`.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -5588,7 +5598,7 @@ Introduced in: v22.6.0
 
 Returns the ID of a transaction.
 
-:::note
+<Note>
 This function is part of an experimental feature set.
 Enable experimental transaction support by adding this setting to your [configuration](/concepts/features/configuration/server-config/configuration-files):
 
@@ -5599,12 +5609,12 @@ Enable experimental transaction support by adding this setting to your [configur
 ```
 
 For more information see the page [Transactional (ACID) support](/concepts/features/operations/insert/transactions#transactions-commit-and-rollback).
-:::
+</Note>
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -5649,7 +5659,7 @@ Introduced in: v22.6.0
 
 Returns the newest snapshot (Commit Sequence Number) of a [transaction](/concepts/features/operations/insert/transactions#transactions-commit-and-rollback) that is available for reading.
 
-:::note
+<Note>
 This function is part of an experimental feature set. Enable experimental transaction support by adding this setting to your configuration:
 
 ```xml
@@ -5659,7 +5669,7 @@ This function is part of an experimental feature set. Enable experimental transa
 ```
 
 For more information see the page [Transactional (ACID) support](/concepts/features/operations/insert/transactions#transactions-commit-and-rollback).
-:::
+</Note>
     
 
 **Syntax**
@@ -5701,7 +5711,7 @@ Introduced in: v22.6.0
 
 Returns the oldest snapshot (Commit Sequence Number) that is visible for some running [transaction](/concepts/features/operations/insert/transactions#transactions-commit-and-rollback).
 
-:::note
+<Note>
 This function is part of an experimental feature set. Enable experimental transaction support by adding this setting to your configuration:
 
 ```xml
@@ -5711,7 +5721,7 @@ This function is part of an experimental feature set. Enable experimental transa
 ```
 
 For more information see the page [Transactional (ACID) support](/concepts/features/operations/insert/transactions#transactions-commit-and-rollback).
-:::
+</Note>
 
 **Syntax**
 
@@ -5946,9 +5956,9 @@ If executed in the context of a distributed table, this function generates a nor
 Otherwise it produces a constant value.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -6067,9 +6077,9 @@ If executed in the context of a distributed table, this function generates a nor
 Otherwise, it produces a constant value.
     
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
@@ -6142,9 +6152,9 @@ Introduced in: v21.11.0
 
 Returns the uptime of the current ZooKeeper session in seconds.
 
-:::note
+<Note>
 This function is non-deterministic: it can return different results for the same arguments.
-:::
+</Note>
 
 **Syntax**
 
