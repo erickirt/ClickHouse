@@ -708,9 +708,9 @@ void StorageNATS::threadFunc()
         if (stream_control.isBlocked() && consumers_ready)
             unsubscribeConsumers();
 
-        /// While paused/stopped the loop above does no work, so reschedule with a delay to avoid
+        /// While paused/stopped/views unready the loop above does no work, so reschedule with a delay to avoid
         /// busy-looping; SYSTEM START reschedules it promptly via `scheduleStreamingTasks`.
-        if (consumers_queues_are_empty || stream_control.isBlocked())
+        if (consumers_queues_are_empty || stream_control.isBlocked() || !deps_ready)
             streaming_task->scheduleAfter(RESCHEDULE_MS);
         else
             streaming_task->schedule();
