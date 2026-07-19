@@ -725,7 +725,7 @@
             margin-bottom: 0.25rem;
             /* Rendered as an <a> so middle-click, Shift+click, and the platform's new-tab
                modifier click (Cmd+click on macOS, Ctrl+click elsewhere) open the terminal in
-               a new browser tab natively. color: inherit keeps the currentColor strokes from
+               a new browser tab or window natively. color: inherit keeps the currentColor strokes from
                picking up the default link color, and display: block matches #databases-icon. */
             text-decoration: none;
             display: block;
@@ -1704,7 +1704,7 @@
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><line x1="3" y1="12" x2="15" y2="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><polyline points="9,6 3,12 9,18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="4" x2="20" y2="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
         <div id="databases"></div>
-        <a id="terminal-icon" class="menu-icon" href="" title="Web Terminal (~) — middle-click, Shift+click, or the platform's new-tab modifier click (Cmd+click on macOS, Ctrl+click elsewhere) to open in a new tab">
+        <a id="terminal-icon" class="menu-icon" href="" title="Web Terminal (~) — middle-click, Shift+click, or the platform's new-tab modifier click (Cmd+click on macOS, Ctrl+click elsewhere) to open in a new tab or window">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="13" y1="16" x2="18" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </a>
         <a id="docs-icon" class="menu-icon" href="/docs" target="_blank" rel="noopener noreferrer" title="Documentation">
@@ -1952,6 +1952,18 @@ function activeColorModes() {
     return tab ? tab.colorModes : {};
 }
 
+/// Names of the columns the user pinned, kept as a set (`{name: true}`). A pinned column sticks
+/// to the left/right edge of the result while it is scrolled horizontally instead of scrolling
+/// away; several pinned columns stack against the edge. Like the color modes, the pinned set is
+/// PER TAB: each tab keeps its own `pinnedColumns` object (see `makeTab`), and its result
+/// element(s) hold the same object via `_pinnedColumns`, so pinning a column in one tab never
+/// re-lays-out another tab's result. They are persisted with the tab's result snapshot and
+/// mirrored into the URL / history for the active tab, exactly like the color modes.
+function activePinnedColumns() {
+    const tab = getActiveTab();
+    return tab ? tab.pinnedColumns : {};
+}
+
 class QueryResultElement extends HTMLElement
 {
     static _loadVizPromise = null;
@@ -2183,6 +2195,85 @@ class QueryResultElement extends HTMLElement
                     opacity: 0.7;
                 }
 
+                /* Icon at the left side of a column header to pin/unpin the column. Pinning is only
+                   meaningful when the table is wider than the viewport (i.e. it can be scrolled
+                   horizontally), so the toggle is disabled (in JS, via _updatePinAvailability) and
+                   thus excluded from the tab order whenever the table does not scroll. Within a
+                   scrollable table it stays out of the way like the colorize toggle - invisible
+                   until the header is hovered - but, unlike the colorize toggle, it is a real
+                   <button> that must stay in the tab order even while invisible so keyboard users
+                   can reach it, so hiding it here uses opacity/pointer-events rather than display,
+                   and it reappears on keyboard focus (:focus-visible) as well as on hover; an
+                   already-pinned column keeps it visible as the pinned indicator. Sits at the left
+                   so it does not crowd the colorize icon. */
+                .pin-toggle
+                {
+                    display: inline-block;
+                    position: absolute;
+                    top: 50%;
+                    left: 0.35rem;
+                    transform: translateY(-50%);
+                    cursor: pointer;
+                    font-size: 0.9em;
+                    line-height: 1;
+                    user-select: none;
+                    opacity: 0;
+                    pointer-events: none;
+                    /* Reset the <button> chrome so it reads as a plain icon, like the emoji it once
+                       was as a <span>; the focus outline itself is left to the browser default. */
+                    background: none;
+                    border: none;
+                    padding: 0;
+                    margin: 0;
+                    font-family: inherit;
+                    color: inherit;
+                }
+
+                /* Reveal the icon only when the table can scroll horizontally: on header hover or
+                   keyboard focus of the toggle itself. */
+                #data-table.has-hscroll th:hover .pin-toggle,
+                #data-table.has-hscroll th .pin-toggle:focus-visible
+                {
+                    opacity: 0.55;
+                    pointer-events: auto;
+                }
+
+                /* A faint extra emphasis while the icon itself (not just its header) is hovered;
+                   placed after the rule above so it wins the tie in specificity. */
+                #data-table.has-hscroll th .pin-toggle:hover
+                {
+                    opacity: 0.85;
+                    pointer-events: auto;
+                }
+
+                /* A pinned column shows its icon at full strength, so it is clear which columns
+                   are pinned; placed last so it wins over the hover rules above regardless of
+                   whether the pinned icon is also being hovered or focused. */
+                #data-table.has-hscroll th.pinned-column .pin-toggle
+                {
+                    opacity: 1;
+                    pointer-events: auto;
+                }
+
+                /* Touch / coarse-pointer devices have no hover, so keep the pin icon tappable -
+                   still only when the table actually scrolls horizontally. */
+                @media (hover: none), (pointer: coarse)
+                {
+                    #data-table.has-hscroll .pin-toggle
+                    {
+                        opacity: 0.55;
+                        pointer-events: auto;
+                    }
+                }
+
+                /* A disabled toggle (table not scrollable) is excluded from the tab order by the
+                   browser; also make it fully transparent and non-interactive defensively. */
+                .pin-toggle:disabled
+                {
+                    opacity: 0;
+                    pointer-events: none;
+                }
+
                 /* Per-column color coding compares values across rows; with no more than a single
                    row there is nothing to compare, so hide the toggles. A column already colorized
                    with a non-default mode is exempted (its header carries the keep-colorize-toggle
@@ -2261,11 +2352,54 @@ class QueryResultElement extends HTMLElement
                     display: block;
                 }
 
-                /* Selected cell stacks above all other cells */
+                /* Selected cell stacks above the ordinary cells around it. A pinned column stacks
+                   higher still (see below), so a pinned column stays visible even when a selected
+                   cell in a scrolling column slides underneath it. */
                 .td-selected
                 {
                     position: relative;
                     z-index: 10;
+                }
+
+                /* A pinned column sticks to the left/right edge of the scroll area during
+                   horizontal scrolling instead of scrolling away. The per-cell left/right
+                   offsets are assigned inline (they depend on the widths of the other pinned
+                   columns, so several pinned columns stack against the edge). Both offsets are
+                   set, so a pinned column stays within view: it slides with the content until it
+                   would leave the viewport, then sticks to the near edge.
+                   Body cells already carry an opaque background (the td rule) and header cells
+                   the header color, which is what lets a pinned cell paint over the cells
+                   scrolling underneath it. Header cells are already position: sticky (for the
+                   vertical header), so the class only needs to raise the body cells; the z-index
+                   here keeps a pinned body cell above the cells it covers, including a selected
+                   cell (z-index 10) that scrolls underneath it - the pinned column must stay
+                   visible even when the ordinary selected cell would otherwise paint over it. */
+                td.pinned-column
+                {
+                    position: sticky;
+                    z-index: 11;
+                }
+
+                /* Delimit a pinned column from the content scrolling underneath it with a border
+                   on its left and right edges. A collapsed-border table paints cell borders at the
+                   table level, which a stuck (sticky) cell does not carry along, so the edges are
+                   drawn with an inset box-shadow that paints on the cell itself and stays visible
+                   while the column is stuck. */
+                td.pinned-column, th.pinned-column
+                {
+                    box-shadow: inset 1px 0 0 0 var(--border-color),
+                                inset -1px 0 0 0 var(--border-color);
+                }
+
+                /* A selected cell in a pinned column must keep sticking (position: sticky) while
+                   stacking one step above the pinned layer (z-index: 12), so its expanded content
+                   paints over the neighbouring pinned cells. Without this more specific rule, the
+                   .td-selected position: relative would win and the selected cell would scroll away
+                   with the rest of the row. */
+                td.pinned-column.td-selected
+                {
+                    position: sticky;
+                    z-index: 12;
                 }
 
                 /* Expand the inner div on top of the table without reflowing it */
@@ -2410,6 +2544,11 @@ class QueryResultElement extends HTMLElement
         /// within the same tab), so toggling a color in one tab never repaints another tab's
         /// identically-named columns. Points at the owning tab's `colorModes` object.
         this._colorModes = {};
+        /// Pinned columns for THIS result, keyed by column name (`{name: true}`). Like `_colorModes`,
+        /// each tab's result element holds its own object (shared by all statements of a multi-query
+        /// run within the same tab, and pointing at the owning tab's `pinnedColumns`), so pinning a
+        /// column in one tab never re-lays-out another tab's identically-named columns.
+        this._pinnedColumns = {};
         /// Set when a result finished rendering into this element while its tab was hidden: the
         /// width/height-measuring layout passes (`transposeIfNeeded` / `_changeTableLayout`) read
         /// `offsetWidth`/`offsetHeight`, which are 0 for a `display:none` panel and would freeze
@@ -2670,10 +2809,15 @@ class QueryResultElement extends HTMLElement
             const unwrapped_type = this._unwrapScalarType(elem.type);
             this._column_is_number[elem.name] = !!unwrapped_type.match(/^(U?Int|Decimal|Float|BFloat)/);
             this._column_is_date[elem.name] = !!unwrapped_type.match(/^Date/);
+            this._appendPinToggle(th, elem.name);
             this._appendColorizeToggle(th, elem.name);
 
             this._appendHeaderResizer(th);
-            th.style.zIndex = zIndex;
+            /// Base header z-index: left columns are highest so a column's type-hint tooltip
+            /// overlaps its right neighbour. The `100 +` base keeps every header above the body
+            /// cells (including a pinned body cell, z-index 11, that scrolls up under the header);
+            /// pinned headers are raised further, into a separate band, by `applyPinnedColumns`.
+            th.style.zIndex = 100 + zIndex;
             --zIndex;
             thead.appendChild(th);
         });
@@ -2731,6 +2875,277 @@ class QueryResultElement extends HTMLElement
         {
             tbody.appendChild(fragment);
         }
+    }
+
+    /// Add the icon at the left of a column header that pins/unpins the column. A real <button>,
+    /// so it is keyboard-reachable (Tab) and keyboard-activatable (Enter/Space) for free, unlike
+    /// the plain <span> icons used elsewhere on the header; see the .pin-toggle CSS for why. It
+    /// starts disabled - and so out of the tab order - until _updatePinAvailability finds the
+    /// table actually scrolls horizontally, since pinning is meaningless otherwise.
+    _appendPinToggle(th, name)
+    {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'pin-toggle';
+        toggle.disabled = true;
+        /// A pushpin emoji, conveying "pin this column".
+        toggle.textContent = '\u{1F4CC}';
+        this._updatePinToggle(toggle, name);
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._togglePin(name);
+        });
+        /// Do not let pressing the icon start a column-resize drag or a text selection.
+        toggle.addEventListener('mousedown', (e) => e.stopPropagation());
+        th.appendChild(toggle);
+    }
+
+    /// Toggle whether a column is pinned. The pinned set is shared by column name WITHIN a tab
+    /// (mirroring `_cycleColorMode`), so re-lay-out every result table of the same tab that has
+    /// this column - scoped to this tab's panel, so other tabs keep their own independent pins -
+    /// then persist the change onto the active tab.
+    _togglePin(name)
+    {
+        if (this._pinnedColumns[name])
+        {
+            delete this._pinnedColumns[name];
+        }
+        else
+        {
+            this._pinnedColumns[name] = true;
+        }
+        const scope = this.closest('.tab-panel');
+        for (const el of (scope ? scope.querySelectorAll('query-result') : [this]))
+        {
+            el.applyPinnedColumns();
+        }
+        persistPinnedColumns();
+    }
+
+    _updatePinToggle(toggle, name)
+    {
+        const label = this._pinnedColumns[name]
+            ? 'Unpin column (currently kept visible during horizontal scroll)'
+            : 'Pin column (keep it visible during horizontal scroll)';
+        toggle.title = label;
+        /// aria-label instead of relying on the title attribute, which screen readers announce
+        /// inconsistently; aria-pressed exposes the toggle's own state, since a screen reader
+        /// cannot see the pinned-column styling that conveys it visually.
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('aria-pressed', this._pinnedColumns[name] ? 'true' : 'false');
+    }
+
+    /// The rows whose data cells participate in pinning: the body rows and the totals row, but
+    /// not the header (its cells are handled separately, keeping their own sticky top position).
+    _pinnableRows()
+    {
+        let rows = [];
+        for (const tbody of this._dataTable.tBodies)
+        {
+            for (const row of tbody.rows) { rows.push(row); }
+        }
+        if (this._dataTable.tFoot)
+        {
+            for (const row of this._dataTable.tFoot.rows) { rows.push(row); }
+        }
+        return rows;
+    }
+
+    /// Lay out the pinned columns of this table for the current (shared) `pinned_columns` set:
+    /// mark each column's header and body/totals cells as pinned (or clear them), and assign the
+    /// per-cell sticky offsets so that several pinned columns stack against the edge instead of
+    /// overlapping. A no-op for non-tabular or vertical (transposed) results, which have no
+    /// horizontally scrolling column layout.
+    ///
+    /// The `left` offset of a pinned column is the total width of the pinned columns before it,
+    /// and the `right` offset is the total width of the pinned columns after it; both are set so
+    /// the column sticks to whichever edge it reaches. Widths are read from the header cells,
+    /// which match the column widths in this collapsed-border table.
+    applyPinnedColumns()
+    {
+        if (!Array.isArray(this._header) || !this._dataTable.tHead) { return; }
+        if (this._willTranspose()) { return; }
+
+        /// Fast path for the common case where nothing is pinned in this table and there is no
+        /// stale pinned layout left over from a previous pass to clear: the full sweep below would
+        /// be a no-op except for horizontal-scroll availability, so just refresh that and return.
+        /// Both `applyColumnColors` and `_changeTableLayout` call this on every render, so without
+        /// this guard every ordinary result would pay two O(rows x columns) DOM passes before the
+        /// user has pinned anything - a real regression on large results. `_hasPinnedColumns` is
+        /// O(columns); the `querySelector` is a native read-only lookup that also catches cells
+        /// left `pinned-column` by a just-unpinned column (a pinned column always marks its header
+        /// cell too, so no stale layout escapes), for which the full clearing pass must still run.
+        if (!this._hasPinnedColumns() && !this._dataTable.querySelector('.pinned-column'))
+        {
+            this._updatePinAvailability();
+            return;
+        }
+
+        this._layoutPinnedColumns(this._pinnableRows());
+    }
+
+    /// Compute the per-column sticky offsets for the currently pinned columns from the current
+    /// header widths. `left_offset[j]` is the total width of the pinned columns before column `j`
+    /// and `right_offset[j]` the total width of those after it (both zero for unpinned columns), so
+    /// each pinned column sticks to whichever edge it reaches while the rest stack against it. Reads
+    /// the header cell widths, which match the column widths in this collapsed-border table.
+    /// O(columns) - no per-row work.
+    _computePinnedOffsets()
+    {
+        const thead = this._dataTable.tHead;
+        const header_len = this._header.length;
+        /// Cell index in a row for data column `j` (the leading row-number cell is at index 0).
+        const cellIndex = (j) => j + 1;
+
+        const pinned = this._header.map(col => !!this._pinnedColumns[col.name]);
+
+        /// Cumulative widths give the stacking offsets: left grows left-to-right, right grows
+        /// right-to-left, over the pinned columns only.
+        const left_offset = new Array(header_len).fill(0);
+        const right_offset = new Array(header_len).fill(0);
+        let acc = 0;
+        for (let j = 0; j < header_len; ++j)
+        {
+            if (!pinned[j]) { continue; }
+            left_offset[j] = acc;
+            acc += thead.children[cellIndex(j)].offsetWidth;
+        }
+        acc = 0;
+        for (let j = header_len - 1; j >= 0; --j)
+        {
+            if (!pinned[j]) { continue; }
+            right_offset[j] = acc;
+            acc += thead.children[cellIndex(j)].offsetWidth;
+        }
+        return { pinned, left_offset, right_offset };
+    }
+
+    /// A compact signature of a pinned-offset vector, used to detect when the offsets last applied
+    /// to the rendered rows have shifted (a pinned column changed width) and the earlier rows must
+    /// be re-laid-out. See `_layoutPinnedColumns` (which stores it) and `_pinStreamedRows`.
+    _pinnedOffsetsKey(left_offset, right_offset)
+    {
+        return left_offset.join(',') + '|' + right_offset.join(',');
+    }
+
+    /// Shared core of the pinned-column layout: recompute the per-column sticky offsets from the
+    /// current header widths, then mark (or clear) the pinned state on the header cells and on the
+    /// given data rows, and refresh horizontal-scroll availability. `applyPinnedColumns` passes
+    /// every body/totals row for a full (re)layout; `_pinStreamedRows` passes only the rows a
+    /// streaming chunk just appended, so the per-chunk work stays proportional to the new rows.
+    _layoutPinnedColumns(rows)
+    {
+        const thead = this._dataTable.tHead;
+        const header_len = this._header.length;
+        /// Cell index in a row for data column `j` (the leading row-number cell is at index 0).
+        const cellIndex = (j) => j + 1;
+
+        const { pinned, left_offset, right_offset } = this._computePinnedOffsets();
+
+        /// Remember the offsets just applied so `_pinStreamedRows` can tell when a later chunk shifts
+        /// them (a pinned column widened) and the rows already rendered with the old offsets need a
+        /// full re-layout rather than only the new rows.
+        this._pinnedLayoutKey = this._pinnedOffsetsKey(left_offset, right_offset);
+
+        for (let j = 0; j < header_len; ++j)
+        {
+            const idx = cellIndex(j);
+            const th = thead.children[idx];
+            const cells = [th];
+            for (const row of rows)
+            {
+                if (row.cells[idx]) { cells.push(row.cells[idx]); }
+            }
+
+            for (const cell of cells)
+            {
+                if (pinned[j])
+                {
+                    cell.classList.add('pinned-column');
+                    cell.style.left = `${left_offset[j]}px`;
+                    cell.style.right = `${right_offset[j]}px`;
+                }
+                else
+                {
+                    cell.classList.remove('pinned-column');
+                    cell.style.left = '';
+                    cell.style.right = '';
+                }
+            }
+
+            /// Raise pinned headers into a band above every other header, so a pinned header cell
+            /// paints over the ordinary headers scrolling behind it; unpinned headers keep the
+            /// base band assigned in `appendHeader`.
+            th.style.zIndex = (pinned[j] ? 2000 : 100) + (header_len - j);
+
+            const toggle = th.querySelector('.pin-toggle');
+            if (toggle) { this._updatePinToggle(toggle, this._header[j].name); }
+        }
+
+        this._updatePinAvailability();
+    }
+
+    /// Keep the pinned-column feature responsive while a table result is still streaming, called
+    /// after each `flushFragment`. Two cases, both cheap in the common path:
+    ///   - Some column is pinned (e.g. a wide `?pinned_columns=...&run=1` link was opened): keep the
+    ///     pinned columns sticky throughout streaming instead of snapping into the pinned state only
+    ///     when `applyColumnColors` runs at EOF. If the pinned-column offsets are unchanged since the
+    ///     last layout, only the rows this chunk appended need them (plus the header, which is cheap),
+    ///     so the per-chunk cost stays proportional to the new rows. If a pinned column widened in
+    ///     this chunk, the offsets of the pinned columns after it shift, so every row already rendered
+    ///     with the old offsets must be re-laid-out too, or those earlier rows would drift out of
+    ///     alignment (overlap or leave gaps) until EOF; that full pass runs only on the chunks that
+    ///     actually change a width. (`_layoutPinnedColumns` refreshes availability itself at the end.)
+    ///   - Nothing pinned yet: there are no offsets to lay out, but the table may have just grown
+    ///     wide enough to scroll horizontally, which is what reveals and enables the pin toggles.
+    ///     Refresh only that availability (O(columns), no per-row reflow) so a user can pin a column
+    ///     on a long-running wide query without waiting for it to finish - the earlier behaviour
+    ///     kept the toggles disabled/hidden until EOF.
+    _pinStreamedRows(newRows)
+    {
+        if (!Array.isArray(this._header) || !this._dataTable.tHead) { return; }
+        if (this._willTranspose()) { return; }
+        if (this._hasPinnedColumns())
+        {
+            const { left_offset, right_offset } = this._computePinnedOffsets();
+            const changed = this._pinnedOffsetsKey(left_offset, right_offset) !== this._pinnedLayoutKey;
+            this._layoutPinnedColumns(changed ? this._pinnableRows() : newRows);
+        }
+        else
+        {
+            this._updatePinAvailability();
+        }
+    }
+
+    /// Reflect whether this table can be scrolled horizontally onto the `has-hscroll` class, which
+    /// gates the visibility of the pin toggles: pinning only makes sense when the table is wider
+    /// than the space available to it. Also enables/disables the toggle buttons themselves to
+    /// match: a disabled <button> is excluded from the tab order, so pinning stays unreachable by
+    /// keyboard too while it is meaningless. Called from `applyPinnedColumns` (every layout pass)
+    /// and on window resize. The table overflows when its rendered width exceeds the host
+    /// element's width (the host is a block box constrained to the scroll container, so a wider
+    /// table overflows it and produces the horizontal scrollbar rather than stretching the host).
+    _updatePinAvailability()
+    {
+        if (!this._dataTable) { return; }
+        const overflows = this._dataTable.offsetWidth > this.clientWidth + 1;
+        this._dataTable.classList.toggle('has-hscroll', overflows);
+        if (this._dataTable.tHead)
+        {
+            for (const toggle of this._dataTable.tHead.querySelectorAll('.pin-toggle'))
+            {
+                toggle.disabled = !overflows;
+            }
+        }
+    }
+
+    /// Whether any column of this table is currently pinned. On resize this decides whether the
+    /// full pinned layout must be recomputed - the sticky `left`/`right` offsets are baked from
+    /// the header widths, which are viewport-dependent - or the cheaper availability refresh is
+    /// enough (nothing pinned means no offsets to update).
+    _hasPinnedColumns()
+    {
+        return Array.isArray(this._header) && this._header.some(col => this._pinnedColumns[col.name]);
     }
 
     /// Add the icon at the right of a column header that cycles the column's color coding mode.
@@ -3133,6 +3548,10 @@ class QueryResultElement extends HTMLElement
             this._applyColumnColor(column.name, col_idx);
         }
         this._scheduleCategoricalEmphasis();
+        /// Apply the pinned-column layout here too: `applyColumnColors` runs in every table-render
+        /// path (live run and both history-restore paths) once all rows are present, so this is the
+        /// single common point at which the pinned columns get their sticky offsets on first paint.
+        this.applyPinnedColumns();
     }
 
     /// Recompute the categorical emphasis after a 100 ms quiet period. Coalesces bursts of
@@ -3302,6 +3721,9 @@ class QueryResultElement extends HTMLElement
             /// No per-column color coding in vertical mode, so drop the colorize toggle too.
             const toggle = th.querySelector('.colorize-toggle');
             if (toggle) { th.removeChild(toggle); }
+            /// No horizontal column layout in vertical mode, so drop the pin toggle too.
+            const pin_toggle = th.querySelector('.pin-toggle');
+            if (pin_toggle) { th.removeChild(pin_toggle); }
             tr.appendChild(th);
             if (values)
             {
@@ -3376,6 +3798,11 @@ class QueryResultElement extends HTMLElement
         {
             row.style.height = `${rowHeights[i++]}px`;
         }
+
+        /// Recompute the pinned-column offsets against the now-frozen column widths, so they match
+        /// exactly whatever this layout pass measured (this also covers any render path that reaches
+        /// `_changeTableLayout` without going through `applyColumnColors`).
+        this.applyPinnedColumns();
     }
 
     _appendHeaderResizer(header)
@@ -3421,6 +3848,10 @@ class QueryResultElement extends HTMLElement
             document.removeEventListener('pointermove', move);
             document.removeEventListener('pointerup', stop);
             document.removeEventListener('pointercancel', stop);
+
+            /// A resize changes column widths, so the pinned columns' stacking offsets must be
+            /// recomputed to stay aligned with the new widths.
+            this.applyPinnedColumns();
         };
 
         const resizer = document.createElement('div');
@@ -3913,6 +4344,14 @@ if (color_modes_from_url) {
     try { url_color_modes = JSON.parse(color_modes_from_url) || {}; } catch (e) { /* ignore malformed */ }
 }
 
+/// Restore the pinned columns from the URL, so a shared/bookmarked link keeps them. Seeded into the
+/// bootstrap tab's `pinnedColumns` (see the bootstrap below), exactly like the color modes above.
+let url_pinned_columns = {};
+const pinned_columns_from_url = current_url.searchParams.get('pinned_columns');
+if (pinned_columns_from_url) {
+    try { url_pinned_columns = JSON.parse(pinned_columns_from_url) || {}; } catch (e) { /* ignore malformed */ }
+}
+
 let url_elem = document.getElementById('url');
 let user_elem = document.getElementById('user');
 let password_elem = document.getElementById('password');
@@ -4011,16 +4450,30 @@ checkURL();
 /// the page's own origin when `/play` is opened locally (`file://`) or pointed at a remote server.
 /// Resolve the Documentation link against that configured server (like `getTerminalURL` does for the Web
 /// Terminal) instead of leaving it hardcoded to `/docs`, and keep it in sync as the URL input changes.
+/// The non-empty Play username is carried over as a `user` query parameter so the docs page connects as
+/// the same user instead of falling back to the server default user. The password is intentionally
+/// omitted (it would leak in the URL).
 {
     const docs_icon = document.getElementById('docs-icon');
     function updateDocsURL() {
         try {
-            docs_icon.href = new URL('/docs', url_elem.value).href;
+            const url = new URL('/docs', url_elem.value);
+            if (user_elem.value) url.searchParams.set('user', user_elem.value);
+            docs_icon.href = url.href;
         } catch (e) {
             /// Leave the previous href in place while the configured URL is not parsable.
         }
     }
     url_elem.addEventListener('input', updateDocsURL);
+    user_elem.addEventListener('input', updateDocsURL);
+    /// Refresh the `href` before navigation so an open uses the current server URL and user. `#user` is a
+    /// browser-autofillable credential field, and autofilling a saved login does not always fire `input`,
+    /// which would otherwise leave `docs_icon.href` stale. `pointerdown` fires before the middle-button
+    /// `auxclick` navigation (which produces no `click`), while `click` also covers keyboard activation
+    /// (tab to the link, then Enter) where no pointer event fires at all. Together they refresh the `href`
+    /// on every navigation path, matching how the Web Terminal link refreshes its `href`.
+    docs_icon.addEventListener('pointerdown', updateDocsURL);
+    docs_icon.addEventListener('click', updateDocsURL);
     updateDocsURL();
 }
 
@@ -5140,8 +5593,9 @@ function toggleDatabases() {
     }
 }
 
-/// The logo is an <a> element so that Ctrl/Cmd/Shift+click and middle-click
-/// natively open the current page (with the query) in a new tab.
+/// The logo is an <a> element so that middle-click, Shift+click, and the platform's
+/// new-tab modifier click (Cmd+click on macOS, Ctrl+click elsewhere) natively open the
+/// current page (with the query) in a new tab or window.
 /// We update the href on mousedown so it always reflects the current URL.
 document.getElementById('databases-icon').addEventListener('mousedown', () => {
     document.getElementById('databases-icon').href = window.location.href;
@@ -5149,7 +5603,8 @@ document.getElementById('databases-icon').addEventListener('mousedown', () => {
 
 databases_toggle.addEventListener('click', e => {
     e.stopPropagation();
-    /// Let the browser handle modifier clicks as a link (open in new tab).
+    /// Defer any modified click to the browser's native link handling instead of toggling:
+    /// a new tab or window for the new-tab gestures, or the context menu for macOS Ctrl+click.
     if (e.ctrlKey || e.metaKey || e.shiftKey) return;
     /// Normal click: toggle the databases panel instead of following the link.
     e.preventDefault();
@@ -5272,6 +5727,32 @@ function updateServerInfoVisibility() {
     server_info.style.visibility = (text_end + 4 > indicator_left) ? 'hidden' : 'visible';
 }
 window.addEventListener('resize', updateServerInfoVisibility);
+
+/// A resize can make a table start or stop overflowing horizontally, which changes whether the pin
+/// option should be offered; it also changes the header widths that the pinned columns' sticky
+/// `left`/`right` offsets are baked from. So for a table with pinned columns recompute the whole
+/// layout (`applyPinnedColumns` refreshes `has-hscroll` itself), and for the rest just refresh the
+/// pin availability.
+function refreshPinnedLayout() {
+    for (const el of document.querySelectorAll('query-result')) {
+        if (el._hasPinnedColumns()) {
+            el.applyPinnedColumns();
+        } else {
+            el._updatePinAvailability();
+        }
+    }
+}
+window.addEventListener('resize', refreshPinnedLayout);
+
+/// A viewport `resize` is not the only thing that changes a result table's available width: opening
+/// or closing the database panel widens the `#menu` grid column and so narrows the `#main` results
+/// column WITHOUT any `resize` event. A table can therefore gain horizontal overflow while its pin
+/// controls stay hidden, or keep stale sticky offsets. Observe the results container so both a
+/// viewport resize and such internal layout changes keep the pin availability and offsets correct.
+const main_container = document.getElementById('main');
+if (main_container && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(refreshPinnedLayout).observe(main_container);
+}
 
 let check_credentials_request_num = 0;
 function checkCredentials() {
@@ -5468,7 +5949,15 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
                     if (!cont) { break; }
                 }
 
+                /// The rows this chunk appended: captured before `flushFragment` empties the
+                /// fragment, but the node references stay valid after the move into the table body.
+                const streamed_rows = fragment.querySelectorAll('tr');
                 targetResultEl.flushFragment(fragment);
+                /// Keep the pinned-column feature live as the table streams: lay out the new rows
+                /// for any already-pinned columns (e.g. a wide `?pinned_columns=...&run=1` link),
+                /// and otherwise just refresh whether the table now scrolls horizontally so the pin
+                /// toggles become usable mid-stream rather than only at EOF.
+                targetResultEl._pinStreamedRows(streamed_rows);
 
                 if (!cont)
                 {
@@ -5801,6 +6290,7 @@ async function postMulti(tab, posted_request_num, parsed, paramValuesSnapshot, e
     for (let i = 0; i < parsed.length; ++i) {
         const el = document.createElement('query-result');
         el._colorModes = tab.colorModes;
+        el._pinnedColumns = tab.pinnedColumns;
         tab.multiContainer.appendChild(el);
         resultElements.push(el);
     }
@@ -6110,6 +6600,37 @@ function persistColorModes() {
     scheduleSave();
 }
 
+/// Persist the pinned columns the same way `persistColorModes` persists the color modes: onto the
+/// active tab's result snapshot, the URL, and the current history entry, so reloads, shares, and
+/// Back/Forward keep them. The pinned set is PER TAB (`getActiveTab().pinnedColumns`), so a toggle
+/// updates only the active tab's persisted set.
+function persistPinnedColumns() {
+    const tab = getActiveTab();
+    const pins = tab ? tab.pinnedColumns : {};
+    if (tab && tab.result) tab.result.pinned_columns = pins;
+    const url = new URL(window.location);
+    if (Object.keys(pins).length > 0) {
+        url.searchParams.set('pinned_columns', JSON.stringify(pins));
+    } else {
+        url.searchParams.delete('pinned_columns');
+    }
+    /// Keep the tabs state shape: fold the pins into the entry's nested `result` when it has one
+    /// (matching how the restore path reads them back via `state.result || state`), else at
+    /// the top level for a legacy flat entry.
+    const cur = history.state;
+    if (cur) {
+        const next = cur.result
+            ? { ...cur, result: { ...cur.result, pinned_columns: pins } }
+            : { ...cur, pinned_columns: pins };
+        try {
+            history.replaceState(next, document.title, url.toString());
+        } catch (e) {
+            /// History manipulation is not allowed for the 'file:' protocol.
+        }
+    }
+    scheduleSave();
+}
+
 /// Re-render a saved multi-query ("Run all") result snapshot into `tab`'s own panel, rebuilding
 /// its multi-query container the same way `postMulti` lays it out: one result element per
 /// statement, this tab's single result element and the logo hidden, and aggregated progress text.
@@ -6131,6 +6652,7 @@ async function restoreMultiQuery(snapshot, tab, matToken) {
     for (let i = 0; i < snapshot.multi.length; ++i) {
         const el = document.createElement('query-result');
         el._colorModes = tab.colorModes;
+        el._pinnedColumns = tab.pinnedColumns;
         tab.multiContainer.appendChild(el);
         elements.push(el);
     }
@@ -6247,6 +6769,10 @@ async function materializeResult(tab) {
     /// colored on first paint. The element shares the tab's modes object.
     tab.colorModes = result.color_modes || {};
     el._colorModes = tab.colorModes;
+    /// Restore this result's pinned columns likewise, so the table is laid out with them on first
+    /// paint. The element shares the tab's pinned-columns object, mirroring the color modes above.
+    tab.pinnedColumns = result.pinned_columns || {};
+    el._pinnedColumns = tab.pinnedColumns;
 
     clearPanel(tab);
     tab.downloadVisible = false;
@@ -6607,6 +7133,7 @@ function tabRuntimeDefaults() {
         finalStats: null,       /// { rowCount, elapsedNs, incomplete } shown when a run finishes
         logoVisible: true,      /// whether the shared logo shows for this tab (hidden by errors / multi)
         colorModes: {},         /// per-column color modes for this tab's result (shared with its element)
+        pinnedColumns: {},      /// pinned columns for this tab's result (shared with its element)
         downloadQuery: '',      /// query the download button should re-run for this tab
         downloadParams: {},
         downloadDatabase: '',   /// database the download should target (the producing connection)
@@ -6669,6 +7196,7 @@ function getOrCreatePanel(tab) {
     panel.hidden = true;
     const el = document.createElement('query-result');
     el._colorModes = tab.colorModes;
+    el._pinnedColumns = tab.pinnedColumns;
     panel.appendChild(el);
     resultPanelsEl.appendChild(panel);
     tab.panel = panel;
@@ -6857,9 +7385,11 @@ function addTab() {
 }
 
 /// Duplicate a tab: copy its query and parameters into a new tab inserted right after the
-/// source, then switch to the copy. Triggered by a middle-click or Ctrl/Shift/Cmd+click on
-/// the title — the browser gesture for "open in a new tab". `guard_paste` is set for a genuine
-/// middle click, so the activation swallows the X11 PRIMARY paste that follows focusing the editor.
+/// source, then switch to the copy. Triggered by a middle-click, Shift+click, or the platform's
+/// new-tab modifier click (Cmd+click on macOS, Ctrl+click elsewhere) on the title — the browser
+/// gesture for "open in a new tab" (macOS Ctrl+click is the secondary/context-menu click and is
+/// left to the browser, not a duplicate gesture). `guard_paste` is set for a genuine middle click,
+/// so the activation swallows the X11 PRIMARY paste that follows focusing the editor.
 function duplicateTab(id, guard_paste = false) {
     const src = tabs.find(t => t.id === id);
     if (!src) return;
@@ -7238,7 +7768,7 @@ async function persist() {
 /// reloaded `run=1` URL reproduces the displayed result instead of replaying against a different
 /// database or server.
 /// `fromRun` marks an entry that a genuine run produced (see `writeHistoryEntry`).
-function buildHistoryParams(params, tabName, fromRun, colorModes, user, server_address, database) {
+function buildHistoryParams(params, tabName, fromRun, colorModes, pinnedColumns, user, server_address, database) {
     const out = [];
     if (user) out.push('user=' + encodeURIComponent(user));
     /// Only carry `run=1` for an entry whose query/params were produced by a genuine run and
@@ -7266,6 +7796,10 @@ function buildHistoryParams(params, tabName, fromRun, colorModes, user, server_a
     /// Carry the result's per-column color coding modes so a shared/reloaded URL restores them.
     if (colorModes && Object.keys(colorModes).length > 0) {
         out.push('color_modes=' + encodeURIComponent(JSON.stringify(colorModes)));
+    }
+    /// Likewise carry the result's pinned columns, so a shared/reloaded URL restores them.
+    if (pinnedColumns && Object.keys(pinnedColumns).length > 0) {
+        out.push('pinned_columns=' + encodeURIComponent(JSON.stringify(pinnedColumns)));
     }
     if (tabName) out.push('tab=' + encodeURIComponent(tabName));
     return out;
@@ -7424,25 +7958,28 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         connectionUser: entry_user,
     };
     const title = "ClickHouse Query: " + (titleForDoc || tab.query);
-    /// Once the tab has materialized, its live `colorModes` object is the authoritative palette:
-    /// URL reconciliation and per-column toggles mutate it in place, and a rerun nulls
-    /// `tab.result` entirely, so the snapshot's `color_modes` may lag it or be missing (e.g. a
-    /// snapshot saved with the default palette stores none, then a shared link's URL modes are
-    /// applied on top). Serialize the live palette, and mirror it into the snapshot so the
-    /// IndexedDB persistence (`scheduleSave` below) and the history-state copy carry it too.
-    /// A tab whose stored result has NOT been rendered yet keeps its snapshot's saved palette:
-    /// its `colorModes` is still the `makeTab` placeholder and must not clobber the saved one.
+    /// Once the tab has materialized, its live `colorModes` / `pinnedColumns` objects are the
+    /// authoritative display state: URL reconciliation and per-column toggles mutate them in place,
+    /// and a rerun nulls `tab.result` entirely, so the snapshot's `color_modes` / `pinned_columns`
+    /// may lag them or be missing (e.g. a snapshot saved with the default palette stores none, then
+    /// a shared link's URL modes are applied on top). Serialize the live state, and mirror it into
+    /// the snapshot so the IndexedDB persistence (`scheduleSave` below) and the history-state copy
+    /// carry it too. A tab whose stored result has NOT been rendered yet keeps its snapshot's saved
+    /// state: its `colorModes` / `pinnedColumns` are still the `makeTab` placeholders and must not
+    /// clobber the saved ones.
     let color_modes = tab.result && tab.result.color_modes;
+    let pinned_columns = tab.result && tab.result.pinned_columns;
     if (tab.materialized) {
         color_modes = tab.colorModes;
-        if (tab.result) tab.result.color_modes = tab.colorModes;
+        pinned_columns = tab.pinnedColumns;
+        if (tab.result) { tab.result.color_modes = tab.colorModes; tab.result.pinned_columns = tab.pinnedColumns; }
     }
     /// `carries_run` (rather than the raw `fromRun`) drops `run=1` when the live connection/database
     /// diverged from the one the displayed result was produced against: auto-running the live target
     /// on reload would not reproduce it (and must not fire a write against the wrong server/database).
     /// The producing user/server/database are serialized into the URL and stamped into the state so
     /// Back/Forward can restore this entry's `database=` only while the live connection still matches.
-    const history_params = buildHistoryParams(tab.params, tab.title, carries_run, color_modes, entry_user, entry_server, entry_database);
+    const history_params = buildHistoryParams(tab.params, tab.title, carries_run, color_modes, pinned_columns, entry_user, entry_server, entry_database);
     let history_url = window.location.pathname;
     if (history_params.length > 0) history_url += '?' + history_params.join('&');
     history_url += '#' + toBase64(tab.query);
@@ -7584,6 +8121,9 @@ function saveHistory(stateData, titleForDoc, tab) {
         /// snapshot so re-activating the tab (or navigating to its entry / reloading) restores and
         /// re-applies the same coloring; a later toggle updates it via `persistColorModes`.
         color_modes: tab.colorModes,
+        /// Pinned columns in effect when this result was produced; travels with the snapshot so
+        /// re-activating the tab (or navigating / reloading) restores them, like `color_modes`.
+        pinned_columns: tab.pinnedColumns,
         elapsed_ns: stateData.elapsed_ns,
     };
     if (tab.id === activeTabId) {
@@ -7819,6 +8359,7 @@ window.onpopstate = function(event) {
             data: flat.data ?? null,
             multi: flat.multi ?? null,
             color_modes: flat.color_modes || {},
+            pinned_columns: flat.pinned_columns || {},
             elapsed_ns: flat.elapsed_ns,
         };
     } else {
@@ -10386,8 +10927,10 @@ if (theme) {
 /// first paint is identical to the pre-tabs UI (no layout shift).
 tabs = [makeTab(undefined, query_area.value)];
 activeTabId = tabs[0].id;
-/// Seed the bootstrap tab's color modes from the URL (a shared/bookmarked link may carry them).
+/// Seed the bootstrap tab's color modes and pinned columns from the URL (a shared/bookmarked link
+/// may carry them).
 tabs[0].colorModes = url_color_modes;
+tabs[0].pinnedColumns = url_pinned_columns;
 /// Build the active tab's panel now (synchronously), so the `resultEl` alias exists before any
 /// connection check / early render runs, matching the pre-tabs invariant that it always existed.
 setActivePanel(tabs[0]);
@@ -10474,9 +11017,11 @@ async function reconcileStartup() {
                     id: r.id, title: r.title, query: r.query || '',
                     params: r.params || {}, result: r.result || null, lastSavedQuery: r.lastSavedQuery,
                     /// Attach fresh transient runtime state (panels/queries are materialized lazily on
-                    /// first activation), seeding color modes from the persisted result snapshot.
+                    /// first activation), seeding color modes and pinned columns from the persisted
+                    /// result snapshot.
                     ...tabRuntimeDefaults(),
                     colorModes: (r.result && r.result.color_modes) || {},
+                    pinnedColumns: (r.result && r.result.pinned_columns) || {},
                 });
             } else {
                 pruned_blank_ids.add(r.id);
@@ -10654,7 +11199,10 @@ async function reconcileStartup() {
                 if (has_url_query && match.query !== url_query) {
                     if (match.lastSavedQuery !== url_query) {
                         /// The URL holds a query this tab was never synced to (a fresh/shared
-                        /// link for an existing tab name): the URL wins, substitute it.
+                        /// link for an existing tab name): the URL wins, substitute it. The tab's
+                        /// live `colorModes` / `pinnedColumns` (seeded from its snapshot in
+                        /// `loadFromDb`) survive the drop of `result`, and when the URL is
+                        /// authoritative the re-apply below replaces them with the link's set.
                         match.query = url_query;
                         match.result = null;
                     } else {
@@ -10735,9 +11283,17 @@ async function reconcileStartup() {
             if (t) {
                 for (const k of Object.keys(t.colorModes)) delete t.colorModes[k];
                 Object.assign(t.colorModes, url_color_modes);
+                /// The pinned columns are persisted and shared the same way as the color modes, so a
+                /// shared link is equally authoritative for them: reassert `url_pinned_columns` in
+                /// place (keeping every aliasing element bound to the same object) alongside the modes.
+                for (const k of Object.keys(t.pinnedColumns)) delete t.pinnedColumns[k];
+                Object.assign(t.pinnedColumns, url_pinned_columns);
                 const els = t.resultEl ? [t.resultEl] : [];
                 if (t.multiContainer) for (const el of t.multiContainer.querySelectorAll('query-result')) els.push(el);
-                for (const el of els) { el._colorModes = t.colorModes; el.applyColumnColors(); }
+                for (const el of els) {
+                    el._colorModes = t.colorModes; el.applyColumnColors();
+                    el._pinnedColumns = t.pinnedColumns; el.applyPinnedColumns();
+                }
             }
         }
     } else if (url_tab_name && ((has_url_query && !stale_blank_reload_bare) || !stale_blank_reload)) {
@@ -11345,8 +11901,11 @@ document.getElementById('download-button').addEventListener('click', async funct
         else activateTerminal();
     }
 
-    /// Ctrl/Cmd/Shift+click opens the terminal in a new browser tab; let the anchor's native
-    /// behaviour handle it (middle-click does not fire a `click` event and is handled natively too).
+    /// True for a modified click that should defer to the anchor's native handling rather
+    /// than toggling the inline terminal: Shift+click or the platform's new-tab modifier
+    /// click (Cmd+click on macOS, Ctrl+click elsewhere) opens a new tab or window, while
+    /// macOS Ctrl+click is the secondary/context-menu click. (Middle-click does not fire a
+    /// `click` event and is handled natively too.)
     function wantsNewTab(e) {
         return e.ctrlKey || e.metaKey || e.shiftKey;
     }
@@ -11356,7 +11915,8 @@ document.getElementById('download-button').addEventListener('click', async funct
     terminalIcon.addEventListener('pointerdown', updateTerminalHref);
 
     terminalIcon.addEventListener('click', function(e) {
-        /// For a modifier-click, fall through to the anchor's native "open in new tab".
+        /// For a modified click, fall through to the anchor's native handling (a new tab or
+        /// window, or the macOS Ctrl+click context menu) instead of toggling the terminal.
         if (wantsNewTab(e)) return;
         /// A plain left click toggles the inline terminal panel instead of navigating.
         e.preventDefault();
