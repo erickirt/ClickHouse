@@ -14,10 +14,11 @@ class InMemoryMetadata
 public:
     InMemoryMetadata(CurrentMetrics::Metric metric_directories_name, CurrentMetrics::Metric metric_files_name);
 
-    void apply(std::shared_ptr<DirectoryTree> snapshot);
-    void apply(std::unordered_map<std::string, DirectoryRemoteInfo> remote_layout);
+    void applySnapshot(std::shared_ptr<DirectoryTree> snapshot);
+    void applyLayout(std::unordered_map<std::string, DirectoryRemoteInfo> remote_layout);
 
     std::shared_ptr<DirectoryTree> takeSnapshot() const;
+    std::shared_ptr<const DirectoryTree> takeReadSnapshot() const;
 
 private:
     mutable std::mutex mutex;

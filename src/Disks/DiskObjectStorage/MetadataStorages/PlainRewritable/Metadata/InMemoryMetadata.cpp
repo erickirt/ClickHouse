@@ -10,7 +10,7 @@ InMemoryMetadata::InMemoryMetadata(CurrentMetrics::Metric metric_directories_nam
 {
 }
 
-void InMemoryMetadata::apply(std::shared_ptr<DirectoryTree> snapshot)
+void InMemoryMetadata::applySnapshot(std::shared_ptr<DirectoryTree> snapshot)
 {
     const auto [directories_delta, files_delta] = snapshot->getRemoteLayoutDeltas();
 
@@ -20,7 +20,7 @@ void InMemoryMetadata::apply(std::shared_ptr<DirectoryTree> snapshot)
     remote_layout_files_count.add(files_delta);
 }
 
-void InMemoryMetadata::apply(std::unordered_map<std::string, DirectoryRemoteInfo> remote_layout)
+void InMemoryMetadata::applyLayout(std::unordered_map<std::string, DirectoryRemoteInfo> remote_layout)
 {
     auto new_tree = std::make_shared<DirectoryTree>();
     for (auto & [path, info] : remote_layout)
@@ -38,6 +38,12 @@ std::shared_ptr<DirectoryTree> InMemoryMetadata::takeSnapshot() const
 {
     std::lock_guard guard(mutex);
     return std::make_shared<DirectoryTree>(directory_tree->getRoot());
+}
+
+std::shared_ptr<const DirectoryTree> InMemoryMetadata::takeReadSnapshot() const
+{
+    std::lock_guard guard(mutex);
+    return directory_tree;
 }
 
 }
