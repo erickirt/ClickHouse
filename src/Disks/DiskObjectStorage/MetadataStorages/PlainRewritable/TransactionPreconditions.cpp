@@ -17,7 +17,7 @@ namespace ErrorCodes
 namespace
 {
 
-void validateDirectoryPresent(const std::shared_ptr<InMemoryDirectoryTree> & fs_tree, const std::filesystem::path & path, const std::string & expected_remote_path)
+void validateDirectoryPresent(const std::shared_ptr<const DirectoryTree> & fs_tree, const std::filesystem::path & path, const std::string & expected_remote_path)
 {
     const auto remote_info = fs_tree->getDirectoryRemoteInfo(path);
 
@@ -28,7 +28,7 @@ void validateDirectoryPresent(const std::shared_ptr<InMemoryDirectoryTree> & fs_
         throw Exception(ErrorCodes::INCORRECT_DATA, "Directory '{}' was recreated concurrently, its remote path changed from '{}' to '{}'", path.string(), expected_remote_path, remote_info->remote_path);
 }
 
-void validateDirectoryMissing(const std::shared_ptr<InMemoryDirectoryTree> & fs_tree, const std::filesystem::path & path)
+void validateDirectoryMissing(const std::shared_ptr<const DirectoryTree> & fs_tree, const std::filesystem::path & path)
 {
     const auto remote_info = fs_tree->getDirectoryRemoteInfo(path);
 
@@ -50,7 +50,7 @@ void TransactionPreconditions::checkDirectoryMissing(std::filesystem::path direc
     expected_missing_directories.emplace(std::move(directory));
 }
 
-void TransactionPreconditions::runChecks(const std::shared_ptr<InMemoryDirectoryTree> & fs_tree)
+void TransactionPreconditions::runChecks(const std::shared_ptr<const DirectoryTree> & fs_tree)
 {
     std::lock_guard lock(mutex);
 
