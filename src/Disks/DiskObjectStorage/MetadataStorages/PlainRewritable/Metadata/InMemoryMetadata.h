@@ -12,7 +12,7 @@ namespace DB
 class InMemoryMetadata
 {
 public:
-    InMemoryMetadata();
+    InMemoryMetadata(CurrentMetrics::Metric metric_directories_name, CurrentMetrics::Metric metric_files_name);
 
     void apply(std::shared_ptr<DirectoryTree> snapshot);
     void apply(std::unordered_map<std::string, DirectoryRemoteInfo> remote_layout);
@@ -21,10 +21,10 @@ public:
 
 private:
     mutable std::mutex mutex;
-    std::shared_ptr<DirectoryTree> directory_tree;
+    std::shared_ptr<DirectoryTree> directory_tree TSA_GUARDED_BY(mutex);
 
-    mutable CurrentMetrics::Increment remote_layout_directories_count;
-    mutable CurrentMetrics::Increment remote_layout_files_count;
+    mutable CurrentMetrics::Increment remote_layout_directories_count TSA_GUARDED_BY(mutex);
+    mutable CurrentMetrics::Increment remote_layout_files_count TSA_GUARDED_BY(mutex);
 };
 
 }

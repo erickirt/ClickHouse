@@ -363,4 +363,16 @@ bool DirectoryTree::existsFile(const std::string & path) const
     return node->info->files.contains(normalized_path.filename());
 }
 
+std::shared_ptr<FsNode> DirectoryTree::getRoot() const
+{
+    std::lock_guard guard(mutex);
+    return root;
+}
+
+std::pair<int64_t, int64_t> DirectoryTree::getRemoteLayoutDeltas() const
+{
+    std::lock_guard guard(mutex);
+    return {remote_layout_directories_delta, remote_layout_files_delta};
+}
+
 }

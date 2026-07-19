@@ -67,6 +67,11 @@ public:
     std::optional<FileRemoteInfo> getFileRemoteInfo(const std::string & path) const;
     bool existsFile(const std::string & path) const;
 
+    /// Snapshot Methods
+
+    std::shared_ptr<FsNode> getRoot() const;
+    std::pair<int64_t, int64_t> getRemoteLayoutDeltas() const;
+
 private:
     mutable std::mutex mutex;
     std::shared_ptr<FsNode> root TSA_GUARDED_BY(mutex);
