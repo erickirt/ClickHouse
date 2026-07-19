@@ -228,7 +228,7 @@ private:
                 ///    output length is output_dims regardless, so padding does not change the visible shape);
                 ///  - a FULL transform of any other length cannot be done exactly, and zero-padding it would
                 ///    silently return a longer vector, so it is rejected instead of padded.
-                size_t working_dim;
+                size_t working_dim = 0;
                 if (kron_m)
                     working_dim = length;
                 else if (std::has_single_bit(length))
