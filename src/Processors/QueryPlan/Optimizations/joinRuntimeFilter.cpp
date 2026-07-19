@@ -616,6 +616,12 @@ void registerLeftSideIndexAnalysisSecondPass(QueryPlan::Node & node, const Query
                && !key_arg->children.empty())
             key_arg = key_arg->children.front();
 
+        /// Only bare key columns are registered. This intentionally excludes the `tuple(key1, key2, ...)`
+        /// argument built for multi-key LEFT ANTI joins: that filter has NOT IN semantics, so a positive
+        /// IN-set / range predicate derived from it would prune exactly the granules the join must keep.
+        /// (Multi-key non-ANTI joins are unaffected: they build one per-column filter per key, and each
+        /// is registered here. Single-key ANTI filters registered here stay fail-open at read time:
+        /// the negating filter exposes neither recorded key values nor a key range.)
         if (key_arg->type != ActionsDAG::ActionType::INPUT)
             continue;
 
