@@ -2592,7 +2592,10 @@ void InterpreterSystemQuery::controlBackgroundActivity(const ASTSystemQuery & qu
     const auto * mv = storage ? dynamic_cast<const StorageMaterializedView *>(storage.get()) : nullptr;
     const bool is_refreshable_view = mv && mv->isRefreshable();
 
-    const bool authorized = (is_streaming && can_streaming) || (is_refreshable_view && can_views) || (can_views && can_streaming);
+    const bool authorized = is_streaming ? can_streaming
+        : is_refreshable_view ? can_views
+        : storage ? (can_views || can_streaming)
+        : (can_views && can_streaming);
     if (!authorized)
         throw Exception(ErrorCodes::ACCESS_DENIED,
             "Not enough privileges. To execute this query, it's necessary to have the grant "

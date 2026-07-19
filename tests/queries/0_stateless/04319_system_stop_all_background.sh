@@ -278,6 +278,15 @@ for verb in stop start pause cancel refresh; do
         system $verb $CLICKHOUSE_DATABASE.granted;"
 done
 
+# A non-controllable table reports BAD_ARGUMENTS to a caller holding either child grant,
+# and stays ACCESS_DENIED without any grant.
+$CLICKHOUSE_CLIENT -q "create table plain_mt (x Int64) engine MergeTree order by x;"
+$CLICKHOUSE_CLIENT --user $test_user -q "
+    system stop $CLICKHOUSE_DATABASE.plain_mt; -- {serverError ACCESS_DENIED}"
+$CLICKHOUSE_CLIENT -q "grant system streaming engines on $CLICKHOUSE_DATABASE.plain_mt to $test_user;"
+$CLICKHOUSE_CLIENT --user $test_user -q "
+    system stop $CLICKHOUSE_DATABASE.plain_mt; -- {serverError BAD_ARGUMENTS}"
+
 $CLICKHOUSE_CLIENT -q "
     select '<9: granted verbs work>';
     select '<9: denied verbs error as expected>';"
@@ -288,6 +297,7 @@ $CLICKHOUSE_CLIENT -q "
     system stop view denied;
     drop table granted;
     drop table denied;
+    drop table plain_mt;
     drop table src;
     drop user $test_user;"
 
