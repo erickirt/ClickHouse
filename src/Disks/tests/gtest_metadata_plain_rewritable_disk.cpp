@@ -690,8 +690,7 @@ TEST_F(MetadataPlainRewritableDiskTest, DirectoryFileNameCollision)
 
     {
         auto tx = metadata->createTransaction();
-        tx->createDirectory("A/B");
-        EXPECT_ANY_THROW(tx->commit(DB::NoCommitOptions{}));
+        EXPECT_ANY_THROW(tx->createDirectory("A/B"));
     }
 
     EXPECT_FALSE(metadata->existsDirectory("A/B"));
@@ -2065,4 +2064,74 @@ TEST_F(MetadataPlainRewritableDiskTest, ValidateDirectoryPreconditions)
         "./ValidateDirectoryPreconditions/__meta/wcageakzukwtfkvkwibqrfhzrrlubsbg/prefix.path", /// A/B/C
         "./ValidateDirectoryPreconditions/huevlfwzdbhkvtedpymtjpafjjjfynpz/file"                /// X/file
     })));
+}
+
+TEST_F(MetadataPlainRewritableDiskTest, RecreateDirectoryInSameTransaction)
+{
+    auto metadata = getMetadataStorage("RecreateDirectoryInSameTransaction");
+    auto object_storage = getObjectStorage("RecreateDirectoryInSameTransaction");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectoryRecursive("A/B/C");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    auto old_prefix = generateObjectKeyPrefixForDirectoryPath(metadata, "A/B/C/");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->moveDirectory("A/B/C", "A/B/D");
+        tx->createDirectory("A/B/C");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    EXPECT_TRUE(metadata->existsDirectory("A/B/C"));
+    EXPECT_TRUE(metadata->existsDirectory("A/B/D"));
+    EXPECT_EQ(generateObjectKeyPrefixForDirectoryPath(metadata, "A/B/D/"), old_prefix);
+    EXPECT_NE(generateObjectKeyPrefixForDirectoryPath(metadata, "A/B/C/"), old_prefix);
+}
+
+TEST_F(MetadataPlainRewritableDiskTest, TransactionViewAfterMove)
+{
+    auto metadata = getMetadataStorage("TransactionViewAfterMove");
+    auto object_storage = getObjectStorage("TransactionViewAfterMove");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectory("A");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    auto a_prefix = generateObjectKeyPrefixForDirectoryPath(metadata, "A/");
+
+    /// Creating the destination of an earlier move must be an idempotent no-op.
+    {
+        auto tx = metadata->createTransaction();
+        tx->moveDirectory("A", "B");
+        tx->createDirectory("B");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    EXPECT_FALSE(metadata->existsDirectory("A"));
+    EXPECT_TRUE(metadata->existsDirectory("B"));
+    EXPECT_EQ(generateObjectKeyPrefixForDirectoryPath(metadata, "B/"), a_prefix);
+
+    /// A path restored within the same transaction must be usable again.
+    {
+        auto tx = metadata->createTransaction();
+        tx->moveDirectory("B", "A");
+        tx->moveDirectory("A", "B");
+        tx->createDirectory("B");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    EXPECT_FALSE(metadata->existsDirectory("A"));
+    EXPECT_TRUE(metadata->existsDirectory("B"));
+    EXPECT_EQ(generateObjectKeyPrefixForDirectoryPath(metadata, "B/"), a_prefix);
+
+    metadata = restartMetadataStorage("TransactionViewAfterMove");
+    EXPECT_FALSE(metadata->existsDirectory("A"));
+    EXPECT_TRUE(metadata->existsDirectory("B"));
+    EXPECT_EQ(generateObjectKeyPrefixForDirectoryPath(metadata, "B/"), a_prefix);
 }

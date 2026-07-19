@@ -12,7 +12,14 @@ namespace DB
 
 namespace ErrorCodes
 {
-    extern const int LOGICAL_ERROR;
+    extern const int BAD_ARGUMENTS;
+    extern const int CANNOT_CREATE_DIRECTORY;
+    extern const int CANNOT_CREATE_FILE;
+    extern const int CANNOT_RMDIR;
+    extern const int DIRECTORY_ALREADY_EXISTS;
+    extern const int DIRECTORY_DOESNT_EXIST;
+    extern const int FILE_ALREADY_EXISTS;
+    extern const int FILE_DOESNT_EXIST;
 }
 
 namespace
@@ -59,23 +66,23 @@ void traverseNode(const std::string & path, const FsNodePtr & start, const std::
     }
 }
 
-void checkNoFileConflictsOnPath(const FsNodePtr & root, const NormalizedPath & path)
+bool hasFileOnPath(const FsNodePtr & root, const NormalizedPath & path)
 {
     auto node = root;
-    std::filesystem::path parent_path;
 
     for (const auto & step : path)
     {
         if (!isVirtual(node) && node->info->files.contains(step))
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "There is a file '{}' under the path '{}', can't create a directory with the same name", step.string(), parent_path.string());
+            return true;
 
-        if (const auto it = node->subdirectories.find(step); it == node->subdirectories.end())
-            return;
-        else
-            node = it->second;
+        const auto it = node->subdirectories.find(step);
+        if (it == node->subdirectories.end())
+            return false;
 
-        parent_path /= step;
+        node = it->second;
     }
+
+    return false;
 }
 
 std::pair<FsNodePtr, FsNodePtr> clonePath(const FsNodePtr & start, const NormalizedPath & path)
@@ -174,9 +181,10 @@ void FsSnapshot::recordDirectoryPath(const std::string & path, DirectoryRemoteIn
     const auto normalized_path = normalizePath(path);
 
     if (const auto node = walk(root, normalized_path); node && !isVirtual(node))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' was already recorded", normalized_path.string());
+        throw Exception(ErrorCodes::DIRECTORY_ALREADY_EXISTS, "Directory '{}' was already recorded", normalized_path.string());
 
-    checkNoFileConflictsOnPath(root, normalized_path);
+    if (hasFileOnPath(root, normalized_path))
+        throw Exception(ErrorCodes::CANNOT_CREATE_DIRECTORY, "There is a file on the path '{}', can't create a directory", normalized_path.string());
 
     root = updateInfo(root, normalized_path, info);
     remote_layout_directories_delta += 1;
@@ -191,18 +199,19 @@ void FsSnapshot::moveDirectory(const std::string & from, const std::string & to)
 
     const auto node_from = walk(root, normalized_from);
     if (!node_from)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' does not exist", normalized_from.string());
+        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' does not exist", normalized_from.string());
 
     if (normalized_from.empty())
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' is root", normalized_from.string());
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Directory '{}' is root", normalized_from.string());
 
     if (normalized_to.string().starts_with(normalized_from.string() + '/'))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' can't be moved to '{}' inside itself", normalized_from.string(), normalized_to.string());
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Directory '{}' can't be moved to '{}' inside itself", normalized_from.string(), normalized_to.string());
 
     if (walk(root, normalized_to))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "There is a subdirectory '{}' under the path '{}', can't move", normalized_to.filename().string(), normalized_to.parent_path().string());
+        throw Exception(ErrorCodes::DIRECTORY_ALREADY_EXISTS, "There is a subdirectory '{}' under the path '{}', can't move", normalized_to.filename().string(), normalized_to.parent_path().string());
 
-    checkNoFileConflictsOnPath(root, normalized_to);
+    if (hasFileOnPath(root, normalized_to))
+        throw Exception(ErrorCodes::FILE_ALREADY_EXISTS, "There is a file on the path '{}', can't move", normalized_to.string());
 
     root = moveTree(root, normalized_from, normalized_to);
 }
@@ -214,10 +223,10 @@ void FsSnapshot::removeDirectory(const std::string & path)
     const auto node = walk(root, normalized_path);
 
     if (!node)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' does not exist", normalized_path.string());
+        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' does not exist", normalized_path.string());
 
     if (normalized_path.empty())
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' is root", normalized_path.string());
+        throw Exception(ErrorCodes::CANNOT_RMDIR, "Directory '{}' is root", normalized_path.string());
 
     root = unlinkTree(root, normalized_path);
 
@@ -238,16 +247,16 @@ void FsSnapshot::recordFile(const std::string & path, FileRemoteInfo info)
     const auto node = walk(root, normalized_path.parent_path());
 
     if (!node)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' does not exist", normalized_path.string());
+        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' does not exist", normalized_path.string());
 
     if (isVirtual(node))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Creation of a file under the virtual directory is not possible");
+        throw Exception(ErrorCodes::CANNOT_CREATE_FILE, "Creation of a file under the virtual directory is not possible");
 
     if (node->subdirectories.contains(normalized_path.filename()))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "There is a subdirectory '{}' under the path '{}'. Can't create file", normalized_path.filename().string(), normalized_path.parent_path().string());
+        throw Exception(ErrorCodes::CANNOT_CREATE_FILE, "There is a subdirectory '{}' under the path '{}'. Can't create file", normalized_path.filename().string(), normalized_path.parent_path().string());
 
     if (node->info->files.contains(normalized_path.filename()))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "File '{}' already exists", normalized_path.string());
+        throw Exception(ErrorCodes::FILE_ALREADY_EXISTS, "File '{}' already exists", normalized_path.string());
 
     auto new_directory_info = node->info.value();
     new_directory_info.files.emplace(normalized_path.filename(), std::move(info));
@@ -262,13 +271,13 @@ void FsSnapshot::removeFile(const std::string & path)
     const auto node = walk(root, normalized_path.parent_path());
 
     if (!node)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Directory '{}' does not exist", normalized_path.string());
+        throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Directory '{}' does not exist", normalized_path.string());
 
     if (isVirtual(node))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Removal of a file under the virtual directory is not possible");
+        throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "Removal of a file under the virtual directory is not possible");
 
     if (!node->info->files.contains(normalized_path.filename()))
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "File '{}' does not exist", normalized_path.string());
+        throw Exception(ErrorCodes::FILE_DOESNT_EXIST, "File '{}' does not exist", normalized_path.string());
 
     auto new_directory_info = node->info.value();
     new_directory_info.files.erase(normalized_path.filename());
