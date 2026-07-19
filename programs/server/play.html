@@ -4242,6 +4242,16 @@ customElements.define('query-result', QueryResultElement);
 ///     so a query keeps streaming into its background tab and a late response still lands there.
 let activation_num = 0;
 
+/// Monotonic run identity, bumped once per run launch (`postOne` / `postAll`) into the launching
+/// tab's `launchRunId`. Unlike the launch query text, it is UNIQUE per execution: a rerun of the
+/// identical query gets a fresh id, and a partial `Run selected` shares it with the full-editor
+/// history entry it wrote even though their query texts differ. `window.onpopstate` uses it to tell
+/// whether a tab's live state (still-running launch, or completed snapshot) truly belongs to the
+/// run a mid-run (`result: null`) history entry was written for, instead of inferring "same run"
+/// from matching query/params (which both a rerun and a selection defeat). The completed snapshot
+/// carries it as `tab.result.run_id`, and every history entry as `state.run_id`.
+let run_seq = 0;
+
 /// While a tab activation is rebuilding the active tab's parameter inputs, this holds the
 /// activation's request token. `restoreEditor` sets it right before the `updateQueryParams`
 /// await (the `param_*` DOM inputs still hold the PREVIOUS tab's values during that await) and
@@ -7142,6 +7152,7 @@ function tabRuntimeDefaults() {
         downloadVisible: false, /// whether the download / copy buttons apply to this tab
         copyVisible: false,
         launchQuery: undefined, /// editor text snapshotted when this tab's run was launched (see `saveHistory`)
+        launchRunId: undefined, /// unique run identity of this tab's current launch (see `run_seq` / `window.onpopstate`)
         runEditorInteraction: 0,  /// `editorInteractionGen` snapshot at this tab's run launch (see `beginFlight`)
         queryErrorOwnerStart: -1, /// editor offset of the statement owning the error marker in this tab's run, or -1
         barEl: null,            /// cached tab-bar row + indicator nodes (see renderTabBar/updateTabIndicator)
@@ -7956,6 +7967,11 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         /// survives re-authentication with a different password on the same server/user.
         connectionServer: entry_server,
         connectionUser: entry_user,
+        /// The run identity this entry currently reflects (see `run_seq`): the still-running launch
+        /// while the tab is in flight (so a mid-run `result: null` entry is stamped with the run that
+        /// wrote it), otherwise the completed snapshot's id. `window.onpopstate` matches it against
+        /// the tab's live state to decide whether that state stands in for a null entry.
+        run_id: tab.inFlight ? tab.launchRunId : (tab.result && tab.result.run_id),
     };
     const title = "ClickHouse Query: " + (titleForDoc || tab.query);
     /// Once the tab has materialized, its live `colorModes` / `pinnedColumns` objects are the
@@ -8124,6 +8140,11 @@ function saveHistory(stateData, titleForDoc, tab) {
         /// Pinned columns in effect when this result was produced; travels with the snapshot so
         /// re-activating the tab (or navigating / reloading) restores them, like `color_modes`.
         pinned_columns: tab.pinnedColumns,
+        /// The run identity that produced this result (see `run_seq`). A completing run still owns
+        /// its tab here (the caller bailed on a superseding `reqNum`), so `tab.launchRunId` is this
+        /// run's. Lets `window.onpopstate` recognize the mid-run history entry this run wrote —
+        /// which carries the same `run_id` — as belonging to the live snapshot.
+        run_id: tab.launchRunId,
         elapsed_ns: stateData.elapsed_ns,
     };
     if (tab.id === activeTabId) {
@@ -8321,19 +8342,28 @@ window.onpopstate = function(event) {
     /// the navigated URL just above, regardless of which path we take here.)
     ///
     /// The live state may only stand in for this null entry when it is provably the SAME run the
-    /// entry was written for. A mid-run entry records the launch query (and params); that identity
-    /// survives on the tab as either the still-running launch (`launchQuery`) or the completed
-    /// in-memory snapshot (`tab.result`). If the tab has since launched or completed a DIFFERENT
-    /// query/params — jump straight back to an old mid-run entry (history menu / `history.go`) after
-    /// the tab moved on to another run — keeping the live state would show that newer result under
-    /// this older entry's URL. In that case fall through to plain time-travel and render the entry
-    /// itself instead of preferring an unrelated later result.
+    /// entry was written for. Every entry records the identity of the run it reflects (`run_id`, see
+    /// `run_seq`), and the tab carries that identity as either the still-running launch
+    /// (`launchRunId`) or the completed in-memory snapshot (`tab.result.run_id`). A `run_id` match is
+    /// exact where the old query/params heuristic was not: a partial `Run selected` writes the full
+    /// editor text into the entry but only the selected statement into `tab.result.query`, and a
+    /// rerun of the identical text produces a NEW run — both of which a text comparison would
+    /// mis-handle (blanking a completed background partial run, or attaching a later rerun to an
+    /// older entry's URL). If the tab has since launched or completed a DIFFERENT run — jump straight
+    /// back to an old mid-run entry (history menu / `history.go`) after the tab moved on — the ids no
+    /// longer match, so fall through to plain time-travel and render the entry itself.
+    ///
+    /// Legacy entries persisted before `run_id` existed carry none; for them fall back to the
+    /// earlier launch-query / snapshot-query heuristic so old history still resolves.
+    const entry_run_id = event.state.run_id;
     const entry_query = event.state.query;
     const entry_params = JSON.stringify(event.state.params || {});
-    const live_is_entry_run =
-        (tab.inFlight && tab.launchQuery === entry_query)
-        || (tab.result && tab.result.query === entry_query
-            && JSON.stringify(tab.result.params || {}) === entry_params);
+    const live_is_entry_run = entry_run_id != null
+        ? ((tab.inFlight && tab.launchRunId === entry_run_id)
+            || (tab.result && tab.result.run_id === entry_run_id))
+        : ((tab.inFlight && tab.launchQuery === entry_query)
+            || (tab.result && tab.result.query === entry_query
+                && JSON.stringify(tab.result.params || {}) === entry_params));
     if (!entry_has_result && live_is_entry_run) {
         activateTab(tab.id).then(scheduleSave);
         return;
@@ -8530,6 +8560,9 @@ async function postOne()
     /// moved on (an edit made while the query ran must not be clobbered by the launch text).
     const editor_text = query_area.value;
     tab.launchQuery = editor_text;
+    /// Fresh run identity for this launch (see `run_seq`): stamped onto the mid-run history entry
+    /// and the completed snapshot so a later Back/Forward can match THIS run exactly.
+    tab.launchRunId = ++run_seq;
     const sel_start = query_area.selectionStart;
     const sel_end = query_area.selectionEnd;
     const has_selection = sel_start !== sel_end;
@@ -8636,6 +8669,7 @@ async function postAll()
 
     const editor_text = query_area.value;
     tab.launchQuery = editor_text;   /// see `postOne`: lets `saveHistory` detect a newer draft
+    tab.launchRunId = ++run_seq;     /// see `postOne`: fresh run identity for this launch
     const sel_start = query_area.selectionStart;
 
     /// See `postOne`: bind the parameter names to the run's own text, and on a no-lexer /
