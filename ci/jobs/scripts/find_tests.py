@@ -119,7 +119,10 @@ class Targeting:
         Fixtures carry their owning test's five-digit prefix by convention, so
         the prefix narrows the candidates to the `NNNNN_*` tests at the suite
         root (a handful of files, never the whole suite). Among those, prefer the
-        ones whose body actually references the fixture by name; fall back to all
+        ones whose body actually references the fixture by name — either the full
+        filename or its extensionless stem, since format schemas are conventionally
+        referenced without the extension (`format_schema = 'NNNNN_foo:Message'`
+        for `format_schemas/NNNNN_foo.proto`); fall back to all
         prefix siblings when the reference is constructed dynamically and cannot
         be found textually. Return an empty list when the file has no numeric
         prefix or no test with that prefix exists — there is then genuinely
@@ -138,11 +141,13 @@ class Targeting:
         if not candidates:
             return []
         fname = os.path.basename(fpath)
+        stem = os.path.splitext(fname)[0]
         referencing = []
         for base_name, test_file in candidates.items():
             try:
                 with test_file.open("r", encoding="utf-8", errors="ignore") as f:
-                    if fname in f.read():
+                    body = f.read()
+                    if fname in body or stem in body:
                         referencing.append(base_name)
             except OSError:
                 continue
