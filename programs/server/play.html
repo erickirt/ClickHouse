@@ -3886,6 +3886,17 @@ function markBootstrapDirty(e) {
 /// explicitly.
 let deferred_run_cancelled = false;
 
+/// Set by `window.onpopstate` while it replays synthetic connection `input` events to reproduce a
+/// navigated-to entry's server/user. Those events fire the normal connection listener, whose
+/// `resetConnectionScopedState` restamps the CURRENT history entry from the active tab when the
+/// connection or selection changed. During a Back/Forward restore that is wrong twice over:
+/// `history.state` is already the popped entry the restore is rebuilding, and `activeTabId` still
+/// points at the tab being left (it is rebound only later in `onpopstate`), so the restamp would
+/// overwrite the time-travel target with the leaving tab's newer query/cleared `database=`. While
+/// this flag is set, `resetConnectionScopedState` still resets its connection-scoped caches but
+/// skips the history restamp; `onpopstate` performs the authoritative entry/URL restore itself.
+let restoring_connection_from_history = false;
+
 const current_url = new URL(window.location);
 const opened_locally = location.protocol == 'file:';
 
@@ -7664,7 +7675,17 @@ window.onpopstate = function(event) {
         /// `resetConnectionScopedState`) then runs exactly as it would for a typed edit. These carry
         /// `isTrusted === false`, so `markBootstrapDirty` ignores them; this navigation already marked
         /// the workspace dirty above.
-        [url_elem, user_elem, password_elem].forEach(el => el.dispatchEvent(new Event('input')));
+        ///
+        /// Guard the replay so `resetConnectionScopedState` skips its history restamp: the target tab
+        /// state is not installed yet (`activeTabId`/`tab.query` are rebound below) and `history.state`
+        /// is already the popped entry, so a restamp would corrupt this time-travel target with the
+        /// leaving tab's newer state. `onpopstate` restores the entry/URL authoritatively itself.
+        restoring_connection_from_history = true;
+        try {
+            [url_elem, user_elem, password_elem].forEach(el => el.dispatchEvent(new Event('input')));
+        } finally {
+            restoring_connection_from_history = false;
+        }
     }
     const tab = resolveTabForState(event.state);
     /// Keep this history entry's identity in sync with the tab it actually resolves to, restamping
@@ -9485,7 +9506,13 @@ function resetConnectionScopedState() {
         && (!sameServerAddress(initial_connection.server, url_elem.value)
             || effectiveConnectionUser(initial_connection.server, initial_connection.user)
                 !== effectiveConnectionUser(url_elem.value, user_elem.value));
-    if (cleared_selection || connection_diverged || bootstrap_connection_diverged) {
+    /// A Back/Forward restore replays these connection changes synthetically to reproduce the popped
+    /// entry; it must NOT restamp history here. `history.state` is already that popped entry and
+    /// `activeTabId` still points at the tab being left, so a restamp would overwrite the time-travel
+    /// target with the leaving tab's state (`restoring_connection_from_history`). `onpopstate` does the
+    /// authoritative entry/URL restore itself.
+    if ((cleared_selection || connection_diverged || bootstrap_connection_diverged)
+        && !restoring_connection_from_history) {
         captureActiveTab();
         /// The restamp seeds/refreshes the current entry through `refreshCurrentHistoryEntry` →
         /// `writeHistoryEntry`, which drops `run=1` while the bootstrap tab has no result yet and
