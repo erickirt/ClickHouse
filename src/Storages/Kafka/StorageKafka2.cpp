@@ -1246,8 +1246,10 @@ void StorageKafka2::threadFunc(size_t idx)
                 }
             }
         }
-        else if (num_views)
+        else if (num_views && stream_control.isBlocked())
             LOG_DEBUG(log, "Consumption is stopped");
+        else if (num_views)
+            ProfileEvents::increment(ProfileEvents::KafkaMVNotReady);
         else
             LOG_DEBUG(log, "No attached views");
     }
