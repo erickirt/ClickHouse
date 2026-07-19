@@ -798,9 +798,12 @@ void StorageObjectStorageQueue::threadFunc(size_t streaming_tasks_index)
 
     const auto storage_id = getStorageID();
 
+    const size_t num_views = DatabaseCatalog::instance().getDependentViews(storage_id).size();
+    const size_t dependencies_count = getDependencies();
     const UInt64 cycle_epoch = stream_control.currentCancelEpoch();
+    const bool deps_ready = num_views == 0 || dependencies_count > 0;
 
-    if (!stream_control.claimCycle(streaming_task_refresh_epochs.at(streaming_tasks_index)))
+    if (!deps_ready || !stream_control.claimCycle(streaming_task_refresh_epochs.at(streaming_tasks_index)))
     {
         /// SYSTEM STOP/PAUSE blocks polling: skip processing. SYSTEM START wakes the task promptly
         /// via `onActionLockRemove`; meanwhile reschedule with a moderate period to avoid busy-looping.
@@ -833,7 +836,6 @@ void StorageObjectStorageQueue::threadFunc(size_t streaming_tasks_index)
     {
         try
         {
-            const size_t dependencies_count = getDependencies();
             if (dependencies_count)
             {
                 LOG_DEBUG(log, "Started streaming to {} attached views", dependencies_count);

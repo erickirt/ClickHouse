@@ -725,3 +725,28 @@ def test_cancel_requeues_unhandled_messages_on_abort(rabbitmq_cluster):
     assert (
         int(instance.query(f"SELECT count() FROM test.{table}_dst WHERE error IS NOT NULL")) == 1
     ), "the malformed message must be requeued on abort, not dropped"
+
+
+def test_refresh_survives_unready_dependencies(rabbitmq_cluster):
+    # A REFRESH issued while the dependent view is attached but not ready (its target table
+    # detached) must run once the target returns, not be lost: a streaming round consumed the
+    # one-shot permit and then bailed on the dependency check before any streaming.
+    table = "rabbitmq_refresh_unready"
+    exchange = "refresh_unready_exchange"
+    setup_consuming_table(table, exchange)
+
+    publish(rabbitmq_cluster, exchange, 0, 1)
+    wait_dst_count(table, 1)
+
+    instance.query(f"SYSTEM STOP test.{table}")
+    publish(rabbitmq_cluster, exchange, 1, 5)
+    assert_dst_count_stable(table, 1)
+
+    instance.query(f"DETACH TABLE test.{table}_dst")
+    instance.query(f"SYSTEM REFRESH test.{table}")
+    time.sleep(2)  # streaming rounds wake with the view unready and must keep the permit
+
+    # Once the target table is back, the queued REFRESH must still drain the queued backlog.
+    instance.query(f"ATTACH TABLE test.{table}_dst")
+    wait_dst_count(table, 6)
+    assert_dst_count_stable(table, 6, seconds=5)

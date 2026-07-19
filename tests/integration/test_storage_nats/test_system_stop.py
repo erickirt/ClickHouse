@@ -1373,3 +1373,54 @@ def test_refresh_survives_failed_resubscribe(nats_cluster):
     jetstream_publish(nats_cluster, subject, 2, 5)
     wait_dst_count_at_least(table, 7)
     assert_dst_count_stable(table, 7, seconds=5)
+
+
+def test_refresh_survives_unready_dependencies(nats_cluster):
+    # A REFRESH issued while the dependent view is attached but not ready (its target table
+    # detached) must run once the target returns, not be lost: a streaming round consumed the
+    # one-shot permit and then bailed on the dependency check before any streaming.
+    stream = "js_refresh_unready_stream"
+    subject = "js_refresh_unready_subject"
+    durable = "js_refresh_unready_durable"
+    table = "nats_refresh_unready"
+
+    jetstream_setup(nats_cluster, stream, subject, durable, ack_wait_seconds=30)
+    instance.query(
+        f"""
+        CREATE TABLE test.{table} (key UInt64, value UInt64)
+            ENGINE = NATS
+            SETTINGS nats_url = 'nats1:4444',
+                     nats_subjects = '{subject}',
+                     nats_stream = '{stream}',
+                     nats_consumer_name = '{durable}',
+                     nats_format = 'JSONEachRow',
+                     nats_secure = 1,
+                     nats_username = '{nats_user}',
+                     nats_password = '{nats_pass}',
+                     nats_flush_interval_ms = 6000,
+                     nats_wait_for_flush_interval = 1;
+
+        CREATE TABLE test.{table}_dst (key UInt64, value UInt64) ENGINE = MergeTree ORDER BY key;
+
+        CREATE MATERIALIZED VIEW test.{table}_mv TO test.{table}_dst AS
+            SELECT key, value FROM test.{table};
+        """
+    )
+    instance.wait_for_log_line(f"test.{table}.*Started streaming to 1 attached views")
+
+    jetstream_publish(nats_cluster, subject, 0, 1)
+    wait_dst_count_at_least(table, 1)
+
+    instance.query(f"SYSTEM STOP test.{table}")
+    time.sleep(1)  # let the worker unsubscribe and settle
+    jetstream_publish(nats_cluster, subject, 1, 5)
+    assert_dst_count_stable(table, 1)
+
+    instance.query(f"DETACH TABLE test.{table}_dst")
+    instance.query(f"SYSTEM REFRESH test.{table}")
+    time.sleep(2)  # streaming rounds wake with the view unready and must keep the permit
+
+    # Once the target table is back, the queued REFRESH must still drain the stream backlog.
+    instance.query(f"ATTACH TABLE test.{table}_dst")
+    wait_dst_count_at_least(table, 6)
+    assert_dst_count_stable(table, 6, seconds=5)

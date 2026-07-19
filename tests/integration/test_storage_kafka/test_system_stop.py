@@ -1057,3 +1057,29 @@ def test_refresh_survives_active_direct_reader(kafka_cluster):
         # Once the reader is gone, the queued REFRESH must still run one cycle despite the STOP.
         wait_dst_count(table, n)
         assert_dst_count_stable(table, n, seconds=5)
+
+
+def test_refresh_survives_unready_dependencies(kafka_cluster):
+    # A REFRESH issued while the dependent view is attached but not ready (its target table
+    # detached) must run once the target returns, not be lost: a streaming round consumed the
+    # one-shot permit and then bailed on the dependency check before any streaming.
+    admin_client = k.get_admin_client(kafka_cluster)
+    table = f"kafka_refresh_unready_{k.random_string(6)}"
+    with k.kafka_topic(admin_client, table):
+        setup_consuming_table(table, table)
+
+        produce(kafka_cluster, table, 0, 1)
+        wait_dst_count(table, 1)
+
+        instance.query(f"SYSTEM STOP test.{table}")
+        produce(kafka_cluster, table, 1, 5)
+        assert_dst_count_stable(table, 1)
+
+        instance.query(f"DETACH TABLE test.{table}_dst")
+        instance.query(f"SYSTEM REFRESH test.{table}")
+        time.sleep(2)  # streaming rounds wake with the view unready and must keep the permit
+
+        # Once the target table is back, the queued REFRESH must still run one cycle despite the STOP.
+        instance.query(f"ATTACH TABLE test.{table}_dst")
+        wait_dst_count(table, 6)
+        assert_dst_count_stable(table, 6, seconds=5)

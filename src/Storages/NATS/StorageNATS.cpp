@@ -637,15 +637,15 @@ void StorageNATS::threadFunc()
 
     bool consumers_queues_are_empty = false;
 
-    const size_t num_views = DatabaseCatalog::instance().getDependentViews(table_id).size();
-
     if (consumers_ready && subscription_stale.exchange(false))
         unsubscribeConsumers();
 
+    const size_t num_views = DatabaseCatalog::instance().getDependentViews(table_id).size();
+    const bool is_connected = consumers_connection && consumers_connection->isConnected();
     const UInt64 cycle_epoch = stream_control.currentCancelEpoch();
     const UInt64 refresh_epoch = last_seen_refresh_epoch.load();
-    const bool run_cycle = consumers_connection && consumers_connection->isConnected()
-        && stream_control.claimCycle(last_seen_refresh_epoch);
+    const bool deps_ready = num_views == 0 || checkDependencies(table_id);
+    const bool run_cycle = is_connected && deps_ready && stream_control.claimCycle(last_seen_refresh_epoch);
 
     try
     {

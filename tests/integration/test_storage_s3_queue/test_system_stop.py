@@ -835,3 +835,28 @@ def test_stopped_table_releases_hash_ring_slot(started_cluster):
     node.query(f"DROP TABLE IF EXISTS {table_a} SYNC")
     node.query(f"DROP TABLE IF EXISTS {table_b} SYNC")
     node.query(f"DROP TABLE IF EXISTS {dst} SYNC")
+
+
+def test_refresh_survives_unready_dependencies(started_cluster):
+    # A REFRESH issued while the dependent view is attached but not ready (its target table
+    # detached) must run once the target returns, not be lost: a polling round consumed the
+    # one-shot permit and then bailed on the dependency check before any processing.
+    node = started_cluster.instances["instance"]
+    table = f"s3queue_refresh_unready_{generate_random_string()}"
+    files_path = setup_consuming_table(started_cluster, node, table)
+
+    generate_random_files(started_cluster, files_path, count=1, start_ind=0)
+    wait_dst_count(node, table, ROWS_PER_FILE)
+
+    node.query(f"SYSTEM STOP {table}")
+    generate_random_files(started_cluster, files_path, count=5, start_ind=1)
+    assert_dst_count_stable(node, table, ROWS_PER_FILE)
+
+    node.query(f"DETACH TABLE {table}_dst")
+    node.query(f"SYSTEM REFRESH {table}")
+    time.sleep(2)  # polling rounds wake with the view unready and must keep the permit
+
+    # Once the target table is back, the queued REFRESH must still process the file backlog.
+    node.query(f"ATTACH TABLE {table}_dst")
+    wait_dst_count(node, table, 6 * ROWS_PER_FILE)
+    assert_dst_count_stable(node, table, 6 * ROWS_PER_FILE, seconds=5)
