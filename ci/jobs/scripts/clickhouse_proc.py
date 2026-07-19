@@ -706,11 +706,11 @@ clickhouse-client --query "SELECT count() FROM test.visits"
         """Gracefully stop only the ClickHouse server processes.
 
         Unlike `terminate`, this leaves the auxiliary services (Redpanda/Kafka,
-        MinIO and its webhooks) running. It is used between bugfix-validation
-        iterations so the server binary can be swapped and restarted without
-        tearing down the rest of the test environment: otherwise a changed test
-        relying on Kafka or MinIO webhooks would pass under the first build type
-        and spuriously "reproduce" a bug under the next one.
+        MinIO) running. It is used between bugfix-validation iterations so the
+        server binary can be swapped and restarted without tearing down the
+        rest of the test environment: otherwise a changed test relying on
+        Kafka or MinIO would pass under the first build type and spuriously
+        "reproduce" a bug under the next one.
         """
         print("Stop ClickHouse processes")
 
@@ -1015,16 +1015,23 @@ clickhouse-client --query "SELECT count() FROM test.visits"
             result.set_label(Result.Label.LOG_CHECK)
         return results
 
-    # Exit codes coreutils `timeout` uses on expiry: 124 when the child dies on
-    # the initial SIGTERM, 128+9 = 137 when a SIGTERM-ignoring child is escalated
-    # with SIGKILL after --kill-after. Both mean the dump exceeded its cap.
-    _TIMEOUT_EXIT_CODES = (124, 137)
+    # `timeout --verbose` logs this to stderr when it escalates to SIGKILL
+    # after --kill-after; it proves a 137 came from the wrapper itself rather
+    # than from an external/OOM SIGKILL of `clickhouse local`.
+    _TIMEOUT_KILL_DIAG = "sending signal KILL to command"
+
+    def _timeout_wrapper_expired(self, res, stderr):
+        # 124: the child died on timeout's initial SIGTERM - always an expiry.
+        # 137 (128+9): any SIGKILL death; trust it as an expiry only when
+        # timeout's own KILL diagnostic is present in stderr.
+        return res == 124 or (res == 137 and self._TIMEOUT_KILL_DIAG in stderr)
 
     def _annotate_timeout(self, res, stderr):
-        # If `res` is one of timeout's expiry codes, prepend the "timed out"
-        # annotation so a stuck dump is reported as a timeout rather than an
-        # opaque non-zero failure. Returns the (possibly) annotated stderr.
-        if res in self._TIMEOUT_EXIT_CODES:
+        # Prepend the "timed out" annotation only to proven wrapper expiries,
+        # so a stuck dump is reported as a timeout rather than an opaque
+        # non-zero failure, while an OOM or externally killed dump (bare 137)
+        # keeps its raw stderr. Returns the (possibly) annotated stderr.
+        if self._timeout_wrapper_expired(res, stderr):
             return f"timed out after {self.DUMP_SYSTEM_TABLE_TIMEOUT}s\n{stderr}"
         return stderr
 
@@ -1078,9 +1085,10 @@ clickhouse-client --query "SELECT count() FROM test.visits"
         # Bound each dump: a single hanging table must not consume the whole
         # 9000s job budget. On expiry timeout sends SIGTERM and returns 124; a
         # dump that ignores SIGTERM is escalated with SIGKILL after --kill-after
-        # and returns 128+9 = 137. Both are timeouts, annotated by
-        # _annotate_timeout below.
-        dump_prefix = f"timeout --signal=TERM --kill-after=60 {self.DUMP_SYSTEM_TABLE_TIMEOUT} "
+        # and returns 128+9 = 137. --verbose makes timeout log its own KILL to
+        # stderr, so _annotate_timeout can tell a wrapper expiry from an
+        # external/OOM SIGKILL of the dump (also 137).
+        dump_prefix = f"timeout --verbose --signal=TERM --kill-after=60 {self.DUMP_SYSTEM_TABLE_TIMEOUT} "
 
         Utils.clean_dir(p_temp_dir / "system_tables")
         res = True
