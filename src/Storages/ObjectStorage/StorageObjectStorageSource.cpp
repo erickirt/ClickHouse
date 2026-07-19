@@ -1015,22 +1015,32 @@ StorageObjectStorageSource::ReaderHolder StorageObjectStorageSource::createReade
             {
                 if (auto mapper = configuration->getColumnMapperForObject(object_info))
                 {
-                    /// The mapper resolves parquet field-ids to the file's OLD clickhouse
-                    /// column names, while PREWHERE / row-level filter reference the CURRENT
-                    /// (renamed or type-evolved) names. Evaluating them inside the reader
-                    /// would look up names the old-schema mapper does not know and silently
-                    /// match nothing. Strip them here and apply them as fallback
-                    /// FilterTransforms after the schema transform aliases the names below.
-                    if (format_supports_prewhere)
+                    /// `schema_changed` is true for real schema evolution (a schema-id
+                    /// mismatch: renamed / type-changed columns) AND for current-schema
+                    /// files that merely carry equality deletes. Strip the reader-side
+                    /// filters ONLY for the former: there the old-schema mapper resolves
+                    /// field-ids to the file's OLD names while PREWHERE / row-level filter
+                    /// reference the CURRENT names, so in-reader evaluation matches nothing
+                    /// (re-applied as fallback FilterTransforms after the schema transform
+                    /// renames the columns below). For equality-delete-only files
+                    /// (getSchemaTransformer() == null, no rename) the mapper already yields
+                    /// the current names, so keep the filters in the reader to preserve
+                    /// Parquet row-group / page pruning.
+                    const bool has_schema_transform
+                        = configuration->getSchemaTransformer(context_, object_info) != nullptr;
+                    if (format_supports_prewhere && has_schema_transform)
                     {
                         if (format_filter_info->row_level_filter)
                             stripped_row_level_filter = format_filter_info->row_level_filter;
                         if (format_filter_info->prewhere_info)
                             stripped_prewhere_info = format_filter_info->prewhere_info;
                     }
+                    const bool keep_in_reader = format_supports_prewhere && !has_schema_transform;
                     return std::make_shared<FormatFilterInfo>(
                         format_filter_info->filter_actions_dag, format_filter_info->context.lock(),
-                        mapper, nullptr, nullptr);
+                        mapper,
+                        keep_in_reader ? format_filter_info->row_level_filter : nullptr,
+                        keep_in_reader ? format_filter_info->prewhere_info : nullptr);
                 }
             }
 
