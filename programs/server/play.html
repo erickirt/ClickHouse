@@ -7779,7 +7779,22 @@ window.onpopstate = function(event) {
     /// time-travel below, and an entry that DOES carry a snapshot keeps the documented
     /// abort-and-re-render behavior. (The connection-scoped `selected_database` was restored from
     /// the navigated URL just above, regardless of which path we take here.)
-    if (!entry_has_result && (tab.inFlight || tab.result)) {
+    ///
+    /// The live state may only stand in for this null entry when it is provably the SAME run the
+    /// entry was written for. A mid-run entry records the launch query (and params); that identity
+    /// survives on the tab as either the still-running launch (`launchQuery`) or the completed
+    /// in-memory snapshot (`tab.result`). If the tab has since launched or completed a DIFFERENT
+    /// query/params — jump straight back to an old mid-run entry (history menu / `history.go`) after
+    /// the tab moved on to another run — keeping the live state would show that newer result under
+    /// this older entry's URL. In that case fall through to plain time-travel and render the entry
+    /// itself instead of preferring an unrelated later result.
+    const entry_query = event.state.query;
+    const entry_params = JSON.stringify(event.state.params || {});
+    const live_is_entry_run =
+        (tab.inFlight && tab.launchQuery === entry_query)
+        || (tab.result && tab.result.query === entry_query
+            && JSON.stringify(tab.result.params || {}) === entry_params);
+    if (!entry_has_result && live_is_entry_run) {
         activateTab(tab.id).then(scheduleSave);
         return;
     }
