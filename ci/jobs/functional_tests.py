@@ -1020,11 +1020,12 @@ def main():
                 and r.has_label(Result.Label.BLOCKER)
                 for r in first_bt_fatals
             )
-            if runner_level_error and crash_repro:
+            if crash_repro:
                 print(
-                    "Runner aborted because the master-HEAD server crashed "
-                    "with a sanitizer/fatal failure while running the changed "
-                    "tests - treating the abort as the bug reproducing."
+                    "The master-HEAD server crashed with a sanitizer/fatal "
+                    "failure while running the changed tests - treating the "
+                    "resulting runner abort / per-test errors as the bug "
+                    "reproducing."
                 )
                 for r in test_result.results:
                     if r.status == Result.Status.ERROR:
