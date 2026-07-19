@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tags: long, no-tsan, no-debug, no-asan, no-msan
+# Tags: long, no-tsan, no-debug, no-asan, no-msan, no-flaky-check
 # Random settings limits: index_granularity=(8192, None)
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
