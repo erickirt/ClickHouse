@@ -801,9 +801,11 @@ void StorageObjectStorageQueue::threadFunc(size_t streaming_tasks_index)
     const size_t num_views = DatabaseCatalog::instance().getDependentViews(storage_id).size();
     const size_t dependencies_count = getDependencies();
     const UInt64 cycle_epoch = stream_control.currentCancelEpoch();
+    /// Attached but unready views must not consume a pending REFRESH permit, so no cycle is claimed
+    /// for them; a viewless table still claims, draining a pending permit so it cannot fire later.
     const bool deps_ready = num_views == 0 || dependencies_count > 0;
 
-    if (!deps_ready || !stream_control.claimCycle(streaming_task_refresh_epochs.at(streaming_tasks_index)))
+    if (deps_ready && !stream_control.claimCycle(streaming_task_refresh_epochs.at(streaming_tasks_index)))
     {
         /// SYSTEM STOP/PAUSE blocks polling: skip processing. SYSTEM START wakes the task promptly
         /// via `onActionLockRemove`; meanwhile reschedule with a moderate period to avoid busy-looping.
@@ -861,7 +863,7 @@ void StorageObjectStorageQueue::threadFunc(size_t streaming_tasks_index)
             }
             else
             {
-                LOG_TEST(log, "No attached dependencies");
+                LOG_TEST(log, "No ready attached dependencies");
             }
         }
         catch (...)
