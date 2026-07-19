@@ -1001,8 +1001,36 @@ def main():
             # `invert_bugfix_validation_status` still sees the error and
             # does not flip a harness-level termination into green.
             runner_level_error = test_result.is_error()
+            # A sanitizer assert / fatal in the master-HEAD server log (the
+            # `BLOCKER`-labelled rows of `check_fatal_messages_in_logs`) means
+            # the server crashed while running only the changed tests. With
+            # `-fno-sanitize-recover=all` a reproduced UBSan bug kills the
+            # server outright, which aborts the runner (`StopTesting`, exit
+            # code 2) and poisons the per-test rows with `ERROR` - so a
+            # crash-manifesting bugfix could never validate. That abort IS the
+            # bug reproducing, not an infra failure: downgrade the
+            # runner-level `ERROR` and the per-row `ERROR`s it caused to
+            # `FAIL`, which the inverter then flips into a successful
+            # reproduction. A run that ends in `ERROR` without a fatal in the
+            # server logs (genuine infra failure) is still preserved as
+            # inconclusive (#105789). OOM kills are excluded: the dmesg OOM
+            # row carries no `BLOCKER` label.
+            crash_repro = any(
+                r.status == Result.Status.FAIL
+                and r.has_label(Result.Label.BLOCKER)
+                for r in first_bt_fatals
+            )
+            if runner_level_error and crash_repro:
+                print(
+                    "Runner aborted because the master-HEAD server crashed "
+                    "with a sanitizer/fatal failure while running the changed "
+                    "tests - treating the abort as the bug reproducing."
+                )
+                for r in test_result.results:
+                    if r.status == Result.Status.ERROR:
+                        r.status = Result.Status.FAIL
             test_result.extend_sub_results(first_bt_fatals)
-            if runner_level_error:
+            if runner_level_error and not crash_repro:
                 test_result.status = Result.Status.ERROR
 
             if test_result.is_ok():
