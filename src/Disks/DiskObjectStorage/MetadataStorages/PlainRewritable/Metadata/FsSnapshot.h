@@ -6,7 +6,6 @@
 
 #include <base/defines.h>
 
-#include <functional>
 #include <unordered_map>
 #include <memory>
 #include <optional>
@@ -37,12 +36,12 @@ struct FsNode : public std::enable_shared_from_this<FsNode>
     std::unordered_map<std::string, std::shared_ptr<FsNode>> subdirectories = {};
 };
 
-/// Maintains virtual file system tree of directories.
-class DirectoryTree
+/// Mutable snapshot of the virtual file system tree.
+class FsSnapshot
 {
 public:
-    explicit DirectoryTree();
-    explicit DirectoryTree(std::shared_ptr<FsNode> root_);
+    explicit FsSnapshot();
+    explicit FsSnapshot(std::shared_ptr<FsNode> root_);
 
     /// Directory Write Methods
 

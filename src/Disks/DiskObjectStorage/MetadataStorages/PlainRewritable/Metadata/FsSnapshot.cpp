@@ -1,15 +1,11 @@
-#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Metadata/DirectoryTree.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Metadata/FsSnapshot.h>
 
 #include <Common/Exception.h>
+#include <Common/UniqueLock.h>
 
 #include <base/defines.h>
 
-#include <filesystem>
-#include <functional>
-#include <memory>
-#include <optional>
 #include <ranges>
-#include <vector>
 
 namespace DB
 {
@@ -162,19 +158,19 @@ FsNodePtr unlinkTree(const FsNodePtr & root, const NormalizedPath & path)
 
 }
 
-DirectoryTree::DirectoryTree()
+FsSnapshot::FsSnapshot()
     : root(std::make_shared<FsNode>())
 {
 }
 
-DirectoryTree::DirectoryTree(std::shared_ptr<FsNode> root_)
+FsSnapshot::FsSnapshot(std::shared_ptr<FsNode> root_)
     : root(std::move(root_))
 {
 }
 
-void DirectoryTree::recordDirectoryPath(const std::string & path, DirectoryRemoteInfo info)
+void FsSnapshot::recordDirectoryPath(const std::string & path, DirectoryRemoteInfo info)
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_path = normalizePath(path);
 
     if (const auto node = walk(root, normalized_path); node && !isVirtual(node))
@@ -187,9 +183,9 @@ void DirectoryTree::recordDirectoryPath(const std::string & path, DirectoryRemot
     remote_layout_files_delta += info.files.size();
 }
 
-void DirectoryTree::moveDirectory(const std::string & from, const std::string & to)
+void FsSnapshot::moveDirectory(const std::string & from, const std::string & to)
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_from = normalizePath(from);
     const auto normalized_to = normalizePath(to);
 
@@ -211,9 +207,9 @@ void DirectoryTree::moveDirectory(const std::string & from, const std::string & 
     root = moveTree(root, normalized_from, normalized_to);
 }
 
-void DirectoryTree::removeDirectory(const std::string & path)
+void FsSnapshot::removeDirectory(const std::string & path)
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_path = normalizePath(path);
     const auto node = walk(root, normalized_path);
 
@@ -235,9 +231,9 @@ void DirectoryTree::removeDirectory(const std::string & path)
     });
 }
 
-void DirectoryTree::recordFile(const std::string & path, FileRemoteInfo info)
+void FsSnapshot::recordFile(const std::string & path, FileRemoteInfo info)
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_path = normalizePath(path);
     const auto node = walk(root, normalized_path.parent_path());
 
@@ -259,9 +255,9 @@ void DirectoryTree::recordFile(const std::string & path, FileRemoteInfo info)
     remote_layout_files_delta += 1;
 }
 
-void DirectoryTree::removeFile(const std::string & path)
+void FsSnapshot::removeFile(const std::string & path)
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_path = normalizePath(path);
     const auto node = walk(root, normalized_path.parent_path());
 
@@ -280,9 +276,9 @@ void DirectoryTree::removeFile(const std::string & path)
     remote_layout_files_delta -= 1;
 }
 
-std::vector<std::string> DirectoryTree::listDirectory(const std::string & path) const
+std::vector<std::string> FsSnapshot::listDirectory(const std::string & path) const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto node = walk(root, normalizePath(path));
 
     if (!node)
@@ -297,9 +293,9 @@ std::vector<std::string> DirectoryTree::listDirectory(const std::string & path) 
     return result;
 }
 
-std::pair<bool, std::optional<DirectoryRemoteInfo>> DirectoryTree::existsDirectory(const std::string & path) const
+std::pair<bool, std::optional<DirectoryRemoteInfo>> FsSnapshot::existsDirectory(const std::string & path) const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto node = walk(root, normalizePath(path));
 
     if (!node)
@@ -308,9 +304,9 @@ std::pair<bool, std::optional<DirectoryRemoteInfo>> DirectoryTree::existsDirecto
     return {true, node->info};
 }
 
-std::unordered_map<std::string, std::optional<DirectoryRemoteInfo>> DirectoryTree::getSubtreeRemoteInfo(const std::string & path) const
+std::unordered_map<std::string, std::optional<DirectoryRemoteInfo>> FsSnapshot::getSubtreeRemoteInfo(const std::string & path) const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_path = normalizePath(path);
     const auto start_node = walk(root, normalized_path);
 
@@ -326,9 +322,9 @@ std::unordered_map<std::string, std::optional<DirectoryRemoteInfo>> DirectoryTre
     return subtree_info;
 }
 
-std::optional<DirectoryRemoteInfo> DirectoryTree::getDirectoryRemoteInfo(const std::string & path) const
+std::optional<DirectoryRemoteInfo> FsSnapshot::getDirectoryRemoteInfo(const std::string & path) const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto node = walk(root, normalizePath(path));
 
     if (!node)
@@ -337,7 +333,7 @@ std::optional<DirectoryRemoteInfo> DirectoryTree::getDirectoryRemoteInfo(const s
     return node->info;
 }
 
-std::optional<FileRemoteInfo> DirectoryTree::getFileRemoteInfo(const std::string & path) const
+std::optional<FileRemoteInfo> FsSnapshot::getFileRemoteInfo(const std::string & path) const
 {
     const auto normalized_path = normalizePath(path);
     const auto directory_remote_info = getDirectoryRemoteInfo(normalized_path.parent_path());
@@ -351,9 +347,9 @@ std::optional<FileRemoteInfo> DirectoryTree::getFileRemoteInfo(const std::string
     return directory_remote_info->files.at(normalized_path.filename());
 }
 
-bool DirectoryTree::existsFile(const std::string & path) const
+bool FsSnapshot::existsFile(const std::string & path) const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     const auto normalized_path = normalizePath(path);
     const auto node = walk(root, normalized_path.parent_path());
 
@@ -363,23 +359,23 @@ bool DirectoryTree::existsFile(const std::string & path) const
     return node->info->files.contains(normalized_path.filename());
 }
 
-std::shared_ptr<FsNode> DirectoryTree::getRoot() const
+std::shared_ptr<FsNode> FsSnapshot::getRoot() const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     return root;
 }
 
-void DirectoryTree::setRoot(std::shared_ptr<FsNode> new_root)
+void FsSnapshot::setRoot(std::shared_ptr<FsNode> new_root)
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     root = std::move(new_root);
     remote_layout_directories_delta = 0;
     remote_layout_files_delta = 0;
 }
 
-std::pair<int64_t, int64_t> DirectoryTree::getRemoteLayoutDeltas() const
+std::pair<int64_t, int64_t> FsSnapshot::getRemoteLayoutDeltas() const
 {
-    std::lock_guard guard(mutex);
+    UniqueLock lock(mutex);
     return {remote_layout_directories_delta, remote_layout_files_delta};
 }
 
