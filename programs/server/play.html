@@ -10494,13 +10494,27 @@ async function reconcileStartup() {
     /// The active tab was restored via `activateTab`/`restoreFromHistory`, which overwrote the
     /// shared display state (`pinned_columns` and `column_color_modes`) with the matched saved
     /// tab's snapshot (or cleared it for a result-less tab). When the URL is authoritative (a
-    /// fresh/shared link, not a stale reload or a live bootstrap edit — the same gate as the
-    /// parameter reconciliation above), make the link's set win over the saved tab's: reassert the
-    /// values the link carried and clear the ones it omitted, so the shared appearance is honored
-    /// exactly and the trailing `syncHistory`/auto-run re-stamps the URL with the link's set rather
-    /// than the saved tab's. Done symmetrically for pinned columns and color modes: the feature
-    /// persists them the same way, so both must survive a shared link.
-    if (activated && url_query && !preserve_local_query && !bootstrap_dirty) {
+    /// fresh/shared link, not a stale reload or a live bootstrap edit), make the link's set win over
+    /// the saved tab's: reassert the values the link carried and clear the ones it omitted, so the
+    /// shared appearance is honored exactly and the trailing `syncHistory`/auto-run re-stamps the URL
+    /// with the link's set rather than the saved tab's. Done symmetrically for pinned columns and
+    /// color modes: the feature persists them the same way, so both must survive a shared link.
+    ///
+    /// Gate on display-state authoritativeness, NOT on the hash carrying a non-empty query: a link
+    /// with an EMPTY query is still authoritative for the display state when it carries a well-formed
+    /// `pinned_columns` / `color_modes` param, which `writeHistoryEntry` emits (e.g. `?pinned_columns=
+    /// {...}#`) once the user clears the editor while columns stay pinned. The old `url_query`-only
+    /// gate dropped those queryless shared/reloaded links on the floor — `activateTab` restored the
+    /// saved tab's set and the trailing `syncHistory` re-stamped the URL without the link's pins/colors,
+    /// breaking the persistence contract. A malformed-only param (`?pinned_columns=not-json`) does NOT
+    /// establish authority — it is left non-destructive per the `/* ignore malformed */` contract, and
+    /// so is a URL with neither a query nor a well-formed display param (a plain reload, whose saved
+    /// display state must be preserved rather than cleared). The remaining guards match the parameter
+    /// reconciliation above: a blank stale-reload echo (`stale_blank_reload_bare`) is a non-authoritative
+    /// stale hash, a stale reload preserving a newer local edit (`preserve_local_query`) and a live
+    /// bootstrap edit (`bootstrap_dirty`) both hold state newer than the URL.
+    const url_display_state_authoritative = url_pinned_columns !== null || url_color_modes !== null;
+    if (activated && (url_query || url_display_state_authoritative) && !stale_blank_reload_bare && !preserve_local_query && !bootstrap_dirty) {
         /// The URL is authoritative for the shared display state, so it wins over the matched saved
         /// tab's snapshot: a param PRESENT-AND-DECODED sets the globals to the link's set, and a param
         /// ABSENT clears them to the empty set. `buildHistoryParams` serializes the empty state by
