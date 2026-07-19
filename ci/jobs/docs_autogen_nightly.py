@@ -20,8 +20,9 @@ GENERATOR = "ci/jobs/scripts/docs/autogenerate/autogenerate_docs.py"
 # A stable branch, force-pushed each run, so the bot keeps a single open PR that
 # always carries exactly one commit off the latest master.
 BRANCH = "robot/docs-autogen"
-# The label the docs check exempts from the read-only copies guard (see
-# ci/jobs/docs_job_mintlify.py). It also skips the changelog requirement.
+# The label the docs check exempts from the generated-region and read-only-copy
+# guards (see ci/jobs/docs_job_mintlify.py). It also skips the changelog
+# requirement.
 # The label is provisioned once in the repository as part of the rollout (it
 # already exists); the workflow only attaches it, so it stays the single source
 # of truth for the label's color and description.
