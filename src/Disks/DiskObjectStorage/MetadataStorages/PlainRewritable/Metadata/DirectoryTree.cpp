@@ -369,6 +369,14 @@ std::shared_ptr<FsNode> DirectoryTree::getRoot() const
     return root;
 }
 
+void DirectoryTree::setRoot(std::shared_ptr<FsNode> new_root)
+{
+    std::lock_guard guard(mutex);
+    root = std::move(new_root);
+    remote_layout_directories_delta = 0;
+    remote_layout_files_delta = 0;
+}
+
 std::pair<int64_t, int64_t> DirectoryTree::getRemoteLayoutDeltas() const
 {
     std::lock_guard guard(mutex);

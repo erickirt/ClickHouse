@@ -70,6 +70,7 @@ public:
     /// Snapshot Methods
 
     std::shared_ptr<FsNode> getRoot() const;
+    void setRoot(std::shared_ptr<FsNode> new_root);
     std::pair<int64_t, int64_t> getRemoteLayoutDeltas() const;
 
 private:
