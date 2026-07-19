@@ -113,7 +113,7 @@ SELECT a, c FROM (
 -- https://github.com/ClickHouse/ClickHouse/issues/107951 (site 11). A second path to the same
 -- IntersectOrExceptStep divergence: one branch folds a column to Const(Nullable(Nothing)) (here via
 -- QUALIFY + LIMIT 0 over a const-NULL CTE) while the sibling keeps the full Nullable(Nothing) column.
--- QUALIFY is only implemented in the new analyzer, so pin it (CI randomizes enable_analyzer).
+-- QUALIFY is only implemented in the Analyzer, so pin it (CI randomizes enable_analyzer).
 WITH cte AS (SELECT DISTINCT NULL WHERE isNullable('') GROUP BY 1)
 SELECT DISTINCT *, toNullable(NULL) FROM cte QUALIFY materialize(100) LIMIT 0
 INTERSECT DISTINCT
