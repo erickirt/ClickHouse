@@ -5494,6 +5494,13 @@ void ReadFromMergeTree::serialize(Serialization & ctx) const
     if (query_info.prewhere_info)
         query_info.prewhere_info->serialize(ctx);
 
+    /// `join_runtime_filters_for_index_analysis` (the descriptors that drive left-side granule pruning
+    /// for `enable_join_runtime_filters_index_analysis`) is intentionally not serialized: the worker
+    /// rebuilds a fresh `ReadFromMergeTree` in `deserialize` without these descriptors, so the pruning is
+    /// simply skipped on distributed reads. Results stay correct (the read just does no runtime pruning);
+    /// only the optimization is lost. This mirrors the parallel-replicas guard in `initializePipeline`.
+    /// Propagating the descriptors to worker plans is a follow-up.
+
     /// Bucketed reads exist only since query-plan serialization version 2. If the peer only understands
     /// version 1, throw a clear error rather than write bytes it would misread (the deserialize side checks
     /// the same).

@@ -500,7 +500,11 @@ private:
     /// Pre-computed value, needed to trigger sets creating for PK
     mutable std::optional<Indexes> indexes;
 
-    /// Used for granule pruning in JOINs
+    /// Used for granule pruning in JOINs (enable_join_runtime_filters_index_analysis).
+    /// Populated post-construction by addJoinRuntimeFilterIndexAnalysisOnDataRead during query-plan
+    /// optimization. Not carried by clone()/serialize()/deserialize(), so the pruning is intentionally
+    /// skipped when the step is rebuilt for distributed or parallel-replicas reads (results stay correct,
+    /// only the optimization is lost); propagating it there is a follow-up.
     std::vector<RuntimeFilterIndexAnalysisDescriptor> join_runtime_filters_for_index_analysis;
 
     /// Row policy / prewhere deferred to after FINAL, if needed
