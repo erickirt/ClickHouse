@@ -109,6 +109,11 @@ public:
 
                 auto column_identifier = planner_context->getGlobalPlannerContext()->createColumnIdentifier(node);
 
+                /// The ALIAS column may be referenced from inside a subquery, which collectSets
+                /// never descends into (it skips QUERY and UNION children), so register the sets
+                /// of the ALIAS expression here before building actions over it.
+                collectSets(column_node->getExpression(), *planner_context);
+
                 ActionsDAG alias_column_actions_dag;
                 ColumnNodePtrWithHashSet empty_correlated_columns_set;
                 PlannerActionsVisitor actions_visitor(planner_context, empty_correlated_columns_set, false);

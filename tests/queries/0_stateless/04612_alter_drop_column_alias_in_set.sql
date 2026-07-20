@@ -25,6 +25,14 @@ INSERT INTO t_alias_in_set (id, category) VALUES (1, 'electronics'), (2, 'other'
 ALTER TABLE t_alias_in_set DROP COLUMN extra;
 SELECT 'after drop', id, is_special, label FROM t_alias_in_set ORDER BY id;
 
+-- Correlated scalar subquery referencing the ALIAS chain (found by the AST fuzzer on this PR).
+-- collectSets does not descend into subqueries, so the ALIAS expansion must register
+-- the sets of the ALIAS expression itself.
+SELECT 'subquery select', id, 'YES' IS DISTINCT FROM (SELECT label) FROM t_alias_in_set ORDER BY id;
+SELECT 'subquery where', count() FROM t_alias_in_set WHERE 'YES' IS DISTINCT FROM (SELECT label);
+-- In a mutation filter a correlated subquery is rejected with a regular error, not a LOGICAL_ERROR.
+ALTER TABLE t_alias_in_set DELETE WHERE 'YES' IS DISTINCT FROM (SELECT label); -- { serverError NOT_IMPLEMENTED }
+
 -- Mutation predicate references ALIAS -> ALIAS -> IN (MutationsInterpreter).
 ALTER TABLE t_alias_in_set DELETE WHERE label = 'YES';
 SELECT 'after delete', id, is_special, label FROM t_alias_in_set ORDER BY id;
