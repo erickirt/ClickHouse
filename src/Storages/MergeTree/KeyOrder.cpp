@@ -15,11 +15,14 @@ int KeyOrder::compareTuples(const FieldRef * left, const FieldRef * right, size_
         if (left[i] == physicalStartExtreme(i) && right[i] == physicalEndExtreme(i))
             return 0;
 
-        if (accurateEquals(left[i], right[i]))
-            continue;
+        /// Equality must follow the total sort order, not value-space semantics: accurateLess places
+        /// NaN above every number (the writer sorts with the same convention), so two NaNs are equal
+        /// here, while accurateEquals would report them as unequal.
+        if (accurateLess(left[i], right[i]))
+            return isReversed(i) ? 1 : -1;
 
-        int cmp = accurateLess(left[i], right[i]) ? -1 : 1;
-        return isReversed(i) ? -cmp : cmp;
+        if (accurateLess(right[i], left[i]))
+            return isReversed(i) ? -1 : 1;
     }
     return 0;
 }
