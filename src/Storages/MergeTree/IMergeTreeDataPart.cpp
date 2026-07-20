@@ -600,6 +600,10 @@ void IMergeTreeDataPart::setIndex(Columns index_columns)
     if (index)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "The index of data part can be set only once");
 
+    /// The primary index lives for the part's whole lifetime, so build the `Index` object in the
+    /// dedicated arena, like `setColumns` / `setMinMaxIndex`. This covers every caller (insert / merge
+    /// write finalize and the mutation path) in one place.
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     optimizeIndexColumns(index_granularity->getMarksCount(), index_columns);
     index = std::make_shared<Index>(std::move(index_columns));
 }

@@ -1514,6 +1514,18 @@ static void finalizeMutatedPart(
         new_data_part->calculateColumnsAndSecondaryIndicesSizesOnDisk();
 
     new_data_part->default_codec = codec;
+
+    /// This hardlink / mutate-some-columns path assembles the checksums and index granularity in the
+    /// default arenas (the full-rewrite path re-homes them in `MergedBlockOutputStream::finalizePartAsync`).
+    /// Re-home the finished part-lifetime maps into the dedicated arena. The primary index set above is
+    /// already routed by `setIndex`; the minmax index by `setMinMaxIndex`.
+    if (JemallocMergeTreeArena::isEnabled())
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        reallocateByCopy(new_data_part->checksums);
+        if (new_data_part->index_granularity)
+            new_data_part->index_granularity = new_data_part->index_granularity->clone();
+    }
 }
 
 }
