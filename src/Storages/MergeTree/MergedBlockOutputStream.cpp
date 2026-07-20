@@ -284,7 +284,9 @@ MergedBlockOutputStream::Finalizer MergedBlockOutputStream::finalizePartAsync(
     /// assigned above; re-home them into the dedicated MergeTree arena so a freshly written part's
     /// long-lived metadata lives there, like a reloaded part's. The in-memory primary index is
     /// already built in the arena by the writer. Runs for insert / merge / mutation, and for
-    /// projections via each projection part's own finalize.
+    /// projections via each projection part's own finalize. When the feature is off the scope is a
+    /// no-op, so skip the O(files + marks) copies entirely rather than paying them in the default arenas.
+    if (JemallocMergeTreeArena::isEnabled())
     {
         ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
         reallocateByCopy(new_part->checksums);

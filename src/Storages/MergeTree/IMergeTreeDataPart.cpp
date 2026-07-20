@@ -1337,9 +1337,6 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             if (!(*storage.getSettings())[MergeTreeSetting::primary_key_lazy_load])
                 index = loadIndex();
 
-            if (!(*storage.getSettings())[MergeTreeSetting::columns_and_secondary_indices_sizes_lazy_calculation])
-                calculateColumnsAndSecondaryIndicesSizesOnDisk();
-
             loadRowsCount(); /// Must be called after loadIndexGranularity() as it uses the value of `index_granularity`.
 
             /// For constant granularity parts (non-adaptive marks), the last mark granularity
@@ -1360,6 +1357,12 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
                 loadProjections(require_columns_checksums, check_consistency, has_broken_projections, false /* if_not_loaded */);
             }
         }
+
+        /// Kept out of the dedicated arena scope above on purpose: the size computation is heavy
+        /// short-lived churn (a sample column per column/substream). The finished, part-lifetime maps
+        /// are re-homed into the arena inside `calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked`.
+        if (!(*storage.getSettings())[MergeTreeSetting::columns_and_secondary_indices_sizes_lazy_calculation])
+            calculateColumnsAndSecondaryIndicesSizesOnDisk();
 
         if (check_consistency && !has_broken_projections)
             checkConsistency(require_columns_checksums);
@@ -2217,6 +2220,11 @@ void IMergeTreeDataPart::setColumnsSubstreams(const ColumnsSubstreams & columns_
 
 void IMergeTreeDataPart::moveMetadataToDedicatedArena()
 {
+    /// Every member below is already stored; the copies exist only to move them between arenas. When the
+    /// feature is off `ScopedJemallocThreadArena` is a no-op, so skip the copies entirely to avoid the cost.
+    if (!JemallocMergeTreeArena::isEnabled())
+        return;
+
     ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
 
     /// Re-home the members built outside the arena into it (copy under the scope, then adopt).
@@ -2727,23 +2735,29 @@ void IMergeTreeDataPart::calculateColumnsAndSecondaryIndicesSizesOnDisk() const
 {
     UniqueLock lock(columns_and_secondary_indices_sizes_mutex);
     calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked();
-
-    /// The size maps are cached on the part for its whole lifetime, so re-home the finished maps into
-    /// the dedicated arena. Only the finished maps are copied here, deliberately not the computation
-    /// above: `calculateEachColumnSizes` resolves a stream name and builds a sample column for every
-    /// column and substream, which is heavy short-lived churn that must stay out of the shared arena.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-    if (columns_sizes)
-        columns_sizes = std::make_shared<const ColumnSizeByName>(*columns_sizes);
-    if (secondary_index_sizes)
-        secondary_index_sizes = std::make_shared<const IndexSizeByName>(*secondary_index_sizes);
 }
 
 void IMergeTreeDataPart::calculateColumnsAndSecondaryIndicesSizesOnDiskUnlocked() const
 {
+    /// The computation must run outside the dedicated arena: `calculateEachColumnSizes` resolves a
+    /// stream name and builds a sample column for every column and substream, which is heavy
+    /// short-lived churn that must stay out of the shared arena. All callers (the eager load path
+    /// and every lazy getter) reach this from the default arenas.
     calculateColumnsSizesOnDisk();
     calculateSecondaryIndicesSizesOnDisk();
     are_columns_and_secondary_indices_sizes_calculated = true;
+
+    /// The size maps are cached on the part for its whole lifetime, so re-home the finished maps into
+    /// the dedicated arena. Done here (not in the public wrapper) so the lazy getters, which call this
+    /// directly, re-home too.
+    if (JemallocMergeTreeArena::isEnabled())
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        if (columns_sizes)
+            columns_sizes = std::make_shared<const ColumnSizeByName>(*columns_sizes);
+        if (secondary_index_sizes)
+            secondary_index_sizes = std::make_shared<const IndexSizeByName>(*secondary_index_sizes);
+    }
 }
 
 void IMergeTreeDataPart::calculateColumnsSizesOnDisk() const
