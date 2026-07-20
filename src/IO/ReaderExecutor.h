@@ -160,9 +160,8 @@ private:
         bool isComplete(bool at_eof) const { return at_eof || atBound(); }
         /// Whether any bytes have been consumed from the stream (read or skipped) since it opened.
         bool consumedAnyBytes() const { return current_position > opened_at; }
-        /// Forward, within `bridgeable_gap`, and still below the bound. A window crossing the bound
-        /// is served short (up to `read_until`), not rejected -- rejecting would drain the residual
-        /// and re-read it on the next connection.
+        /// Forward, within `bridgeable_gap`, and still below the bound (a crossing window is served
+        /// short, not rejected).
         bool canServeAt(size_t off, size_t bridgeable_gap) const
         {
             return off >= current_position && off - current_position <= bridgeable_gap && off < read_until;
@@ -211,9 +210,8 @@ private:
     /// Drop the held connection: drain a small tail to complete it, else account it incomplete.
     void dropLongConnection();
 
-    /// The only logical<->physical converters: physical = header-inclusive file coords (the offset
-    /// map, object offsets); logical = payload coords (`position`, `totalSize`). A raw
-    /// `+/- data_start_offset` anywhere else is a bug.
+    /// The only logical<->physical converters (physical = header-inclusive file coords, logical =
+    /// payload coords); a raw `+/- data_start_offset` elsewhere is a bug.
     size_t toPhys(size_t logical) const { return logical + data_start_offset; }
     size_t toLogical(size_t physical) const { chassert(physical >= data_start_offset); return physical - data_start_offset; }
 
@@ -236,7 +234,7 @@ private:
     /// Held source connection reused across sequential windows; empty when none is open.
     std::optional<LongConnection> long_conn;
     /// Forward-reach estimator, fed `recordReadRange`/`recordSeek`; drives the open-long decision.
-    ReadContinuityTracker continuity_tracker;
+    ReadContinuityTracker fetch_tracker;
     /// Connection-reuse budget; null disables long connections (the stateless path).
     std::shared_ptr<LongConnectionLimit> long_connection_limit;
     /// Global encryption-header cache; null disables caching (url / non-disk reads).

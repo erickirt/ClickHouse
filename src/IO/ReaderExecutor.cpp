@@ -123,7 +123,7 @@ ReaderExecutor::ReaderExecutor(
     Options options)
     : source(std::move(source_))
     , block_size(options.block_size ? options.block_size : DEFAULT_BLOCK_SIZE)
-    , continuity_tracker(ReadContinuityTracker::Options{.bridgeable_gap = options.min_bytes_for_seek})
+    , fetch_tracker(ReadContinuityTracker::Options{.bridgeable_gap = options.min_bytes_for_seek})
     , long_connection_limit(std::move(options.long_connection_limit))
     , encryption_header_cache(std::move(options.encryption_header_cache))
     , min_bytes_for_seek(options.min_bytes_for_seek)
@@ -234,7 +234,7 @@ bool ReaderExecutor::shouldOpenLongConnection() const
     if (long_conn || !long_connection_limit)
         return false;
     /// Open a long connection when the predicted run end runs past this window.
-    return clampReach(continuity_tracker.predictedEnd(), position) > position + block_size;
+    return clampReach(fetch_tracker.predictedEnd(), position) > position + block_size;
 }
 
 bool ReaderExecutor::tryOpenLongConnection(const StoredObject & object, size_t object_offset)
@@ -252,7 +252,7 @@ bool ReaderExecutor::tryOpenLongConnection(const StoredObject & object, size_t o
     /// reads ahead only as far as the pattern predicts (no full-object over-read when just a
     /// slice is used). Reuse spans this bound; once the read runs past it the connection completes
     /// (pool-reusable) and the next window opens a fresh, longer one as the run keeps growing.
-    const size_t forward = clampReach(continuity_tracker.predictedEnd(), position) - position;
+    const size_t forward = clampReach(fetch_tracker.predictedEnd(), position) - position;
     size_t read_until_obj = object_offset + forward;
     if (!offset_map.hasUnknownSize())
         read_until_obj = std::min<size_t>(read_until_obj, object.bytes_size);
@@ -482,8 +482,7 @@ ChainedBuffers ReaderExecutor::readNextWindow()
     if (long_conn && long_conn->servesObject(object.remote_path)
         && long_conn->canServeAt(object_offset, min_bytes_for_seek))
     {
-        /// Reuse the held connection, serving only up to its bound (a short window is fine); the
-        /// next call reopens at the bound rather than draining and re-reading the residual.
+        /// Serve only up to the bound (a short window is fine); avoids draining and re-reading it.
         stats.add(Stats::LongConnectionHits);
         const size_t serve = std::min(want, long_conn->read_until - object_offset);
         got = serveFromLongConnection(object_offset, serve, block->data());
@@ -506,9 +505,8 @@ ChainedBuffers ReaderExecutor::readNextWindow()
     stats.add(Stats::BytesFromSource, got);
     stats.add(Stats::RequestedBytes, got);
 
-    /// A short window (`got < want`) is normal -- the held connection served up to its bound, or the
-    /// object ended; advance by `got` and let the next call continue. EOF is the only `got == 0`, and
-    /// nothing read below a known-size source's declared end is truncation.
+    /// A short window is normal (advance by `got`, re-call); only `got == 0` is EOF, where a
+    /// known-size source ending early is truncation.
     if (got == 0)
     {
         reached_eof = true;
@@ -520,7 +518,7 @@ ChainedBuffers ReaderExecutor::readNextWindow()
         return {};
     }
 
-    continuity_tracker.recordReadRange(position, got);
+    fetch_tracker.recordReadRange(position, got);
 
     /// Decrypt the freshly-read, uniquely-owned block in place at its logical offset. CTR is
     /// position-addressable, so decrypting just this window is exact.
@@ -537,7 +535,7 @@ void ReaderExecutor::seek(size_t new_position)
     LOG_TRACE(log, "seek: {} -> {}", position, new_position);
     /// Feed the estimator; a held connection that can't continue to `new_position` is dropped
     /// lazily by the next `readNextWindow` (its `canServeAt` check).
-    continuity_tracker.recordSeek(new_position);
+    fetch_tracker.recordSeek(new_position);
     position = new_position;
     reached_eof = false;
 }
