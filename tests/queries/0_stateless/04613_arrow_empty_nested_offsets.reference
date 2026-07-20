@@ -16,3 +16,7 @@ native_reader=0
 2	{}
 1	[]
 2	[]
+1	[]
+2	[]
+DoS guard: forged-length variants that drove an allocation: 0
+DoS guard: empty-child length check active
