@@ -1,3 +1,8 @@
+-- Tags: no-parallel-replicas
+-- ^ with parallel replicas, the initiator constant-folds the `::Point::Geometry` cast and re-serializes it
+-- as `_CAST((0., 0.), 'Geometry')`; the replica then rejects the conversion of a bare `Tuple(Float64, Float64)`
+-- literal to the `Geometry` variant, see https://github.com/ClickHouse/ClickHouse/issues/74366.
+
 -- Test MVTEncode aggregate state serialize/deserialize round-trip via a stored AggregateFunction column
 
 DROP TABLE IF EXISTS mvt_state;
