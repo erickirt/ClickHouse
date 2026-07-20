@@ -6,8 +6,8 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CUR_DIR"/../shell_config.sh
 
-fallback_query_id="04549_values_fallback_${CLICKHOUSE_DATABASE}_${RANDOM}"
-overflow_query_id="04549_values_overflow_${CLICKHOUSE_DATABASE}_${RANDOM}"
+fallback_query_id="04613_values_fallback_${CLICKHOUSE_DATABASE}_${RANDOM}"
+overflow_query_id="04613_values_overflow_${CLICKHOUSE_DATABASE}_${RANDOM}"
 
 $CLICKHOUSE_CLIENT -q "
     CREATE TABLE values_fallback
