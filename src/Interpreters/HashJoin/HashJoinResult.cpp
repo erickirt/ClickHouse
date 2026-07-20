@@ -68,8 +68,8 @@ static ColumnWithTypeAndName copyLeftKeyColumnToRight(
     if (!right_column.type->equals(*right_key_type))
         right_column.column = castColumnAccurate(right_column, right_key_type);
 
-    /// Types may be equal but not identical, e.g. `DateTime` with different timezones,
-    /// which shares the physical representation but affects expressions over the key (issue #111033).
+    /// Types may be equal but not identical, DateTime with different timezones
+    /// share physical representation but affect expressions over the key (issue #111033)
     right_column.type = right_key_type;
 
     right_column.column = right_column.column->convertToFullColumnIfConst();
