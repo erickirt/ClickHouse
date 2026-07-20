@@ -6820,7 +6820,11 @@ void StorageReplicatedMergeTree::alter(
         changeSettings(future_metadata.settings_changes, table_lock_holder);
 
         if (statistics_changed)
+        {
+            /// Route the long-lived metadata snapshot clone into the dedicated MergeTree arena.
+            ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
             setInMemoryMetadata(future_metadata);
+        }
 
         /// It is safe to ignore exceptions here as only settings are changed, which is not validated in `alterTable`
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(query_context, table_id, future_metadata, /*validate_new_create_query=*/true);
@@ -6829,7 +6833,11 @@ void StorageReplicatedMergeTree::alter(
 
     if (commands.isCommentAlter())
     {
-        setInMemoryMetadata(future_metadata);
+        {
+            /// Route the long-lived metadata snapshot clone into the dedicated MergeTree arena.
+            ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+            setInMemoryMetadata(future_metadata);
+        }
 
         /// It is safe to ignore exceptions here as only the comment is changed, which is not validated in `alterTable`
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(query_context, table_id, future_metadata, /*validate_new_create_query=*/true);
@@ -6853,7 +6861,11 @@ void StorageReplicatedMergeTree::alter(
         for (auto & index : future_metadata.secondary_indices)
             index.escape_filenames = committed_metadata->escape_index_filenames;
 
-        setInMemoryMetadata(future_metadata);
+        {
+            /// Route the long-lived metadata snapshot clone into the dedicated MergeTree arena.
+            ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+            setInMemoryMetadata(future_metadata);
+        }
 
         /// It is safe to ignore exceptions here as only settings and comments are changed, neither of which is validated in `alterTable`
         DatabaseCatalog::instance().getDatabase(table_id.database_name)->alterTable(query_context, table_id, future_metadata, /*validate_new_create_query=*/true);
@@ -6982,7 +6994,11 @@ void StorageReplicatedMergeTree::alter(
             if (comment_is_changed)
             {
                 metadata_copy.setComment(future_metadata.comment);
-                setInMemoryMetadata(metadata_copy);
+                {
+                    /// Route the long-lived metadata snapshot clone into the dedicated MergeTree arena.
+                    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+                    setInMemoryMetadata(metadata_copy);
+                }
             }
 
             /// Only the comment and/or settings changed here, so it is okay to assume alterTable won't throw as neither
