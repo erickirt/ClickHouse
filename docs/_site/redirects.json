@@ -52507,5 +52507,17 @@
   {
     "source": "/use-cases/observability/clickstack/demo-days/2026/2026-06-12",
     "destination": "/clickstack/demo-days/2026/2026-06-12"
+  },
+  {
+    "source": "/interfaces/web-ui-pinned-columns",
+    "destination": "/concepts/features/interfaces/web-ui-pinned-columns"
+  },
+  {
+    "source": "/sql-reference/statements/check-database",
+    "destination": "/reference/statements/check-database"
+  },
+  {
+    "source": "/sql-reference/statements/create/dictionary/layouts/naive-bayes",
+    "destination": "/reference/statements/create/dictionary/layouts/naive-bayes"
   }
 ]
