@@ -155,8 +155,6 @@ public:
     PopResult pop();
     void confirm(Index last_flashed_index);
 
-    size_t getQueueCapacityForTest();
-
 private:
     void notifyFlushUnlocked(Index expected_flushed_index, bool should_prepare_tables_anyway);
 

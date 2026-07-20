@@ -218,44 +218,40 @@ typename SystemLogQueue<LogElement>::PopResult SystemLogQueue<LogElement>::pop()
     PopResult result;
     size_t prev_ignored_logs = 0;
 
-    std::unique_lock lock(mutex);
-
-    flush_event.wait_for(lock, std::chrono::milliseconds(settings.flush_interval_milliseconds), [&] ()
     {
-        return requested_flush_index > flushed_index || requested_prepare_tables > prepared_tables || is_shutdown;
-    });
+        std::unique_lock lock(mutex);
 
-    if (is_shutdown)
-        return PopResult{.is_shutdown = true};
-
-    if (!queue.empty())
-    {
-        /// Retain useful allocator headroom, but cap it at twice the observed
-        /// batch size so capacity from transient spikes decays on later flushes.
-        const auto retained_capacity_limit = queue.size() > settings.max_size_rows / 2 ? settings.max_size_rows : queue.size() * 2;
-        const auto next_capacity = std::max(settings.reserved_size_rows, std::min(queue.capacity(), retained_capacity_limit));
-
-        /// Do not retry if producers append while unlocked: trace_log can profile
-        /// SYSTEM FLUSH LOGS itself, so chasing a growing queue could starve it.
-        lock.unlock();
-        result.logs.reserve(next_capacity);
-        lock.lock();
+        flush_event.wait_for(lock, std::chrono::milliseconds(settings.flush_interval_milliseconds), [&] ()
+        {
+            return requested_flush_index > flushed_index || requested_prepare_tables > prepared_tables || is_shutdown;
+        });
 
         if (is_shutdown)
             return PopResult{.is_shutdown = true};
+
+        /// Allocate the next batch's buffer outside the lock so a large reallocation
+        /// does not block producers, then hand it over with a cheap swap below.
+        if (!queue.empty())
+        {
+            const auto next_capacity = std::max(settings.reserved_size_rows, queue.size());
+            lock.unlock();
+            result.logs.reserve(next_capacity);
+            lock.lock();
+
+            if (is_shutdown)
+                return PopResult{.is_shutdown = true};
+        }
+
+        const auto queue_size = queue.size();
+        queue_front_index += queue_size;
+        prev_ignored_logs = ignored_logs;
+        ignored_logs = 0;
+
+        result.last_log_index = queue_front_index;
+        if (!queue.empty())
+            result.logs.swap(queue);
+        result.create_table_force = requested_prepare_tables > prepared_tables;
     }
-
-    const auto queue_size = queue.size();
-    queue_front_index += queue_size;
-    prev_ignored_logs = ignored_logs;
-    ignored_logs = 0;
-
-    result.last_log_index = queue_front_index;
-    result.create_table_force = requested_prepare_tables > prepared_tables;
-
-    if (!queue.empty())
-        result.logs.swap(queue);
-    lock.unlock();
 
     if (prev_ignored_logs)
         LOG_ERROR(log, "Queue had been full at {}, accepted {} logs, ignored {} logs.",
@@ -273,13 +269,6 @@ void SystemLogQueue<LogElement>::shutdown()
     is_shutdown = true;
     /// Tell thread to shutdown.
     flush_event.notify_all();
-}
-
-template <typename LogElement>
-size_t SystemLogQueue<LogElement>::getQueueCapacityForTest()
-{
-    std::lock_guard lock(mutex);
-    return queue.capacity();
 }
 
 template <typename LogElement>
