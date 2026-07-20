@@ -4,7 +4,7 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Metadata/FsSnapshot.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableLayout.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableMetrics.h>
-#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/TransactionPreconditions.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Transactions/UncommittedState.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/MetadataOperationsHolder.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/IMetadataStorage.h>
 #include <Disks/DiskObjectStorage/ObjectStorages/StoredObject.h>
@@ -96,9 +96,8 @@ class MetadataStorageFromPlainRewritableObjectStorageTransaction : public IMetad
 protected:
     MetadataStorageFromPlainRewritableObjectStorage & metadata_storage;
 
-    std::shared_ptr<FsSnapshot> write_set;
-    std::shared_ptr<FsSnapshot> read_set;
-    std::shared_ptr<TransactionPreconditions> preconditions;
+    std::shared_ptr<FsSnapshot> commit_snapshot;
+    UncommittedState uncommitted_state;
     MetadataOperationsHolder operations;
     StoredObjects removed_objects;
 

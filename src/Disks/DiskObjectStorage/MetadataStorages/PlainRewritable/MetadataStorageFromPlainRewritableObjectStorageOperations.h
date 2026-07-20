@@ -5,7 +5,7 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/Plain/MetadataStorageFromPlainObjectStorage.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableLayout.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/PlainRewritableMetrics.h>
-#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/TransactionPreconditions.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Transactions/Preconditions.h>
 
 #include <filesystem>
 #include <memory>
@@ -17,12 +17,12 @@ namespace DB
 class MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation final : public IMetadataOperation
 {
 private:
-    const std::shared_ptr<TransactionPreconditions> preconditions;
+    const std::shared_ptr<Preconditions> preconditions;
     const std::shared_ptr<FsSnapshot> fs_tree;
 
 public:
     MetadataStorageFromPlainObjectStorageValidatePreconditionsOperation(
-        std::shared_ptr<TransactionPreconditions> preconditions_,
+        std::shared_ptr<Preconditions> preconditions_,
         std::shared_ptr<FsSnapshot> fs_tree_);
 
     void execute() override;
