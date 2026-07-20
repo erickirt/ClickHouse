@@ -1393,8 +1393,21 @@ Chunk AsynchronousInsertQueue::processPreprocessedEntries(
             continue;
         }
 
-        if (!isCompatibleHeader(block_to_insert, header))
-            convertBlockToHeader(block_to_insert, header, context_);
+        try
+        {
+            if (!isCompatibleHeader(block_to_insert, header))
+                convertBlockToHeader(block_to_insert, header, context_);
+        }
+        catch (...)
+        {
+            /// Isolate the failure to this entry, mirroring the parsing path (processEntriesWithParsing)
+            auto exception = getCurrentExceptionMessage(/*with_stacktrace=*/ false);
+            LOG_ERROR(logger, "Failed conversion for insert query id {}. {}", entry->query_id, exception);
+            add_to_async_insert_log(entry, exception, /*num_rows=*/ 0, block->bytes());
+            entry->finish(std::current_exception());
+            entry->resetChunk();
+            continue;
+        }
 
         auto columns = block_to_insert.getColumns();
         for (size_t i = 0, s = columns.size(); i < s; ++i)
