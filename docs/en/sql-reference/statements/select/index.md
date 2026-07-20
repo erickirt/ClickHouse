@@ -35,7 +35,7 @@ SELECT [DISTINCT [ON (column1, column2, ...)]] expr_list
 
 All clauses are optional, except for the required list of expressions immediately after `SELECT` which is covered in more detail [below](#select-clause).
 
-Specifics of each optional clause are covered in separate sections, which are listed in the same order as they are executed:
+Specifics of each optional clause are covered in separate sections, which are listed in the same order as they are executed (except for `SELECT` and `DISTINCT`, listed first for convenience: their expressions are evaluated only after the preceding clauses finish, as described [below](#select-clause)):
 
 - [WITH clause](../../../sql-reference/statements/select/with.md)
 - [SELECT clause](#select-clause)
