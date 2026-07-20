@@ -11,6 +11,7 @@ class UncommittedState
     class PathResolver;
 
     void useDirectory(const std::string & path) const;
+    void useMissingDirectory(const std::string & path) const;
 
 public:
     explicit UncommittedState(std::shared_ptr<FsSnapshot> tx_snapshot_);

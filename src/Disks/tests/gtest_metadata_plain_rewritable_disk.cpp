@@ -2199,3 +2199,20 @@ TEST_F(MetadataPlainRewritableDiskTest, ConcurrentRecreateUnderUnlinkFile)
     EXPECT_TRUE(metadata->existsFile("A/file"));
     EXPECT_EQ(readObject(object_storage, metadata->getStorageObjects("A/file").front().remote_path), "New content");
 }
+
+TEST_F(MetadataPlainRewritableDiskTest, SnapshotDecisionPreservedOnConcurrentChange)
+{
+    auto metadata = getMetadataStorage("SnapshotDecisionPreservedOnConcurrentChange");
+
+    auto tx1 = metadata->createTransaction();
+    tx1->removeRecursive("X", /*should_remove_blob=*/nullptr);
+
+    {
+        auto tx2 = metadata->createTransaction();
+        tx2->createDirectory("X");
+        tx2->commit(DB::NoCommitOptions{});
+    }
+
+    EXPECT_ANY_THROW(tx1->commit(DB::NoCommitOptions{}));
+    EXPECT_TRUE(metadata->existsDirectory("X"));
+}
