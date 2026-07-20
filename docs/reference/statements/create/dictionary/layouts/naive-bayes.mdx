@@ -1,14 +1,10 @@
 ---
 slug: /sql-reference/statements/create/dictionary/layouts/naive-bayes
 title: 'Naive Bayes dictionaries'
-sidebar_label: 'Naive Bayes'
-sidebar_position: 13
+sidebarTitle: 'Naive Bayes'
 description: 'Configure NAIVE_BAYES dictionaries for text classification.'
 doc_type: 'reference'
 ---
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
 
 The `naive_bayes` (`NAIVE_BAYES`) dictionary classifies text with a multinomial [Naive Bayes](https://en.wikipedia.org/wiki/Naive_Bayes_classifier) model, the standard event model for text: it scores each class by how often the input's n-grams appear in it. You give it a table of per-class **n-gram counts**, which it compiles into a model once, at load time, then uses to classify any text you pass in.
 
@@ -16,11 +12,11 @@ It is suited to fast, lightweight text classification such as sentiment analysis
 
 You query the dictionary with one of three functions:
 
-- [`naiveBayesClassifier`](/sql-reference/functions/machine-learning-functions#naiveBayesClassifier) returns the predicted class id.
-- [`naiveBayesClassifierWithProb`](/sql-reference/functions/machine-learning-functions#naiveBayesClassifierWithProb) returns the predicted class with its probability.
-- [`naiveBayesClassifierWithAllProbs`](/sql-reference/functions/machine-learning-functions#naiveBayesClassifierWithAllProbs) returns every class with its probability.
+- [`naiveBayesClassifier`](/reference/functions/regular-functions/machine-learning-functions#naiveBayesClassifier) returns the predicted class id.
+- [`naiveBayesClassifierWithProb`](/reference/functions/regular-functions/machine-learning-functions#naiveBayesClassifierWithProb) returns the predicted class with its probability.
+- [`naiveBayesClassifierWithAllProbs`](/reference/functions/regular-functions/machine-learning-functions#naiveBayesClassifierWithAllProbs) returns every class with its probability.
 
-A plain [`dictGet`](/sql-reference/functions/ext-dict-functions#dictGet) classifies too (see [Notes](#notes)). One more function, [`naiveBayesNgrams`](/sql-reference/functions/splitting-merging-functions#naiveBayesNgrams), does not classify — it splits text into n-grams the same way the dictionary does, so you can build the training data from raw text (see [Build training data from raw text](#build-training-data-from-raw-text)).
+A plain [`dictGet`](/reference/functions/regular-functions/ext-dict-functions#dictGet) classifies too (see [Notes](#notes)). One more function, [`naiveBayesNgrams`](/reference/functions/regular-functions/splitting-merging-functions#naiveBayesNgrams), does not classify — it splits text into n-grams the same way the dictionary does, so you can build the training data from raw text (see [Build training data from raw text](#build-training-data-from-raw-text)).
 
 ## Quickstart {#quickstart}
 
@@ -177,10 +173,10 @@ SYSTEM RELOAD DICTIONARY sentiment;
 | `start_token` | Boundary token prepended `(n-1)` times to the input. See [Boundary tokens](#boundary-tokens-padding). | `'0x01'` / `'<s>'` | — (no padding) |
 | `end_token` | Boundary token appended `(n-1)` times to the input. | `'0xFF'` / `'</s>'` | — (no padding) |
 
-You can define the dictionary with `CREATE DICTIONARY` DDL (as in the quickstart above) or in an XML configuration file; see [Dictionary layouts](/sql-reference/statements/create/dictionary/layouts) for where that file goes. The example below sets every layout option so you can see them all — only `class_attribute`, `n`, and `mode` are required, and the table above gives the defaults for the rest. In a configuration file, the priors are written as repeated `prior` elements (one per class, as shown below), padding tokens for `byte` and `codepoint` are numbers (the config cannot carry raw bytes), and a `token` literal is XML-escaped where needed, so `<s>` becomes `&lt;s&gt;`.
+You can define the dictionary with `CREATE DICTIONARY` DDL (as in the quickstart above) or in an XML configuration file; see [Dictionary layouts](/reference/statements/create/dictionary/layouts/overview) for where that file goes. The example below sets every layout option so you can see them all — only `class_attribute`, `n`, and `mode` are required, and the table above gives the defaults for the rest. In a configuration file, the priors are written as repeated `prior` elements (one per class, as shown below), padding tokens for `byte` and `codepoint` are numbers (the config cannot carry raw bytes), and a `token` literal is XML-escaped where needed, so `<s>` becomes `&lt;s&gt;`.
 
 <Tabs>
-<TabItem value="ddl" label="DDL" default>
+<Tab title="DDL">
 
 ```sql
 CREATE DICTIONARY naive_bayes (ngram String, class_id UInt32, count UInt64)
@@ -200,8 +196,8 @@ LAYOUT(NAIVE_BAYES(
 LIFETIME(3600);
 ```
 
-</TabItem>
-<TabItem value="xml" label="Configuration file">
+</Tab>
+<Tab title="Configuration file">
 
 ```xml
 <dictionary>
@@ -255,7 +251,7 @@ LIFETIME(3600);
 </dictionary>
 ```
 
-</TabItem>
+</Tab>
 </Tabs>
 
 ## Tokenization modes {#tokenization-modes}
@@ -298,7 +294,7 @@ Padding is off by default. It only matters for `n > 1`, where it can improve acc
 
 1. **Decide per side.** `start_token` and `end_token` are independent — set one, both, or neither. An empty value means that side is not padded.
 2. **Choose rare values** that will not collide with real data, e.g. `0x01` / `0xFF` for `byte`, `U+10FFFE` / `U+10FFFF` for `codepoint`, or `<s>` / `</s>` for `token`.
-3. **Produce the training n-grams with the same padding.** The dictionary pads the query input but never your source, so the boundary tokens must already be baked into the n-grams you load. The easiest way to guarantee they match is to build the source with [`naiveBayesNgrams`](/sql-reference/functions/splitting-merging-functions#naiveBayesNgrams), passing it the same `start_token` and `end_token` (and `n` and `mode`) you give the layout — it emits exactly the padded n-grams the dictionary produces at query time.
+3. **Produce the training n-grams with the same padding.** The dictionary pads the query input but never your source, so the boundary tokens must already be baked into the n-grams you load. The easiest way to guarantee they match is to build the source with [`naiveBayesNgrams`](/reference/functions/regular-functions/splitting-merging-functions#naiveBayesNgrams), passing it the same `start_token` and `end_token` (and `n` and `mode`) you give the layout — it emits exactly the padded n-grams the dictionary produces at query time.
 
 The padding-token format depends on the mode:
 
@@ -322,7 +318,7 @@ The padding-token format depends on the mode:
 
 ## Build training data from raw text {#build-training-data-from-raw-text}
 
-If you start from raw labelled text instead of pre-aggregated counts, use the [`naiveBayesNgrams`](/sql-reference/functions/splitting-merging-functions#naiveBayesNgrams) function to split it into n-grams. Give it the same `n`, `mode`, `start_token`, and `end_token` as your layout, and it produces exactly the n-grams the dictionary expects, so the training data matches what the model sees at query time.
+If you start from raw labelled text instead of pre-aggregated counts, use the [`naiveBayesNgrams`](/reference/functions/regular-functions/splitting-merging-functions#naiveBayesNgrams) function to split it into n-grams. Give it the same `n`, `mode`, `start_token`, and `end_token` as your layout, and it produces exactly the n-grams the dictionary expects, so the training data matches what the model sees at query time.
 
 Given a table of `(class_id, text)` rows, build the `(ngram, class_id, count)` source with one `GROUP BY`:
 
@@ -361,7 +357,9 @@ SELECT * FROM training_data ORDER BY ngram LIMIT 5;
 
 `training_data` is now a valid source for a `NAIVE_BAYES` dictionary (here token unigrams; change the `n` and `mode` arguments to match your layout). The dictionary tokenizes query input exactly as it is given, so if the training text is lowercased but the query text is not, their n-grams will not match and model accuracy will suffer.
 
-:::note Priors and document counts
+<Info>
+**Priors and document counts**
+
 The `proportional` prior (the default) is weighted by each class's **total n-gram count**, not by its number of documents. If you want the classic document-frequency prior (`documents_in_class / total_documents`), compute it from the raw `docs` table and pass it with `priors_mode 'explicit'`:
 
 ```sql
@@ -374,7 +372,7 @@ FROM (SELECT class_id, count() / sum(count()) OVER () AS frac FROM docs GROUP BY
 1. │ [(0,0.4),(1,0.6)] │
    └───────────────────┘
 ```
-:::
+</Info>
 
 Then, create the dictionary from `training_data`, passing the explicit prior computed above, and classify new reviews:
 
@@ -461,7 +459,7 @@ SELECT ngram, class_id, count FROM stored ORDER BY ngram;
    └───────┴──────────┴───────┘
 ```
 
-**Language detection from raw text** — short words with boundary padding (`n = 2`, `mode 'codepoint'`; class `0` = English, `1` = Spanish). The training n-grams are built from raw words with [`naiveBayesNgrams`](/sql-reference/functions/splitting-merging-functions#naiveBayesNgrams), and the boundary tokens — passed to both the function and the layout — let the model use the first and last letters of each word:
+**Language detection from raw text** — short words with boundary padding (`n = 2`, `mode 'codepoint'`; class `0` = English, `1` = Spanish). The training n-grams are built from raw words with [`naiveBayesNgrams`](/reference/functions/regular-functions/splitting-merging-functions#naiveBayesNgrams), and the boundary tokens — passed to both the function and the layout — let the model use the first and last letters of each word:
 
 ```sql
 CREATE TABLE words (class_id UInt32, text String) ENGINE = MergeTree ORDER BY tuple();
