@@ -4075,7 +4075,12 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
                         /// decline index analysis (fall back to a full scan). A wider-or-equal
                         /// `FixedString(M)` key (M >= N) pads the constant into exactly one key value,
                         /// so pruning stays correct and is left untouched.
-                        if (WhichDataType(const_type).isFixedString() && isStringOrFixedString(key_expr_type_not_null))
+                        /// Strip `LowCardinality` first: `toFixedString(x, N)` with a non-literal length
+                        /// (e.g. `toLowCardinality(N)`) yields a `LowCardinality(FixedString(N))` constant
+                        /// with the same padded bytes and comparison semantics; the wrapper must not let
+                        /// the constant slip past this guard (the key type is already LC-stripped above).
+                        const auto const_type_not_lc = removeLowCardinality(const_type);
+                        if (WhichDataType(const_type_not_lc).isFixedString() && isStringOrFixedString(key_expr_type_not_null))
                         {
                             const size_t const_bytes = const_value.safeGet<String>().size();
                             const auto * fixed_key = typeid_cast<const DataTypeFixedString *>(key_expr_type_not_null.get());

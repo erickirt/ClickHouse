@@ -43,7 +43,7 @@ SELECT count() FROM t_pk_str  WHERE toFixedString('abc', 257) = p;
 SELECT count() FROM t_pk_inj  WHERE toFixedString('abc', 257) = p;
 SELECT count() FROM t_skip    WHERE toFixedString('abc', 257) = p;
 
--- With the exact-count projection path enabled (the original crash: chassert i==len).
+-- With the exact-count projection path enabled (the original chassert(i == len) failure).
 SELECT count() FROM t_skip WHERE toFixedString('abc', 257) = p GROUP BY ALL
 SETTINGS optimize_use_projections = 1, optimize_use_implicit_projections = 1, optimize_trivial_count_query = 1;
 
@@ -89,6 +89,28 @@ SELECT count() FROM t_fs5 WHERE p = toFixedString('abc', 3);
 -- Constant wider than the key (257 > 5): must still be correct (index analysis declines).
 SELECT count() FROM t_fs5 WHERE p = toFixedString('abc', 257);
 
+-- A non-literal length argument (e.g. toLowCardinality(257)) makes the constant
+-- LowCardinality(FixedString(257)) instead of FixedString(257). The guard must strip
+-- LowCardinality, otherwise the wrapper slips past it and re-introduces the mis-prune
+-- (wrong count()) and the chassert(i == len) failure.
+DROP TABLE IF EXISTS t_lc_gt;
+DROP TABLE IF EXISTS t_lc_inj;
+CREATE TABLE t_lc_gt (p String) ENGINE = MergeTree ORDER BY tuple() SETTINGS index_granularity = 1024;
+INSERT INTO t_lc_gt SELECT if(number < 9000, 'abc', concat('x', toString(number))) FROM numbers(10000);
+CREATE TABLE t_lc_inj (p String) ENGINE = MergeTree ORDER BY reverse(tuple(bin(p), reverse(p)))
+SETTINGS index_granularity = 1024, add_minmax_index_for_string_columns = 1;
+INSERT INTO t_lc_inj SELECT if(number < 9000, 'abc', concat('x', toString(number))) FROM numbers(10000);
+SELECT count() FROM t_lc_gt  WHERE toFixedString('abc', toLowCardinality(257)) = p;
+SELECT count() FROM t_lc_inj WHERE toFixedString('abc', toLowCardinality(257)) = p;
+SELECT count() FROM t_lc_inj WHERE toFixedString('abc', toLowCardinality(257)) = p GROUP BY ALL
+SETTINGS optimize_use_projections = 1, optimize_use_implicit_projections = 1, optimize_trivial_count_query = 1;
+SELECT countIf(explain LIKE '%ReadFromMergeTree%') > 0
+FROM (
+    EXPLAIN indexes = 1
+    SELECT count() FROM t_lc_inj WHERE toFixedString('abc', toLowCardinality(257)) = p GROUP BY ALL
+    SETTINGS optimize_use_projections = 1, optimize_use_implicit_projections = 1, optimize_trivial_count_query = 1
+);
+
 DROP TABLE IF EXISTS t_gt;
 DROP TABLE IF EXISTS t_pk_str;
 DROP TABLE IF EXISTS t_pk_inj;
@@ -97,3 +119,5 @@ DROP TABLE IF EXISTS t_nul_gt;
 DROP TABLE IF EXISTS t_nul_pk;
 DROP TABLE IF EXISTS t_fs;
 DROP TABLE IF EXISTS t_fs5;
+DROP TABLE IF EXISTS t_lc_gt;
+DROP TABLE IF EXISTS t_lc_inj;
