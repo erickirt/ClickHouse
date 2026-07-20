@@ -480,11 +480,13 @@ ChainedBuffers ReaderExecutor::readNextWindow()
 
     size_t got = 0;
     if (long_conn && long_conn->servesObject(object.remote_path)
-        && long_conn->canContinue(object_offset, want, min_bytes_for_seek))
+        && long_conn->canServeAt(object_offset, min_bytes_for_seek))
     {
-        /// Reuse the held connection for this contiguous (or small-gap) window.
+        /// Reuse the held connection, serving only up to its bound (a short window is fine); the
+        /// next call reopens at the bound rather than draining and re-reading the residual.
         stats.add(Stats::LongConnectionHits);
-        got = serveFromLongConnection(object_offset, want, block->data());
+        const size_t serve = std::min(want, long_conn->read_until - object_offset);
+        got = serveFromLongConnection(object_offset, serve, block->data());
     }
     else
     {
@@ -504,22 +506,18 @@ ChainedBuffers ReaderExecutor::readNextWindow()
     stats.add(Stats::BytesFromSource, got);
     stats.add(Stats::RequestedBytes, got);
 
-    if (offset_map.hasUnknownSize())
+    /// A short window (`got < want`) is normal -- the held connection served up to its bound, or the
+    /// object ended; advance by `got` and let the next call continue. EOF is the only `got == 0`, and
+    /// nothing read below a known-size source's declared end is truncation.
+    if (got == 0)
     {
-        /// At unknown total size a short read is the only EOF signal.
-        if (got == 0)
-        {
-            reached_eof = true;
-            long_conn.reset();   /// at EOF the connection is done, not an incomplete drop
-            return {};
-        }
-    }
-    else if (got < want)
-    {
-        /// The object is shorter than its declared size — truncated or corrupt.
-        throw Exception(ErrorCodes::CANNOT_READ_ALL_DATA,
-            "ReaderExecutor: read {} of {} bytes at offset {} from {} (declared size {})",
-            got, want, position, object.remote_path, object.bytes_size);
+        reached_eof = true;
+        long_conn.reset();
+        if (!offset_map.hasUnknownSize() && position < totalSize())
+            throw Exception(ErrorCodes::CANNOT_READ_ALL_DATA,
+                "ReaderExecutor: source ended at {} of {} bytes for {} (declared size {})",
+                position, totalSize(), object.remote_path, object.bytes_size);
+        return {};
     }
 
     continuity_tracker.recordReadRange(position, got);
@@ -538,7 +536,7 @@ void ReaderExecutor::seek(size_t new_position)
 {
     LOG_TRACE(log, "seek: {} -> {}", position, new_position);
     /// Feed the estimator; a held connection that can't continue to `new_position` is dropped
-    /// lazily by the next `readNextWindow` (its `canContinue` check).
+    /// lazily by the next `readNextWindow` (its `canServeAt` check).
     continuity_tracker.recordSeek(new_position);
     position = new_position;
     reached_eof = false;

@@ -160,10 +160,12 @@ private:
         bool isComplete(bool at_eof) const { return at_eof || atBound(); }
         /// Whether any bytes have been consumed from the stream (read or skipped) since it opened.
         bool consumedAnyBytes() const { return current_position > opened_at; }
-        /// Forward, within `bridgeable_gap`, and `[off, off+want)` stays inside the bound.
-        bool canContinue(size_t off, size_t want, size_t bridgeable_gap) const
+        /// Forward, within `bridgeable_gap`, and still below the bound. A window crossing the bound
+        /// is served short (up to `read_until`), not rejected -- rejecting would drain the residual
+        /// and re-read it on the next connection.
+        bool canServeAt(size_t off, size_t bridgeable_gap) const
         {
-            return off >= current_position && off - current_position <= bridgeable_gap && off + want <= read_until;
+            return off >= current_position && off - current_position <= bridgeable_gap && off < read_until;
         }
 
         /// Read up to `want` bytes from the open stream into `dst`; advances the frontier.
@@ -202,7 +204,7 @@ private:
     /// no slot was available (caller falls back to a one-shot read).
     bool tryOpenLongConnection(const StoredObject & object, size_t object_offset);
     /// Serve one window (<= `want`) from the held connection, bridging a small leading gap;
-    /// releases the connection if it reaches its bound. Precondition: `canContinue`.
+    /// releases the connection if it reaches its bound. Precondition: `canServeAt`.
     size_t serveFromLongConnection(size_t object_offset, size_t want, char * dst);
     /// One-shot bounded read (the stateless path): open, seek, read `want` into `dst`.
     size_t readOneShot(const StoredObject & object, size_t object_offset, size_t want, char * dst);
