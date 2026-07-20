@@ -9,7 +9,9 @@
 #include <Common/SettingSource.h>
 #include <IO/WriteHelpers.h>
 
+#include <algorithm>
 #include <bitset>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 
@@ -242,10 +244,31 @@ void SettingsConstraints::checkOrClamp(const Settings & current_settings, Settin
 {
     /// If we filter out settings that match the current default here, `compatibility` will silently override them.
     /// So when `compatibility` is present, we keep unchanged settings so they are applied after `compatibility`.
-    bool has_compatibility_setting = changes.tryGet("compatibility") != nullptr;
+    const Field * compatibility_value = changes.tryGet("compatibility");
+    bool has_compatibility_setting = compatibility_value != nullptr;
+
+    /// A native-protocol client resolves `compatibility` on its own side and transmits every reverted setting as an
+    /// explicit change (see `SettingsImpl::applyCompatibilitySetting`). For a setting a profile pins with `readonly`
+    /// (a CONST constraint) this would fail the whole query, even though the server keeps the pinned value regardless.
+    /// Reproduce the values that `compatibility` derives so `checkImpl` can drop such compatibility-derived changes
+    /// instead of throwing, matching how the server resolves `compatibility` itself (and how HTTP already behaves).
+    /// Only build the snapshot when a CONST-pinned setting is actually present, to keep the common case free.
+    std::optional<Settings> compatibility_settings;
+    if (has_compatibility_setting
+        && std::any_of(changes.begin(), changes.end(), [&](const SettingChange & change)
+           {
+               auto it = constraints.find(resolveSettingNameWithCache(Settings::resolveName(change.name)));
+               return it != constraints.end() && it->second.writability == SettingConstraintWritability::CONST;
+           }))
+    {
+        compatibility_settings.emplace();
+        compatibility_settings->set("compatibility", *compatibility_value);
+    }
+
     std::erase_if(changes, [&](SettingChange & change)
     {
-        return !checkImpl(current_settings, change, reaction, source, /*ignore_unchanged_settings=*/has_compatibility_setting);
+        return !checkImpl(current_settings, change, reaction, source, /*ignore_unchanged_settings=*/has_compatibility_setting,
+                          compatibility_settings ? &*compatibility_settings : nullptr);
     });
 }
 
@@ -285,7 +308,8 @@ bool SettingsConstraints::checkImpl(const Settings & current_settings,
                                     SettingChange & change,
                                     ReactionOnViolation reaction,
                                     SettingSource source,
-                                    bool ignore_unchanged_settings) const
+                                    bool ignore_unchanged_settings,
+                                    const Settings * compatibility_settings) const
 {
     std::string_view setting_name = Settings::resolveName(change.name);
 
@@ -324,7 +348,20 @@ bool SettingsConstraints::checkImpl(const Settings & current_settings,
             return true;
     }
 
-    return getChecker(current_settings, setting_name).check(change, new_value, reaction, source);
+    auto checker = getChecker(current_settings, setting_name);
+
+    /// Drop a change that merely carries the value `compatibility` derived on the client side for a setting the
+    /// profile pins read-only (see `checkOrClamp`): the pinned value stays in force and the query no longer fails.
+    /// A value differing from the derived one is a genuine override attempt of a read-only setting and still fails.
+    if (compatibility_settings && checker.explain.text.empty()
+        && checker.constraint.writability == SettingConstraintWritability::CONST)
+    {
+        Field compatibility_value;
+        if (compatibility_settings->tryGet(change.name, compatibility_value) && new_value == compatibility_value)
+            return false;
+    }
+
+    return checker.check(change, new_value, reaction, source);
 }
 
 bool SettingsConstraints::checkImpl(const MergeTreeSettings & current_settings, SettingChange & change, ReactionOnViolation reaction) const
