@@ -6791,14 +6791,11 @@ void StorageReplicatedMergeTree::alter(
     auto table_id = getStorageID();
     const auto & query_settings = query_context->getSettingsRef();
 
-    /// Read the current committed metadata directly, bypassing the query-scoped snapshot cache
-    /// (enable_shared_storage_snapshot_in_query). That cache can be pinned earlier in this query -
-    /// for example by the access check, which runs before lockForAlter and reads the snapshot with
-    /// the cache enabled - to a pre-ALTER structure. The comment- and settings-only branches below
-    /// commit this snapshot via setInMemoryMetadata while holding only the alter lock; a stale base
-    /// would overwrite a concurrently applied ALTER_METADATA (executeMetadataAlter also runs under
-    /// lockForAlter, so it is serialized with us) and silently drop columns it added. Reading fresh
-    /// under the held alter lock is what makes that serialization effective.
+    /// Read the committed metadata fresh under the alter lock, bypassing the query-scoped snapshot
+    /// cache (enable_shared_storage_snapshot_in_query): it may have been pinned earlier in the query
+    /// (e.g. by the access check, before lockForAlter) to a pre-ALTER structure. The comment/settings
+    /// branches below commit this base via setInMemoryMetadata under the alter lock, so a stale base
+    /// would drop a column a concurrently applied ALTER_METADATA (also under lockForAlter) just added.
     auto metadata_snapshot = getInMemoryMetadataPtr(query_context, true);
     StorageInMemoryMetadata future_metadata = *metadata_snapshot;
     /// Snapshot the sorting key before applying commands, to compare with the resolved future one.
@@ -6924,11 +6921,10 @@ void StorageReplicatedMergeTree::alter(
         alter_entry.emplace();
         mutation_znode.reset();
 
-        /// Read the current committed metadata fresh (bypass the query-scoped snapshot cache), for the same
-        /// reason as at the top of this method: the cache may have been pinned before lockForAlter (e.g. by
-        /// the access check) to a pre-ALTER structure. Here it also backs the bundled comment/settings local
-        /// commit below (setInMemoryMetadata/alterTable) and the versioned zookeeper_path/metadata write, so a
-        /// stale base would drop a concurrently applied column and write an outdated metadata_version.
+        /// Read committed metadata fresh (bypass the query-scoped cache), same reason as the fresh read at
+        /// the top of this method. Here it also backs the bundled comment/settings local commit and the
+        /// versioned zookeeper_path/metadata write below, so a stale base would drop a concurrently applied
+        /// column and write an outdated metadata_version.
         auto current_metadata = getInMemoryMetadataPtr(query_context, true);
 
         ReplicatedMergeTreeTableMetadata future_metadata_in_zk(*this, current_metadata);
