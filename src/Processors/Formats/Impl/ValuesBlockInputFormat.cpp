@@ -298,6 +298,7 @@ bool ValuesBlockInputFormat::tryReadValue(IColumn & column, size_t column_idx)
     bool rollback_on_exception = false;
     try
     {
+        Exception::SuppressErrorCodesScope suppress_error_codes;
         bool read = true;
         if (checkStringByFirstCharacterAndAssertTheRestCaseInsensitive("DEFAULT", *buf))
         {
@@ -320,12 +321,15 @@ bool ValuesBlockInputFormat::tryReadValue(IColumn & column, size_t column_idx)
         assertDelimiterAfterValue(column_idx);
         return read;
     }
-    catch (const Exception & e)
+    catch (Exception & e)
     {
         /// Do not consider decimal overflow as parse error to avoid attempts to parse it as expression with float literal
         bool decimal_overflow = e.code() == ErrorCodes::ARGUMENT_OUT_OF_BOUND;
         if (!isParseError(e.code()) || decimal_overflow)
+        {
+            e.recordToSystemErrors();
             throw;
+        }
         if (rollback_on_exception)
             column.popBack(1);
 
@@ -491,6 +495,7 @@ bool ValuesBlockInputFormat::parseExpression(IColumn & column, size_t column_idx
         bool ok = false;
         try
         {
+            Exception::SuppressErrorCodesScope suppress_error_codes;
             const auto & serialization = serializations[column_idx];
             serialization->deserializeTextQuoted(column, *buf, format_settings);
             rollback_on_exception = true;
@@ -498,11 +503,14 @@ bool ValuesBlockInputFormat::parseExpression(IColumn & column, size_t column_idx
             if (checkDelimiterAfterValue(column_idx))
                 ok = true;
         }
-        catch (const Exception & e)
+        catch (Exception & e)
         {
             bool decimal_overflow = e.code() == ErrorCodes::ARGUMENT_OUT_OF_BOUND;
             if (!isParseError(e.code()) || decimal_overflow)
+            {
+                e.recordToSystemErrors();
                 throw;
+            }
         }
         if (ok)
         {

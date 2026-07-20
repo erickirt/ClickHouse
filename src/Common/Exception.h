@@ -136,6 +136,22 @@ public:
     /// Callback for any exception
     static std::function<void(std::string_view format_string, int code, bool remote, const Exception::Trace & trace)> callback;
 
+    /// Prevent exceptions constructed on the current thread from being recorded in `system.errors`
+    /// and consequently `system.error_log`.
+    /// An exception that leaves the scope must be recorded explicitly with `recordToSystemErrors`.
+    class SuppressErrorCodesScope
+    {
+    public:
+        SuppressErrorCodesScope();
+        ~SuppressErrorCodesScope();
+
+        SuppressErrorCodesScope(const SuppressErrorCodesScope &) = delete;
+        SuppressErrorCodesScope & operator=(const SuppressErrorCodesScope &) = delete;
+
+    private:
+        bool previous;
+    };
+
 protected:
     static thread_local bool can_use_thread_frame_pointers;
     /// Because of unknown order of static destructor calls,
@@ -224,6 +240,9 @@ public:
     std::string_view tryGetMessageFormatString() const { return message_format_string; }
 
     std::vector<std::string> getMessageFormatStringArgs() const { return message_format_string_args; }
+
+    /// Record an exception that was constructed under `SuppressErrorCodesScope` but will be propagated.
+    void recordToSystemErrors();
 
     void markAsLogged() { logged.store(true, std::memory_order_relaxed); }
 

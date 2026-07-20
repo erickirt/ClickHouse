@@ -71,6 +71,22 @@ std::atomic_bool abort_on_logical_error = false;
 static int terminate_status_code = 128 + SIGABRT;
 std::function<void(std::string_view format_string, int code, bool remote, const Exception::Trace & trace)> Exception::callback = {};
 
+namespace
+{
+thread_local bool suppress_error_codes = false;
+}
+
+Exception::SuppressErrorCodesScope::SuppressErrorCodesScope()
+    : previous(suppress_error_codes)
+{
+    suppress_error_codes = true;
+}
+
+Exception::SuppressErrorCodesScope::~SuppressErrorCodesScope()
+{
+    suppress_error_codes = previous;
+}
+
 constexpr bool debug_or_sanitizer_build =
 #ifdef DEBUG_OR_SANITIZER_BUILD
 true
@@ -99,6 +115,9 @@ static size_t handle_error_code(
         /// So it does not include customer queries.
         Exception::callback(format_string, code, remote, trace);
     }
+
+    if (suppress_error_codes)
+        return static_cast<size_t>(-1);
 
     return ErrorCodes::increment(code, remote, msg, std::string(format_string), trace);
 }
@@ -144,6 +163,12 @@ Exception::Exception(MessageMasked && msg_masked, int code, bool remote_)
     capture_thread_frame_pointers = getThreadFramePointers();
     message_format_string = msg_masked.format_string;
     error_index = handle_error_code(message(), message_format_string, code, remote, getStackFramePointers());
+}
+
+void Exception::recordToSystemErrors()
+{
+    if (error_index == static_cast<size_t>(-1))
+        error_index = ErrorCodes::increment(code(), remote, message(), std::string(message_format_string), getStackFramePointers());
 }
 
 Exception::Exception(CreateFromPocoTag, const Poco::Exception & exc)
