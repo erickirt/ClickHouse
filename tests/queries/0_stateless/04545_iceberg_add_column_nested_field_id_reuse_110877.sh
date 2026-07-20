@@ -16,50 +16,50 @@
 # "last-column-id" on initial table creation, and in generateAddColumnMetadata
 # assigns nested children of a newly added complex column their own ids so every
 # newly added field id is globally unique.
-#
-# Runs in `clickhouse local` (parallel-safe: isolated work dir, no shared
-# server state) so no `no-parallel` tag is needed.
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CUR_DIR"/../shell_config.sh
 
-WORK_DIR="${CLICKHOUSE_TMP}/iceberg_add_column_nested_110877_${CLICKHOUSE_TEST_UNIQUE_NAME}"
-rm -rf "${WORK_DIR}"
-mkdir -p "${WORK_DIR}"
-trap 'rm -rf "${WORK_DIR}"' EXIT
+# Unique table name and on-disk path so the test is parallel-safe.
+TABLE="t_${CLICKHOUSE_DATABASE}_${RANDOM}"
+TABLE_DIR="${USER_FILES_PATH}/${TABLE}"
+rm -rf "${TABLE_DIR}"
+trap 'rm -rf "${TABLE_DIR}"; ${CLICKHOUSE_CLIENT} --query "DROP TABLE IF EXISTS ${TABLE}"' EXIT
 
 # last-column-id of the latest on-disk metadata version.
 last_column_id() {
-    local table_dir="$1"
     local latest
-    latest=$(find "${table_dir}/metadata" -name 'v*.metadata.json' | sort -V | tail -1)
+    latest=$(find "${TABLE_DIR}/metadata" -name 'v*.metadata.json' | sort -V | tail -1)
     python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['last-column-id'])" "${latest}"
 }
 
 # The initial schema has a nested tuple, so nested children consume field ids
-# past the top-level column count. ADD COLUMN of a scalar (c), of a complex
-# nested column (s), and of another scalar (d) must all assign globally-unique
-# ids. A SELECT after each ALTER re-reads the published metadata, so a duplicate
-# field id surfaces immediately. The SELECT after two consecutive ALTERs (s then
-# d) is what exercises the nested half of the fix: if generateAddColumnMetadata
-# regressed to storing `new_field_id` instead of the max nested child id, `d`
-# would reuse a child id of `s` and that SELECT would fail with a duplicate id.
-TABLE_DIR="${WORK_DIR}/t0"
-mkdir -p "${TABLE_DIR}"
-${CLICKHOUSE_LOCAL} \
+# past the top-level column count. A SELECT after each ALTER re-reads the
+# published metadata, so a duplicate field id surfaces immediately. Adding the
+# complex nested column `s` then reading exercises the nested half of the fix:
+# if generateAddColumnMetadata regressed to storing `new_field_id` instead of
+# the max nested child id, a later ADD COLUMN would reuse a child id of `s`.
+# DROP COLUMN d then ADD COLUMN e checks that dropped ids are never reused: `d`
+# (id 9) is dropped, `e` must still take a fresh id 10, so last-column-id stays
+# monotonic at 10.
+${CLICKHOUSE_CLIENT} \
     --allow_insert_into_iceberg=1 \
     --enable_nullable_tuple_type=1 \
     --multiquery -q "
-CREATE TABLE t0 (id Int64, t Tuple(a Int64, b Int64)) ENGINE = IcebergLocal('${TABLE_DIR}/');
-INSERT INTO t0 VALUES (1, (10, 20));
-ALTER TABLE t0 ADD COLUMN c Nullable(Int64);
-SELECT id, t FROM t0 ORDER BY id;
-ALTER TABLE t0 ADD COLUMN s Nullable(Tuple(x Int64, y Int64));
-SELECT id, t FROM t0 ORDER BY id;
-ALTER TABLE t0 ADD COLUMN d Nullable(Int64);
-INSERT INTO t0 (id, t) VALUES (2, (30, 40));
-SELECT id, t FROM t0 ORDER BY id;
-" -- --user_files_path="${WORK_DIR}"
-# ids: id=1 t=2 (t.a=3 t.b=4) c=5 s=6 (s.x=7 s.y=8) d=9 -> last-column-id=9.
-echo "last-column-id=$(last_column_id "${TABLE_DIR}")"
+CREATE TABLE ${TABLE} (id Int64, t Tuple(a Int64, b Int64)) ENGINE = IcebergLocal('${TABLE_DIR}/');
+INSERT INTO ${TABLE} VALUES (1, (10, 20));
+ALTER TABLE ${TABLE} ADD COLUMN c Nullable(Int64);
+SELECT id, t FROM ${TABLE} ORDER BY id;
+ALTER TABLE ${TABLE} ADD COLUMN s Nullable(Tuple(x Int64, y Int64));
+SELECT id, t FROM ${TABLE} ORDER BY id;
+ALTER TABLE ${TABLE} ADD COLUMN d Nullable(Int64);
+SELECT id, t FROM ${TABLE} ORDER BY id;
+ALTER TABLE ${TABLE} DROP COLUMN d;
+ALTER TABLE ${TABLE} ADD COLUMN e Nullable(Int64);
+SELECT id, t FROM ${TABLE} ORDER BY id;
+INSERT INTO ${TABLE} (id, t) VALUES (2, (30, 40));
+SELECT id, t FROM ${TABLE} ORDER BY id;
+"
+# ids: id=1 t=2 (t.a=3 t.b=4) c=5 s=6 (s.x=7 s.y=8) d=9; DROP d keeps 9; e=10.
+echo "last-column-id=$(last_column_id)"
