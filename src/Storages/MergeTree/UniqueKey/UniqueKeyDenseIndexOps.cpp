@@ -28,6 +28,8 @@
 #include <rocksdb/table_properties.h>
 #endif
 
+#include <limits>
+
 
 namespace ProfileEvents
 {
@@ -48,7 +50,6 @@ namespace ErrorCodes
 namespace Setting
 {
     extern const SettingsNonZeroUInt64 max_block_size;
-    extern const SettingsUInt64 unique_key_max_encoded_size;
 }
 
 
@@ -291,7 +292,9 @@ void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part, bo
                 part->name, part->rows_count);
 
         const UInt64 rows = accumulated.rows();
-        const auto max_encoded_size = data.getContext()->getSettingsRef()[Setting::unique_key_max_encoded_size];
+        /// `unique_key_max_encoded_size` is an INSERT-time ingestion policy (a
+        /// check-only bound in `encodeBlock`); the rebuild re-encodes rows the
+        /// server already accepted at INSERT, so no cap applies here.
         SSTIndexWriter::write(
             storage,
             accumulated,
@@ -299,7 +302,7 @@ void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part, bo
             metadata_snapshot->getSortingKeyColumns(),
             metadata_snapshot->getSortingKeyReverseFlags(),
             /*permutation=*/nullptr,
-            max_encoded_size,
+            /*max_encoded_size=*/std::numeric_limits<UInt64>::max(),
             data.getContext());
 
         const UInt64 elapsed_us = rebuild_watch.elapsedMicroseconds();
