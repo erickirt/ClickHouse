@@ -552,3 +552,86 @@ Search Algorithm: binary search
 SELECT count() FROM t_nan_asc WHERE g = 1 AND isNaN(r);
 2
 DROP TABLE t_nan_asc;
+SELECT 'realistic ranges across merged parts';
+realistic ranges across merged parts
+-- Several inserts merged with FINAL exercise the merge path writing reverse-sorted keys, and the
+-- per-group time ranges are nested (the middle group is denser and wider), so range conditions cut
+-- granule boundaries at different positions in every group. The ground truth countIf scans without
+-- using the primary key, so its value must literally equal the indexed counts below it.
+DROP TABLE IF EXISTS t_ranges;
+CREATE TABLE t_ranges (org String, dt DateTime, id UInt64)
+ENGINE = MergeTree ORDER BY (org, dt DESC, id) SETTINGS index_granularity = 128;
+INSERT INTO t_ranges SELECT 'org_a', toDateTime('2026-06-01') + intDiv(number * 2592000, 2000), number FROM numbers(2000);
+INSERT INTO t_ranges SELECT 'org_m', toDateTime('2026-06-01') + intDiv(number * 2592000, 8000), number FROM numbers(8000);
+INSERT INTO t_ranges SELECT 'org_z', toDateTime('2026-06-10') + intDiv(number * 1814400, 2000), number FROM numbers(2000);
+OPTIMIZE TABLE t_ranges FINAL;
+SELECT countIf(org = 'org_m' AND dt > toDateTime('2026-06-20')) FROM t_ranges;
+2933
+SELECT count() FROM t_ranges WHERE org = 'org_m' AND dt > toDateTime('2026-06-20') SETTINGS use_lightweight_primary_key_index_analysis = 1;
+2933
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_ranges WHERE org = 'org_m' AND dt > toDateTime('2026-06-20') SETTINGS use_lightweight_primary_key_index_analysis = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in [1781913601, +Inf)), (org in [\'org_m\', \'org_m\']))
+Parts: 1/1
+Granules: 24/95
+Search Algorithm: binary search
+SELECT count() FROM t_ranges WHERE org = 'org_m' AND dt > toDateTime('2026-06-20') SETTINGS use_lightweight_primary_key_index_analysis = 0;
+2933
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_ranges WHERE org = 'org_m' AND dt > toDateTime('2026-06-20') SETTINGS use_lightweight_primary_key_index_analysis = 0) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in [1781913601, +Inf)), (org in [\'org_m\', \'org_m\']))
+Parts: 1/1
+Granules: 24/95
+Search Algorithm: binary search
+SELECT countIf(org = 'org_a' AND dt < toDateTime('2026-06-05')) FROM t_ranges;
+267
+SELECT count() FROM t_ranges WHERE org = 'org_a' AND dt < toDateTime('2026-06-05') SETTINGS use_lightweight_primary_key_index_analysis = 1;
+267
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_ranges WHERE org = 'org_a' AND dt < toDateTime('2026-06-05') SETTINGS use_lightweight_primary_key_index_analysis = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in (-Inf, 1780617599]), (org in [\'org_a\', \'org_a\']))
+Parts: 1/1
+Granules: 3/95
+Search Algorithm: binary search
+SELECT count() FROM t_ranges WHERE org = 'org_a' AND dt < toDateTime('2026-06-05') SETTINGS use_lightweight_primary_key_index_analysis = 0;
+267
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_ranges WHERE org = 'org_a' AND dt < toDateTime('2026-06-05') SETTINGS use_lightweight_primary_key_index_analysis = 0) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in (-Inf, 1780617599]), (org in [\'org_a\', \'org_a\']))
+Parts: 1/1
+Granules: 3/95
+Search Algorithm: binary search
+SELECT countIf(org = 'org_z' AND dt > toDateTime('2026-06-28')) FROM t_ranges;
+285
+SELECT count() FROM t_ranges WHERE org = 'org_z' AND dt > toDateTime('2026-06-28');
+285
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_ranges WHERE org = 'org_z' AND dt > toDateTime('2026-06-28')) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in [1782604801, +Inf)), (org in [\'org_z\', \'org_z\']))
+Parts: 1/1
+Granules: 4/95
+Search Algorithm: binary search
+SELECT countIf(org = 'org_z' AND dt < toDateTime('2026-06-10')) FROM t_ranges;
+0
+SELECT count() FROM t_ranges WHERE org = 'org_z' AND dt < toDateTime('2026-06-10');
+0
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_ranges WHERE org = 'org_z' AND dt < toDateTime('2026-06-10')) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in (-Inf, 1781049599]), (org in [\'org_z\', \'org_z\']))
+Parts: 0/1
+Granules: 0/95
+Search Algorithm: binary search
+-- Reading in order with a limit must see the same rows the index analysis selects.
+SELECT dt, id FROM t_ranges WHERE org = 'org_a' AND dt < toDateTime('2026-06-05') ORDER BY org, dt DESC, id LIMIT 3 SETTINGS optimize_read_in_order = 1;
+2026-06-04 23:45:36	266
+2026-06-04 23:24:00	265
+2026-06-04 23:02:24	264
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT dt, id FROM t_ranges WHERE org = 'org_a' AND dt < toDateTime('2026-06-05') ORDER BY org, dt DESC, id LIMIT 3 SETTINGS optimize_read_in_order = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in (-Inf, 1780617599]), (org in [\'org_a\', \'org_a\']))
+Parts: 1/1
+Granules: 3/95
+Search Algorithm: binary search
+SELECT dt, id FROM t_ranges WHERE org = 'org_z' AND dt > toDateTime('2026-06-28') ORDER BY org, dt DESC, id LIMIT 3 SETTINGS optimize_read_in_order = 1;
+2026-06-30 23:44:52	1999
+2026-06-30 23:29:45	1998
+2026-06-30 23:14:38	1997
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT dt, id FROM t_ranges WHERE org = 'org_z' AND dt > toDateTime('2026-06-28') ORDER BY org, dt DESC, id LIMIT 3 SETTINGS optimize_read_in_order = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+Condition: and((dt in [1782604801, +Inf)), (org in [\'org_z\', \'org_z\']))
+Parts: 1/1
+Granules: 4/95
+Search Algorithm: binary search
+DROP TABLE t_ranges;
