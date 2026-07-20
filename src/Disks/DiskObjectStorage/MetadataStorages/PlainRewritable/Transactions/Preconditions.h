@@ -11,7 +11,8 @@
 namespace DB
 {
 
-class TransactionPreconditions
+/// Collects the facts about the committed filesystem state that a transaction depends on.
+class Preconditions
 {
 public:
     void checkDirectoryPresent(std::filesystem::path directory, std::string remote_path);

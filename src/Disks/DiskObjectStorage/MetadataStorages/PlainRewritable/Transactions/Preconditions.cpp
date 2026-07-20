@@ -1,4 +1,4 @@
-#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/TransactionPreconditions.h>
+#include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Transactions/Preconditions.h>
 
 #include <Common/Exception.h>
 
@@ -38,19 +38,19 @@ void validateDirectoryMissing(const std::shared_ptr<const FsSnapshot> & fs_tree,
 
 }
 
-void TransactionPreconditions::checkDirectoryPresent(std::filesystem::path directory, std::string remote_path)
+void Preconditions::checkDirectoryPresent(std::filesystem::path directory, std::string remote_path)
 {
     std::lock_guard lock(mutex);
     expected_directory_remote_paths.emplace(std::move(directory), std::move(remote_path));
 }
 
-void TransactionPreconditions::checkDirectoryMissing(std::filesystem::path directory)
+void Preconditions::checkDirectoryMissing(std::filesystem::path directory)
 {
     std::lock_guard lock(mutex);
     expected_missing_directories.emplace(std::move(directory));
 }
 
-void TransactionPreconditions::runChecks(const std::shared_ptr<const FsSnapshot> & fs_tree)
+void Preconditions::runChecks(const std::shared_ptr<const FsSnapshot> & fs_tree)
 {
     std::lock_guard lock(mutex);
 
