@@ -6924,7 +6924,12 @@ void StorageReplicatedMergeTree::alter(
         alter_entry.emplace();
         mutation_znode.reset();
 
-        auto current_metadata = getInMemoryMetadataPtr(query_context, false);
+        /// Read the current committed metadata fresh (bypass the query-scoped snapshot cache), for the same
+        /// reason as at the top of this method: the cache may have been pinned before lockForAlter (e.g. by
+        /// the access check) to a pre-ALTER structure. Here it also backs the bundled comment/settings local
+        /// commit below (setInMemoryMetadata/alterTable) and the versioned zookeeper_path/metadata write, so a
+        /// stale base would drop a concurrently applied column and write an outdated metadata_version.
+        auto current_metadata = getInMemoryMetadataPtr(query_context, true);
 
         ReplicatedMergeTreeTableMetadata future_metadata_in_zk(*this, current_metadata);
         if (ast_to_str(future_metadata.sorting_key.definition_ast) != ast_to_str(current_metadata->sorting_key.definition_ast))
