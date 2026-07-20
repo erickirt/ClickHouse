@@ -852,6 +852,7 @@ void DiskObjectStorage::prepareRead(
     /// Memory cache (page cache).
     const bool use_page_cache =
         read_settings.page_cache_settings.cache
+        && (metadata_storage->areBlobPathsRandom() || metadata_storage->isReadOnly())
         && (use_distributed_cache
             ? read_settings.use_page_cache_with_distributed_cache
             : (read_settings.use_page_cache_for_disks_without_file_cache && !file_cache_enabled));
