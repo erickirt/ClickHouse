@@ -1,5 +1,6 @@
 #include <Disks/DiskObjectStorage/MetadataStorages/PlainRewritable/Transactions/UncommittedState.h>
 #include <Disks/DiskObjectStorage/MetadataStorages/NormalizedPath.h>
+#include <base/defines.h>
 
 #include <Common/getRandomASCIIString.h>
 
@@ -7,6 +8,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace DB
@@ -14,28 +16,28 @@ namespace DB
 
 class UncommittedState::PathResolver
 {
-    enum class EventType
+    struct Move
     {
-        Remove,
-        Move,
-    };
-
-    struct Event
-    {
-        EventType type = EventType::Remove;
         NormalizedPath from = {};
         NormalizedPath to = {};
     };
 
+    struct Remove
+    {
+        NormalizedPath path = {};
+    };
+
+    using Event = std::variant<Move, Remove>;
+
 public:
     void recordMove(const NormalizedPath & from, const NormalizedPath & to)
     {
-        events.push_back({.type = EventType::Move, .from = from, .to = to});
+        events.push_back(Move{.from = from, .to = to});
     }
 
     void recordRemove(const NormalizedPath & directory)
     {
-        events.push_back({.type = EventType::Remove, .from = directory});
+        events.push_back(Remove{.path = directory});
     }
 
     void recordCreate(const NormalizedPath & directory)
@@ -50,29 +52,23 @@ public:
 
         for (const auto & event : events | std::views::reverse)
         {
-            const auto & from = event.from.native();
-            const auto & to = event.to.native();
-
-            switch (event.type)
+            if (const Remove * remove = std::get_if<Remove>(&event))
             {
-                case EventType::Remove:
-                {
-                    if (resolved == from || resolved.starts_with(from + '/'))
-                        return std::nullopt;
-
-                    break;
-                }
-                case EventType::Move:
-                {
-                    if (resolved == to)
-                        resolved = from;
-                    else if (resolved.starts_with(to + '/'))
-                        resolved = from + resolved.substr(to.size());
-                    else if (resolved == from || resolved.starts_with(from + '/'))
-                        return std::nullopt;
-
-                    break;
-                }
+                if (resolved == remove->path || resolved.starts_with(remove->path.native() + '/'))
+                    return std::nullopt;
+            }
+            else if (const Move * move = std::get_if<Move>(&event))
+            {
+                if (resolved == move->to)
+                    resolved = move->from;
+                else if (resolved.starts_with(move->to.native() + '/'))
+                    resolved = move->from.native() + resolved.substr(move->to.native().size());
+                else if (resolved == move->from.native() || resolved.starts_with(move->from.native() + '/'))
+                    return std::nullopt;
+            }
+            else
+            {
+                UNREACHABLE();
             }
         }
 
