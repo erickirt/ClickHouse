@@ -51,10 +51,17 @@ SELECT randomHadamardTransform(CAST(range(130), 'Array(Float32)'));  -- { server
 SELECT randomHadamardTransform(CAST(range(127), 'Array(Float32)'));  -- { serverError BAD_ARGUMENTS }  127 is prime
 SELECT randomHadamardTransform(CAST(range(1000), 'Array(Float32)')); -- { serverError BAD_ARGUMENTS }  1000 = 8 * 125
 
--- Such a length is still accepted as a truncated (subsampled) projection: that zero-pads to a power
--- of two internally, and the output length is output_dims regardless, so nothing is silently changed.
+-- Such a length is still accepted as a projection whenever an explicit output_dims is given: that
+-- zero-pads to a power of two internally, and the output length is output_dims regardless, so nothing
+-- is silently changed. This holds for output_dims below, equal to, and above the input length (up to
+-- the padded power of two) -- an explicit output_dims accepts any length, even one that has no exact
+-- full transform.
 SELECT length(randomHadamardTransform(CAST(range(1000), 'Array(Float32)'), 0, 128)),
-       length(randomHadamardTransform(CAST(range(130), 'Array(Float32)'), 0, 64));
+       length(randomHadamardTransform(CAST(range(1000), 'Array(Float32)'), 0, 1000)),
+       length(randomHadamardTransform(CAST(range(1000), 'Array(Float32)'), 0, 1024)),
+       length(randomHadamardTransform(CAST(range(130), 'Array(Float32)'), 0, 64)),
+       length(randomHadamardTransform(CAST(range(130), 'Array(Float32)'), 0, 130));
 
--- output_dims above the input length still throws.
+-- output_dims above the padded power of two (here 8 for length 7, whose exact transform length is 7)
+-- still throws.
 SELECT randomHadamardTransform(CAST(range(7), 'Array(Float32)'), 0, 16); -- { serverError ARGUMENT_OUT_OF_BOUND }

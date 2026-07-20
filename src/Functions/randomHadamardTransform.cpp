@@ -203,7 +203,12 @@ private:
                 /// is transformed directly by the FWHT. Any other length has no exact transform.
                 auto [kron_m, kron_blocks, kron_kind] = kroneckerFactorFor(length);
 
-                const bool truncating = fixed_out_dims != 0 && fixed_out_dims < length;
+                /// `projecting` -- the caller passed an explicit `output_dims`, so the output length is
+                /// user-specified and internal zero-padding is invisible; such a call accepts any length.
+                /// `truncating` -- a projection that actually drops coordinates (`output_dims < length`),
+                /// which is the only case that needs the uniform row leverage of a +-1 Hadamard factor.
+                const bool projecting = fixed_out_dims != 0;
+                const bool truncating = projecting && fixed_out_dims < length;
 
                 /// A truncated projection (SRHT) needs uniform row leverage, which only the +-1 Hadamard
                 /// small factor has. The dense Hartley (DHT) factor C_m is orthogonal, so the FULL
@@ -224,16 +229,18 @@ private:
                 ///  - an exact Kronecker factor (Hadamard for the full or truncated transform, Hartley for
                 ///    the full transform) works on the input length itself -- no padding;
                 ///  - a power of two is already exact for the FWHT -- no padding;
-                ///  - a truncated projection of any other length zero-pads to the next power of two (the
-                ///    output length is output_dims regardless, so padding does not change the visible shape);
-                ///  - a FULL transform of any other length cannot be done exactly, and zero-padding it would
-                ///    silently return a longer vector, so it is rejected instead of padded.
+                ///  - a projection of any other length (any explicit output_dims) zero-pads to the next
+                ///    power of two -- the output length is output_dims regardless, so padding does not
+                ///    change the visible shape, and an explicit output_dims is documented to accept any
+                ///    length;
+                ///  - a FULL transform (no output_dims) of any other length cannot be done exactly, and
+                ///    zero-padding it would silently return a longer vector, so it is rejected instead.
                 size_t working_dim = 0;
                 if (kron_m)
                     working_dim = length;
                 else if (std::has_single_bit(length))
                     working_dim = length;
-                else if (truncating)
+                else if (projecting)
                     working_dim = std::bit_ceil(length);
                 else
                     throw Exception(ErrorCodes::BAD_ARGUMENTS,
