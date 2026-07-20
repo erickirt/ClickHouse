@@ -170,3 +170,22 @@ SELECT count() >= 1 FROM (
     UNION ALL
     SELECT randConstant() AS c FROM remote('127.0.0.{1,2}', system.one)
 ) SETTINGS enable_analyzer = 0;
+
+-- AST fuzzer (STID 0993-2a62). Same Const-vs-full divergence, but the branch pipelines carry a
+-- totals port (WITH TOTALS in the CTE). IntersectOrExceptStep::updatePipeline must apply the
+-- converting expression whenever the branch header differs from the output header in constness
+-- (strict blocksHaveEqualStructure, not isCompatibleHeader): addSimpleTransform converts the
+-- totals port too, while the main-stream processors below it do not, so skipping the conversion
+-- left a Const totals port next to materialized full main streams and the per-stream structure
+-- check in a downstream DistinctStep threw a logical error.
+WITH cte AS (SELECT DISTINCT NULL WHERE isNullable('') GROUP BY 1 WITH TOTALS)
+SELECT DISTINCT *, toNullable(NULL) FROM cte QUALIFY materialize(100) LIMIT 0
+INTERSECT DISTINCT
+SELECT *, NULL FROM cte GROUP BY ALL
+SETTINGS enable_analyzer = 1;
+
+WITH cte AS (SELECT DISTINCT NULL WHERE isNullable('') GROUP BY 1 WITH TOTALS)
+SELECT DISTINCT *, toNullable(NULL) FROM cte QUALIFY materialize(100) LIMIT 0
+EXCEPT DISTINCT
+SELECT *, NULL FROM cte GROUP BY ALL
+SETTINGS enable_analyzer = 1;

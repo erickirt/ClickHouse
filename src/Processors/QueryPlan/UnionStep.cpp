@@ -30,14 +30,17 @@ static SharedHeader checkHeaders(const SharedHeaders & input_headers)
     /// Branches are optimized independently, so filter push-down may constant-fold a
     /// column in one branch but not its sibling. Tolerate exactly that: compare with the
     /// top-level Const stripped, which keeps the check otherwise strict (different types
-    /// and divergent Sparse/Replicated wrappers are still rejected). Header columns may
-    /// legitimately have a null column pointer (e.g. __grouping_set from WithMergeableState);
-    /// leave those untouched, names and types are still validated below.
+    /// and divergent Sparse/Replicated wrappers are still rejected). The strip is guarded
+    /// by isColumnConst because convertToFullColumnIfConst is broader for some columns
+    /// (e.g. ColumnArray materializes const nested data too), and the conversion path at
+    /// execution time only reconciles a top-level Const. Header columns may legitimately
+    /// have a null column pointer (e.g. __grouping_set from WithMergeableState); leave
+    /// those untouched, names and types are still validated below.
     auto without_top_level_const = [](const Block & header)
     {
         ColumnsWithTypeAndName columns = header.getColumnsWithTypeAndName();
         for (auto & column : columns)
-            if (column.column)
+            if (column.column && isColumnConst(*column.column))
                 column.column = column.column->convertToFullColumnIfConst();
         return Block(std::move(columns));
     };
