@@ -89,11 +89,6 @@ void MetricLog::stepFunction(const std::chrono::system_clock::time_point current
 
     const bool show_zero_values = getContext()->getSettingsRef()[Setting::system_metric_log_show_zero_values_in_histograms];
 
-    /// Move the guarded previous values into a local for the duration of the add() callback, then move
-    /// them back: thread-safety analysis cannot see the mutex through the callback, so the guarded member
-    /// must only be touched in this scope. The lock is held throughout, so no one else observes the gap.
-    std::vector<ProfileEvents::Count> previous = std::move(previous_profile_events);
-
     add([&](MetricLogElement & element)
     {
         element.event_time = std::chrono::system_clock::to_time_t(current_time);
@@ -103,7 +98,9 @@ void MetricLog::stepFunction(const std::chrono::system_clock::time_point current
         for (ProfileEvents::Event i = ProfileEvents::Event(0), end = ProfileEvents::end(); i < end; ++i)
         {
             const ProfileEvents::Count new_value = ProfileEvents::global_counters[i];
-            auto & old_value = previous[i];
+            /// previous_profile_events is guarded by the mutex held above; thread-safety analysis cannot
+            /// see the lock through this callback, so suppress the false positive on this access.
+            auto & old_value = TSA_SUPPRESS_WARNING_FOR_WRITE(previous_profile_events)[i];
 
             /// Profile event counters are supposed to be monotonic. However, at least the `NetworkReceiveBytes` can be inaccurate.
             /// So, since in the future the counter should always have a bigger value than in the past, we skip this event.
@@ -161,8 +158,6 @@ void MetricLog::stepFunction(const std::chrono::system_clock::time_point current
             });
         });
     });
-
-    previous_profile_events = std::move(previous);
 }
 
 }
