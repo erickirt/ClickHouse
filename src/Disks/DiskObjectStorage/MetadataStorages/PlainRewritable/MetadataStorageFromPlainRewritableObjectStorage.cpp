@@ -491,6 +491,8 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::moveDirectory(c
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::unlinkFile(const std::string & path, bool if_exists, bool /*should_remove_objects*/)
 {
+    uncommitted_state.lookupDirectory(normalizePath(path).parent_path());
+
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageUnlinkMetadataFileOperation>(
         path,
         if_exists,
@@ -530,6 +532,9 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::removeRecursive
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::createHardLink(const std::string & path_from, const std::string & path_to)
 {
+    uncommitted_state.lookupDirectory(normalizePath(path_from).parent_path());
+    uncommitted_state.lookupDirectory(normalizePath(path_to).parent_path());
+
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageCopyFileOperation>(
         path_from,
         path_to,
@@ -541,6 +546,9 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::createHardLink(
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::moveFile(const std::string & path_from, const std::string & path_to)
 {
+    uncommitted_state.lookupDirectory(normalizePath(path_from).parent_path());
+    uncommitted_state.lookupDirectory(normalizePath(path_to).parent_path());
+
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageMoveFileOperation>(
         /*replaceable=*/false,
         path_from,
@@ -554,6 +562,9 @@ void MetadataStorageFromPlainRewritableObjectStorageTransaction::moveFile(const 
 
 void MetadataStorageFromPlainRewritableObjectStorageTransaction::replaceFile(const std::string & path_from, const std::string & path_to)
 {
+    uncommitted_state.lookupDirectory(normalizePath(path_from).parent_path());
+    uncommitted_state.lookupDirectory(normalizePath(path_to).parent_path());
+
     operations.addOperation(std::make_unique<MetadataStorageFromPlainObjectStorageMoveFileOperation>(
         /*replaceable=*/true,
         path_from,
