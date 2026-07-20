@@ -2141,3 +2141,85 @@ def test_alias_with_dropped_target(started_cluster):
     # Cleanup
     for node in [main_node, dummy_node]:
         node.query(f"DROP DATABASE IF EXISTS {db_name} SYNC")
+
+
+def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, comment_settings=None):
+    """Reproduce the issue #110036 race: a comment-only ALTER (executed locally on
+    every replica of a Replicated database) pins its metadata snapshot at
+    access-check time (query-scoped metadata cache), while a concurrent table-level
+    ALTER_METADATA applies ADD COLUMN. If the comment ALTER acquires the alter lock
+    after executeMetadataAlter commits, it overwrites the in-memory metadata and the
+    local .sql with the stale pre-ADD-COLUMN structure - silently dropping the new
+    column while the persisted replica metadata_version stays equal to the ZooKeeper
+    /metadata version.
+
+    Returns the name of the lost column, or None if the race never fired.
+    """
+    main_node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
+    competing_node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
+
+    main_node.query(
+        f"CREATE DATABASE {db} ENGINE = Replicated('/clickhouse/databases/{db}', 'shard1', 'replica1');"
+    )
+    competing_node.query(
+        f"CREATE DATABASE {db} ENGINE = Replicated('/clickhouse/databases/{db}', 'shard1', 'replica2');"
+    )
+
+    # A wide table makes executeMetadataAlter slow (metadata parse/format cost),
+    # widening the race window between the comment ALTER's access check and its
+    # alter-lock acquisition.
+    wide = ", ".join(f"c{j} String" for j in range(wide_columns))
+    main_node.query(
+        f"CREATE TABLE {db}.rmt (n int, v UInt64, {wide}) ENGINE=ReplicatedMergeTree ORDER BY n"
+    )
+    competing_node.query(f"SYSTEM SYNC DATABASE REPLICA {db}")
+
+    for i in range(cycles):
+        # Hold back the table-level queue on competing so the ALTER_METADATA of the
+        # next ADD COLUMN executes at a controlled moment.
+        competing_node.query(f"SYSTEM STOP REPLICATION QUEUES {db}.rmt")
+        main_node.query(f"ALTER TABLE {db}.rmt ADD COLUMN m{i} Int32")
+        # Give the (still running) pull task a moment to copy the entry into the queue.
+        for _ in range(30):
+            if (
+                competing_node.query(
+                    f"SELECT count() FROM system.replication_queue "
+                    f"WHERE database='{db}' AND table='rmt' AND type='ALTER_METADATA'"
+                ).strip()
+                != "0"
+            ):
+                break
+            time.sleep(0.1)
+        # Release the queue and immediately fire a comment-only ALTER in the same
+        # client session, so its local execution on competing overlaps the
+        # ALTER_METADATA application.
+        competing_node.query(
+            f"SYSTEM START REPLICATION QUEUES {db}.rmt; "
+            f"ALTER TABLE {db}.rmt COMMENT COLUMN v 'c{i}';",
+            settings=comment_settings,
+        )
+        competing_node.query(f"SYSTEM SYNC REPLICA {db}.rmt")
+        present = competing_node.query(
+            f"SELECT count() FROM system.columns "
+            f"WHERE database='{db}' AND table='rmt' AND name='m{i}'"
+        ).strip()
+        if present != "1":
+            # The replica lost the column: the stale comment commit won. Stop here -
+            # any further metadata ALTER would repair the structure and hide the bug.
+            return f"m{i}"
+
+    return None
+
+
+def test_alter_comment_races_replicated_alter_metadata(started_cluster):
+    # Regression test for the actual mechanism of issue #110036 (no database
+    # recovery involved): the comment-only ALTER must never clobber a concurrently
+    # applied ALTER_METADATA.
+    lost = _drive_comment_alter_race("comment_race")
+    assert lost is None, (
+        f"replica competing lost column {lost} of comment_race.rmt: a comment-only "
+        f"ALTER committed a stale metadata snapshot over a concurrently applied "
+        f"ALTER_METADATA"
+    )
+    main_node.query("DROP DATABASE IF EXISTS comment_race SYNC")
+    competing_node.query("DROP DATABASE IF EXISTS comment_race SYNC")

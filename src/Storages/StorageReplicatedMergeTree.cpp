@@ -6791,7 +6791,15 @@ void StorageReplicatedMergeTree::alter(
     auto table_id = getStorageID();
     const auto & query_settings = query_context->getSettingsRef();
 
-    auto metadata_snapshot = getInMemoryMetadataPtr(query_context, false);
+    /// Read the current committed metadata directly, bypassing the query-scoped snapshot cache
+    /// (enable_shared_storage_snapshot_in_query). That cache can be pinned earlier in this query -
+    /// for example by the access check, which runs before lockForAlter and reads the snapshot with
+    /// the cache enabled - to a pre-ALTER structure. The comment- and settings-only branches below
+    /// commit this snapshot via setInMemoryMetadata while holding only the alter lock; a stale base
+    /// would overwrite a concurrently applied ALTER_METADATA (executeMetadataAlter also runs under
+    /// lockForAlter, so it is serialized with us) and silently drop columns it added. Reading fresh
+    /// under the held alter lock is what makes that serialization effective.
+    auto metadata_snapshot = getInMemoryMetadataPtr(query_context, true);
     StorageInMemoryMetadata future_metadata = *metadata_snapshot;
     /// Snapshot the sorting key before applying commands, to compare with the resolved future one.
     KeyDescription old_sorting_key = future_metadata.sorting_key;
