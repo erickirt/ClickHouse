@@ -45,26 +45,31 @@ for _ in {1..60}; do
     sleep 0.5
 done
 
+if [ -z "$flush_query_id" ]; then
+    echo "Failed to find the asynchronous insert flush query" >&2
+    exit 1
+fi
+
 $CLICKHOUSE_CLIENT -q "SELECT count() = 0 FROM system.errors WHERE query_id = '${flush_query_id}'"
 $CLICKHOUSE_CLIENT -q "SELECT count() = 0 FROM system.error_log WHERE last_error_query_id = '${flush_query_id}'"
 
 $CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS error_log"
-overflow_errors_before=$($CLICKHOUSE_CLIENT -q "SELECT any(value) FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'")
+overflow_errors_before=$($CLICKHOUSE_CLIENT -q "SELECT sum(value) FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'")
 overflow_log_before=$($CLICKHOUSE_CLIENT -q "SELECT sum(value) FROM system.error_log WHERE error = 'ARGUMENT_OUT_OF_BOUND'")
 
 ${CLICKHOUSE_CURL} -sS "${CLICKHOUSE_URL}&query_id=${overflow_query_id}" \
     --data-binary "INSERT INTO values_decimal VALUES (12345678.91)" > /dev/null
 
 $CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS error_log"
-$CLICKHOUSE_CLIENT -q "SELECT value = ${overflow_errors_before} + 1 FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'"
+$CLICKHOUSE_CLIENT -q "SELECT sum(value) = ${overflow_errors_before} + 1 FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'"
 $CLICKHOUSE_CLIENT -q "SELECT sum(value) > ${overflow_log_before} FROM system.error_log WHERE error = 'ARGUMENT_OUT_OF_BOUND'"
 
-overflow_errors_before=$($CLICKHOUSE_CLIENT -q "SELECT any(value) FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'")
+overflow_errors_before=$($CLICKHOUSE_CLIENT -q "SELECT sum(value) FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'")
 overflow_log_before=$($CLICKHOUSE_CLIENT -q "SELECT sum(value) FROM system.error_log WHERE error = 'ARGUMENT_OUT_OF_BOUND'")
 
 ${CLICKHOUSE_CURL} -sS "${CLICKHOUSE_URL}&input_format_values_deduce_templates_of_expressions=0" \
     --data-binary "INSERT INTO values_decimal_retry VALUES (1.20 + 0.03), (12345678.91)" > /dev/null
 
 $CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS error_log"
-$CLICKHOUSE_CLIENT -q "SELECT value = ${overflow_errors_before} + 1 FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'"
+$CLICKHOUSE_CLIENT -q "SELECT sum(value) = ${overflow_errors_before} + 1 FROM system.errors WHERE name = 'ARGUMENT_OUT_OF_BOUND'"
 $CLICKHOUSE_CLIENT -q "SELECT sum(value) > ${overflow_log_before} FROM system.error_log WHERE error = 'ARGUMENT_OUT_OF_BOUND'"
