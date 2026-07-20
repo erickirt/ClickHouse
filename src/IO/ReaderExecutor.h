@@ -209,6 +209,12 @@ private:
     /// Drop the held connection: drain a small tail to complete it, else account it incomplete.
     void dropLongConnection();
 
+    /// The only logical<->physical converters: physical = header-inclusive file coords (the offset
+    /// map, object offsets); logical = payload coords (`position`, `totalSize`). A raw
+    /// `+/- data_start_offset` anywhere else is a bug.
+    size_t toPhys(size_t logical) const { return logical + data_start_offset; }
+    size_t toLogical(size_t physical) const { chassert(physical >= data_start_offset); return physical - data_start_offset; }
+
     /// Whether served payload is encrypted (`data_start_offset` is the header size,
     /// 0 when there is no encryption / no SSL).
     bool needsDecryption() const { return data_start_offset > 0; }

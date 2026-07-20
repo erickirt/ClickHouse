@@ -7,31 +7,32 @@
 namespace DB
 {
 
-/// Maps logical file offsets to (object, offset-within-object).
-/// Used to abstract many storage objects behind a single logical file.
+/// Maps file offsets to (object, offset-within-object), abstracting many storage objects behind
+/// a single file. Offsets are in the concatenated-file space: object sizes are byte lengths as
+/// stored, so any payload/header (logical vs physical) split is the caller's concern, not this map's.
 class OffsetMap
 {
 public:
-    /// Objects are concatenated in their input order to form the logical file.
+    /// One object's placement in the concatenated file: `file_offset` is the object's start
+    /// offset in the file, `size` its byte length.
+    struct Segment
+    {
+        StoredObject object;
+        size_t file_offset = 0;
+        size_t size = 0;
+    };
+
+    /// Objects are concatenated in their input order to form the file.
     void build(const StoredObjects & objects);
 
-    /// Find the object containing `logical_offset`, or nullptr if it is at or past
-    /// `totalSize`. When given, `object_logical_start_offset` returns that object's start
-    /// offset in the logical file.
-    const StoredObject * findObjectAt(size_t logical_offset, size_t * object_logical_start_offset = nullptr) const;
+    /// The segment containing `file_offset`, or nullptr if it is at or past `totalSize`.
+    const Segment * findObjectAt(size_t file_offset) const;
 
     size_t totalSize() const { return total_size; }
 
     bool hasUnknownSize() const { return total_size == StoredObject::UnknownSize; }
 
 private:
-    struct Segment
-    {
-        StoredObject object;
-        size_t logical_offset = 0;
-        size_t size = 0;
-    };
-
     VectorWithMemoryTracking<Segment> segments;
     size_t total_size = 0;
 };
