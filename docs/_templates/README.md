@@ -3,6 +3,8 @@
 Skeletons for common ClickHouse doc types. Copy the relevant template, fill the
 `{placeholders}`, and delete the guidance comments.
 
+For how templates fit into the writing workflow, see the [documentation contribution guide](../README.md#templates).
+
 ## Reference templates (`.md`)
 
 Section snippets for reference content — paste into a page and adjust heading levels:
@@ -15,16 +17,16 @@ Section snippets for reference content — paste into a page and adjust heading 
 
 ## Narrative templates
 
-- `template-guide.mdx` — a full-page how-to / setup guide
+- `template-setup-guide.mdx` — a full-page how-to / setup guide
 
-## Filling in `template-guide.mdx`
+## Filling in `template-setup-guide.mdx`
 
 The section order is fixed; drop a section only if it genuinely doesn't apply. The
 author's job is to classify the content's *shape* — the shape dictates the component:
 
 | Content shape | Component |
 |---|---|
-| Procedure with depth (screenshots, code, sub-steps) | `<Steps>` / `<Step>` with `### {#anchor}` headings |
+| Procedure with depth (screenshots, code, sub-steps) | `<Steps>` / `<Step title="…" id="…">` — the `id` makes a step deep-linkable via `#id` |
 | A step or section that differs by variant (provider, OS, deployment) | `<Tabs>` / `<Tab title="…" id="…">` — the `id` makes a variant deep-linkable via `#id` |
 | Selective-consult content — the reader wants one item (Troubleshooting, FAQ) | `<Accordion title="…">`, one per item |
 | Advisory list read in full (Best practices) | `### {#anchor}` subheadings, one per item |
@@ -40,4 +42,4 @@ Guidelines:
   them when there's real content to add; don't fabricate to fill them.
 - Frontmatter uses `sidebarTitle` (no repeated `# H1`). Built-in components (`Steps`,
   `Accordion`, `Tabs`, `Note`, `Warning`, `Tip`) need no import.
-- Every `##` / `###` needs a unique `{#anchor}`.
+- Every `##` / `###` needs a unique `{#anchor}`; `<Step>` and `<Tab>` carry their anchor in an `id` prop.

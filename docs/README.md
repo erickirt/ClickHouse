@@ -203,7 +203,7 @@ Reference templates (paste a section into a page):
 
 Narrative templates (full page):
 
-- [Guide](_templates/template-guide.mdx) — how-to and setup guides
+- [Setup guide](_templates/template-setup-guide.mdx) — how-to and setup guides
 
 
 <a name="how-to-build-docs"/>
