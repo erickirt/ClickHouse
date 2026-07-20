@@ -153,9 +153,6 @@
   "redirects": { "$ref": "./_site/redirects.json" },
   "scripts": [
     {
-      "src": "/_site/customizations/page-hydration-placeholder.js"
-    },
-    {
       "src": "/_site/customizations/galaxy.js"
     },
     {
