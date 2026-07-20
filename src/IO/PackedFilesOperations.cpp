@@ -33,9 +33,15 @@ static void assertOutputNotInsideInput(
     if (disk_in->getName() != disk_out->getName())
         return;
 
-    auto in = fs::path(normalizePath(input_dir)).lexically_normal().string();
-    auto out = fs::path(normalizePath(output_dir)).lexically_normal().string();
-    if (out == in || out.starts_with(in + "/"))
+    /// Root both paths before comparing so a disk-relative "." (the disk root / current directory) is
+    /// treated as the root it names. Comparing raw normalized strings would reduce "." vs "./out" to
+    /// "." vs "out" and miss that the output is nested under the input.
+    auto in = (fs::path("/") / normalizePath(input_dir)).lexically_normal();
+    auto out = (fs::path("/") / normalizePath(output_dir)).lexically_normal();
+    /// The output is the same as, or nested under, the input iff the path from input to output does not
+    /// step outside it (i.e. does not start with "..").
+    auto relative = out.lexically_relative(in);
+    if (!relative.empty() && *relative.begin() != "..")
         throw Exception(
             ErrorCodes::INCORRECT_DATA,
             "Output path {} is the same as or nested under the input path {} on the same disk; "

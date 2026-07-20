@@ -443,14 +443,16 @@ def test_packed_io_rejects_output_inside_input(started_cluster):
     part_path = get_relative_part_path("t_packed_selfrec", "all_1_1_0")
     nested_output = os.path.join(part_path, "self_output")
 
-    with pytest.raises(Exception) as exc_info:
-        node.exec_in_container(
-            [
-                "bash",
-                "-c",
-                f'clickhouse disks --config /etc/clickhouse-server/config.xml --disk s3 --query "packed-io --recursive create --disk-from s3 {part_path} {nested_output}"',
-            ],
-            privileged=True,
-            user="root",
-        )
-    assert "nested under the input" in str(exc_info.value)
+    # `clickhouse disks` catches query errors and still exits 0, so assert on the printed error message
+    # (captured via 2>&1) rather than on a non-zero exit code / a raised exception.
+    output = node.exec_in_container(
+        [
+            "bash",
+            "-c",
+            f'clickhouse disks --config /etc/clickhouse-server/config.xml --disk s3 --query "packed-io --recursive create --disk-from s3 {part_path} {nested_output}" 2>&1',
+        ],
+        privileged=True,
+        user="root",
+        nothrow=True,
+    )
+    assert "nested under the input" in output, f"expected rejection, got: {output}"
