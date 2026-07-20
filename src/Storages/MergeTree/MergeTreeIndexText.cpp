@@ -1674,10 +1674,7 @@ std::unique_ptr<MergeTreeIndexGranuleTextWritable> MergeTreeIndexTextGranuleBuil
     std::ranges::sort(sorted_tokens, [](const auto & lhs, const auto & rhs) { return lhs.token < rhs.token; });
 
     /// Attach each token's position builder by binary search over the already-sorted sorted_tokens.
-    /// Not position_map->find(token): that rehashes a key view into position_map's own hash cells,
-    /// which are not 8-byte padded, and StringHashTable lookup reads an 8-byte word around the key
-    /// (heap-buffer-overflow on short tokens). lower_bound only compares key bytes. tokens_map and
-    /// position_map are filled in lockstep in addDocument(), so the key sets are identical.
+    /// tokens_map and position_map are filled in lockstep in addDocument(), so the key sets are identical.
     if (position_map)
     {
         size_t attached = 0;
