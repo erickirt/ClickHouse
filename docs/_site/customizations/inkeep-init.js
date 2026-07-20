@@ -117,14 +117,8 @@
   }
 
   function loadScript(url, callback) {
-    var existing = document.getElementById('inkeep-cxkit-script');
-    if (existing) {
-      if (typeof Inkeep !== 'undefined') {
-        callback();
-      } else {
-        existing.addEventListener('load', callback, { once: true });
-        existing.addEventListener('error', reportProviderFailure, { once: true });
-      }
+    if (document.getElementById('inkeep-cxkit-script')) {
+      callback();
       return;
     }
     var script = document.createElement('script');
@@ -132,25 +126,7 @@
     script.src = url;
     script.type = 'text/javascript';
     script.onload = callback;
-    script.onerror = reportProviderFailure;
     document.head.appendChild(script);
-  }
-
-  function setProviderState(status) {
-    // Ask AI uses this shared state to reveal both control pairs at once.
-    if (!window.__chSearchControlsState) {
-      window.__chSearchControlsState = {};
-    }
-    window.__chSearchControlsState.providerReady = status === 'ready';
-    window.__chSearchControlsState.providerFailed = status === 'failed';
-    window.dispatchEvent(new CustomEvent('clickhouse:search-provider-state', {
-      detail: { provider: 'inkeep', status: status },
-    }));
-  }
-
-  function reportProviderFailure(error) {
-    setProviderState('failed');
-    console.log('Inkeep: failed to load widget:', error);
   }
 
   // When the Inkeep modal opens, its scroll lock (react-remove-scroll) marks
@@ -172,7 +148,7 @@
   function initInkeep() {
     if (typeof Inkeep === 'undefined' || !Inkeep || typeof Inkeep.ModalSearchAndChat !== 'function') {
       console.log('Inkeep: cxkit-mintlify did not expose ModalSearchAndChat.');
-      return false;
+      return;
     }
 
     var settings = {
@@ -283,23 +259,14 @@
     // intercepting them (capture-phase preventDefault) so the native search
     // never opens.
     Inkeep.ModalSearchAndChat(settings);
-    return true;
-  }
-
-  function initializeProvider() {
-    try {
-      setProviderState(initInkeep() ? 'ready' : 'failed');
-    } catch (e) {
-      reportProviderFailure(e);
-    }
   }
 
   function boot() {
     try {
       injectNoShiftStyle();
-      loadScript(INKEEP_SCRIPT_URL, initializeProvider);
+      loadScript(INKEEP_SCRIPT_URL, initInkeep);
     } catch (e) {
-      reportProviderFailure(e);
+      console.log('Inkeep: failed to load widget:', e);
     }
   }
 

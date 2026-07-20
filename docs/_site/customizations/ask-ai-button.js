@@ -3,17 +3,6 @@
 
   var BTN_ID = 'ch-ask-ai-btn';
   var MOBILE_BTN_ID = 'ch-ask-ai-btn-mobile';
-  var SEARCH_STATE_EVENT = 'clickhouse:search-provider-state';
-  var READY_CLASS = 'ch-search-controls-ready';
-  var SEARCH_VISIBLE_CLASS = 'ch-search-control-visible';
-  var ASK_VISIBLE_CLASS = 'ch-ask-control-visible';
-  var INKEEP_FAILED_CLASS = 'ch-inkeep-provider-failed';
-  var KAPA_FAILED_CLASS = 'ch-kapa-provider-failed';
-  var ASK_UNAVAILABLE_CLASS = 'ch-ask-control-unavailable';
-  var surfaceObserver;
-  var bootstrapObserver;
-  var observedSurfaces = [];
-  var syncPending = false;
 
   var sparkleSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"'
     + ' class="ch-ai-icon size-4 shrink-0 text-gray-700">'
@@ -100,94 +89,16 @@
     return true;
   }
 
-  function searchState() {
-    if (!window.__chSearchControlsState) {
-      window.__chSearchControlsState = {
-        providerReady: false,
-        providerFailed: false,
-        kapaReady: false,
-        kapaFailed: false,
-      };
-    }
-    return window.__chSearchControlsState;
-  }
-
-  function updateRevealState() {
-    var state = searchState();
-    var desktopSearch = document.getElementById('search-bar-entry');
-    var mobileSearch = document.getElementById('search-bar-entry-mobile');
-    var hasSearchControl = Boolean(desktopSearch || mobileSearch);
-    var buttonsReady = (!desktopSearch || document.getElementById(BTN_ID))
-      && (!mobileSearch || document.getElementById(MOBILE_BTN_ID));
-    var ready = state.providerReady && state.kapaReady && hasSearchControl && buttonsReady;
-    var searchVisible = state.providerFailed
-      || (state.providerReady && (state.kapaReady || state.kapaFailed));
-    var askVisible = state.kapaReady && (state.providerReady || state.providerFailed) && buttonsReady;
-
-    document.documentElement.classList.toggle(READY_CLASS, Boolean(ready));
-    document.documentElement.classList.toggle(SEARCH_VISIBLE_CLASS, Boolean(searchVisible));
-    document.documentElement.classList.toggle(ASK_VISIBLE_CLASS, Boolean(askVisible));
-    document.documentElement.classList.toggle(INKEEP_FAILED_CLASS, Boolean(state.providerFailed));
-    document.documentElement.classList.toggle(KAPA_FAILED_CLASS, Boolean(state.kapaFailed));
-    document.documentElement.classList.toggle(ASK_UNAVAILABLE_CLASS, Boolean(state.kapaFailed));
-  }
-
-  function observeSurface(searchControl) {
-    if (!searchControl || !surfaceObserver) return;
-
-    var surface = searchControl.closest('nav, header') || searchControl.parentNode;
-    if (!surface || observedSurfaces.indexOf(surface) !== -1) return;
-
-    observedSurfaces.push(surface);
-    surfaceObserver.observe(surface, { childList: true, subtree: true });
-    if (surface.parentNode) {
-      // Keep route-level navbar replacements observable without falling back
-      // to a permanent observer over the full document subtree.
-      surfaceObserver.observe(surface.parentNode, { childList: true });
-    }
-  }
-
-  function syncButtons() {
-    syncPending = false;
+  function init() {
     injectButton();
     injectMobileButton();
 
-    observeSurface(document.getElementById('search-bar-entry'));
-    observeSurface(document.getElementById('search-bar-entry-mobile'));
-
-    // Mintlify renders desktop and mobile controls together. Once both stable
-    // navbar surfaces are found, stop watching the entire page.
-    if (bootstrapObserver && observedSurfaces.length >= 2) {
-      bootstrapObserver.disconnect();
-      bootstrapObserver = null;
-    }
-
-    updateRevealState();
+    var observer = new MutationObserver(function () {
+      injectButton();
+      injectMobileButton();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
-
-  function scheduleSync() {
-    if (syncPending) return;
-    syncPending = true;
-    Promise.resolve().then(syncButtons);
-  }
-
-  function init() {
-    surfaceObserver = new MutationObserver(scheduleSync);
-    bootstrapObserver = new MutationObserver(scheduleSync);
-    bootstrapObserver.observe(document.documentElement, { childList: true, subtree: true });
-    syncButtons();
-
-    // Avoid a permanent page-wide observer on an unexpected template that
-    // does not render both search variants.
-    setTimeout(function () {
-      if (bootstrapObserver) {
-        bootstrapObserver.disconnect();
-        bootstrapObserver = null;
-      }
-    }, 10000);
-  }
-
-  window.addEventListener(SEARCH_STATE_EVENT, updateRevealState);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

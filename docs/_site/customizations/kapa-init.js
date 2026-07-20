@@ -25,32 +25,6 @@
   var gaUserId = extractGoogleAnalyticsUserIdFromCookie(getBrowserCookie('_ga'));
   window.kapaSettings = { user: { uniqueClientId: gaUserId } };
 
-  function setKapaState(status) {
-    if (!window.__chSearchControlsState) {
-      window.__chSearchControlsState = {};
-    }
-    window.__chSearchControlsState.kapaReady = status === 'ready';
-    window.__chSearchControlsState.kapaFailed = status === 'failed';
-    window.dispatchEvent(new CustomEvent('clickhouse:search-provider-state', {
-      detail: { provider: 'kapa', status: status },
-    }));
-  }
-
-  function reportKapaReady(event) {
-    if (event && event.currentTarget) {
-      event.currentTarget.dataset.chLoadState = 'ready';
-    }
-    setKapaState('ready');
-  }
-
-  function reportKapaFailure(error) {
-    if (error && error.currentTarget) {
-      error.currentTarget.dataset.chLoadState = 'failed';
-    }
-    setKapaState('failed');
-    console.log('An error occurred while trying to load the Kapa.ai widget:', error);
-  }
-
   // Kapa doesn't support iOS 16.4 or lower — skip injection on those devices.
   function isOldiOS() {
     var ua = navigator.userAgent;
@@ -64,21 +38,9 @@
   }
 
   function insertKapaWidget() {
-    var existing = document.getElementById('kapa-widget-script');
-    if (existing) {
-      if (existing.dataset.chLoadState === 'ready' || window.Kapa) {
-        setKapaState('ready');
-      } else if (existing.dataset.chLoadState === 'failed') {
-        setKapaState('failed');
-      } else {
-        existing.addEventListener('load', reportKapaReady, { once: true });
-        existing.addEventListener('error', reportKapaFailure, { once: true });
-      }
-      return;
-    }
+    if (document.getElementById('kapa-widget-script')) return;
     if (isOldiOS()) {
       console.log('Kapa widget not added: detected iOS 16.4 or lower');
-      setKapaState('failed');
       return;
     }
 
@@ -87,8 +49,6 @@
     script.src = 'https://widget.kapa.ai/kapa-widget.bundle.js';
     script.async = true;
     script.defer = true;
-    script.addEventListener('load', reportKapaReady, { once: true });
-    script.addEventListener('error', reportKapaFailure, { once: true });
 
     var attrs = {
       'data-website-id': '5df6cc2b-732e-44e4-b789-aec81b70fe46',
@@ -111,17 +71,13 @@
     document.head.appendChild(script);
   }
 
-  function boot() {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', insertKapaWidget);
+  } else {
     try {
       insertKapaWidget();
     } catch (e) {
-      reportKapaFailure(e);
+      console.log('An error occurred while trying to load the Kapa.ai widget:', e);
     }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
   }
 })();

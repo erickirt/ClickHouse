@@ -231,30 +231,43 @@
     + '</div>';
   }
 
-  function findFooterTarget(contentContainer) {
+  function findFooterTarget() {
+    var contentContainer = document.getElementById('content-container');
     if (!contentContainer) return null;
-
-    // Maple nests #content-container inside a flex content row and then a
-    // responsive column wrapper. On desktop that wrapper is the full-width
-    // block we need. On mobile, wrappers marked max-lg:contents have no box,
-    // so skip them without forcing layout through getComputedStyle().
-    var contentRow = contentContainer.parentElement;
-    var ancestor = contentRow ? contentRow.parentElement : null;
-    if (!ancestor) return contentContainer;
-
-    if (!window.matchMedia('(min-width: 1024px)').matches) {
-      while (ancestor && ancestor !== document.body &&
-             String(ancestor.className || '').indexOf('max-lg:contents') !== -1) {
-        ancestor = ancestor.parentElement;
+    // Walk up to the nearest block-level ancestor so the footer renders as a
+    // full-width block below the sidebar + content row. Some intermediate
+    // ancestors use display:contents on mobile, so keep walking until we
+    // find a real block-level container.
+    var ancestor = contentContainer.parentElement;
+    while (ancestor && ancestor !== document.body) {
+      if (getComputedStyle(ancestor).display === 'block') {
+        return ancestor;
       }
+      ancestor = ancestor.parentElement;
     }
-
-    return ancestor && ancestor !== document.body ? ancestor : contentContainer;
+    return contentContainer;
   }
 
-  function createFooter() {
+  function ensureFooterAtEnd() {
     var existing = document.getElementById(FOOTER_ID);
-    if (existing) return existing;
+    if (!existing) return false;
+    var target = findFooterTarget();
+    // If the target was replaced or the footer drifted, move it to the end of the right parent.
+    if (target && (existing.parentElement !== target || existing !== target.lastElementChild)) {
+      target.appendChild(existing);
+    }
+    return true;
+  }
+
+  function injectFooter() {
+    // Already injected — just make sure it's still positioned at the end.
+    if (document.getElementById(FOOTER_ID)) {
+      return ensureFooterAtEnd();
+    }
+
+    // Find the scrollable content container
+    var contentContainer = document.getElementById('content-container');
+    if (!contentContainer) return false;
 
     // Hide the existing Mintlify footer if present
     var mintlifyFooter = document.getElementById('footer');
@@ -269,82 +282,46 @@
     wrapper.id = FOOTER_ID;
     wrapper.style.cssText = 'width:100%;padding:64px 24px 32px;';
     wrapper.innerHTML = buildFooterHtml();
-    return wrapper;
+
+    // In the Maple theme, #content-container is a flex-row, so appending
+    // there makes the footer a horizontal sibling of the content columns.
+    // Walk up to the nearest block-level ancestor so the footer renders as
+    // a full-width block below the sidebar + content row.
+    var target = findFooterTarget() || contentContainer;
+    target.appendChild(wrapper);
+    return true;
   }
 
   function init() {
-    var contentContainer = null;
-    var contentParent = null;
-    var footerTarget = null;
-    var targetObserver = null;
+    injectFooter();
+
     var scheduled = false;
-    var targetNeedsResolving = true;
+    var observer;
 
-    function observeTarget(target) {
-      if (targetObserver) targetObserver.disconnect();
-      if (!target) return;
-
-      // Only direct children can affect whether the footer is the last block.
-      // Changes within the article or footer do not require any work here.
-      targetObserver = new MutationObserver(function () {
-        schedule(false);
-      });
-      targetObserver.observe(target, { childList: true });
-    }
-
-    function reconcile() {
+    function check() {
       scheduled = false;
-
-      var nextContentContainer = document.getElementById('content-container');
-      var containerChanged = nextContentContainer !== contentContainer ||
-        (contentContainer && contentContainer.parentElement !== contentParent);
-
-      if (targetNeedsResolving || containerChanged) {
-        contentContainer = nextContentContainer;
-        contentParent = contentContainer ? contentContainer.parentElement : null;
-        footerTarget = findFooterTarget(contentContainer);
-        targetNeedsResolving = false;
-        observeTarget(footerTarget);
+      var existing = document.getElementById(FOOTER_ID);
+      if (!existing) {
+        injectFooter();
+        return;
       }
-
-      if (!footerTarget) return;
-
-      var footer = createFooter();
-      if (footer.parentElement === footerTarget && footer === footerTarget.lastElementChild) return;
-
-      // Disconnect around our own append so it cannot schedule redundant work.
-      if (targetObserver) targetObserver.disconnect();
-      footerTarget.appendChild(footer);
-      observeTarget(footerTarget);
+      var target = findFooterTarget();
+      if (!target) return;
+      if (existing.parentElement === target && existing === target.lastElementChild) return;
+      // Disconnect around our own re-append so the resulting mutation doesn't
+      // re-fire the observer mid-React-render, which corrupts the top-nav
+      // dropdown's SVG icons during reconciliation.
+      observer.disconnect();
+      target.appendChild(existing);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
     }
 
-    function schedule(resolveTarget) {
-      if (resolveTarget) targetNeedsResolving = true;
+    observer = new MutationObserver(function () {
       if (scheduled) return;
       scheduled = true;
-      requestAnimationFrame(reconcile);
-    }
-
-    // The body is the narrowest ancestor that survives Mintlify route
-    // transitions. The callback performs only constant-time identity checks.
-    var bodyObserver = new MutationObserver(function () {
-      var nextContentContainer = document.getElementById('content-container');
-      var footer = document.getElementById(FOOTER_ID);
-      if (nextContentContainer !== contentContainer ||
-          !contentContainer || !contentContainer.isConnected ||
-          contentContainer.parentElement !== contentParent) {
-        schedule(true);
-      } else if (!footer || !footer.isConnected) {
-        schedule(false);
-      }
+      requestAnimationFrame(check);
     });
-    bodyObserver.observe(document.body, { childList: true, subtree: true });
-
-    // Responsive styles can change an ancestor from display:block to
-    // display:contents, so resolve the target again after viewport changes.
-    window.addEventListener('resize', function () { schedule(true); }, { passive: true });
-
-    reconcile();
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') {

@@ -231,8 +231,7 @@
   }
 
   // Docusaurus hooks tracked load, focus, and blur for every docs and KB page.
-  // Mintlify is a SPA, so emit one load event whenever its history entry moves
-  // to a different path.
+  // Mintlify is a SPA, so watch the path to emit one load event per route.
   var lastPath = window.location.pathname;
   trackPageEvent('load');
   window.addEventListener('focus', function () { trackPageEvent('focus'); });
@@ -278,33 +277,16 @@
     track(eventName, properties);
   }, true);
 
-  function handlePathChange() {
+  function watchPath() {
     var path = window.location.pathname;
-    if (path === lastPath) return;
-    lastPath = path;
-    trackPageEvent('load');
-    updateCloudLinks();
+    if (path !== lastPath) {
+      lastPath = path;
+      trackPageEvent('load');
+      updateCloudLinks();
+    }
+    window.requestAnimationFrame(watchPath);
   }
-
-  function wrapHistoryMethod(name) {
-    var original = window.history[name];
-    window.history[name] = function () {
-      var result = original.apply(this, arguments);
-      handlePathChange();
-      return result;
-    };
-  }
-
-  wrapHistoryMethod('pushState');
-  wrapHistoryMethod('replaceState');
-  window.addEventListener('popstate', handlePathChange);
-
-  // The Navigation API also covers clients that captured the native History
-  // methods before this customization loaded. The pathname guard above keeps
-  // History and Navigation notifications from double-counting a route.
-  if (window.navigation && typeof window.navigation.addEventListener === 'function') {
-    window.navigation.addEventListener('currententrychange', handlePathChange);
-  }
+  window.requestAnimationFrame(watchPath);
 
   // Preserve the attribution behavior from src/clientModules/utmPersistence:
   // retain campaign parameters and attach the Galaxy ID and page paths to
@@ -349,34 +331,12 @@
     return getCookie('_ga');
   }
 
-  function collectCloudLinks(root, links) {
-    var element = root && root.nodeType === 1 ? root : null;
-    if (element && element.matches('a[href*="clickhouse.cloud"]')) links.push(element);
-
-    if (root && typeof root.querySelectorAll === 'function') {
-      var descendants = root.querySelectorAll('a[href*="clickhouse.cloud"]');
-      for (var i = 0; i < descendants.length; i++) {
-        if (links.indexOf(descendants[i]) === -1) links.push(descendants[i]);
-      }
-    }
-  }
-
-  function updateCloudLinks(roots) {
+  function updateCloudLinks() {
     if (!isCanonicalDocs) return;
 
     saveAttribution();
     var attribution = storedAttribution();
-    var links = [];
-    var scanRoots = roots == null
-      ? [document]
-      : (Array.isArray(roots) ? roots : [roots]);
-    for (var rootIndex = 0; rootIndex < scanRoots.length; rootIndex++) {
-      collectCloudLinks(scanRoots[rootIndex], links);
-    }
-
-    var userId = getUserId();
-    var originalPath = storageGet(window.localStorage, 'origPath');
-    var gaId = googleAnalyticsId();
+    var links = document.querySelectorAll('a[href*="clickhouse.cloud"]');
 
     for (var i = 0; i < links.length; i++) {
       try {
@@ -390,15 +350,16 @@
             }
           }
         }
-        url.searchParams.set('glxid', userId);
+        url.searchParams.set('glxid', getUserId());
         url.searchParams.set('pagePath', window.location.pathname);
 
+        var originalPath = storageGet(window.localStorage, 'origPath');
         if (originalPath) url.searchParams.set('origPath', originalPath);
 
+        var gaId = googleAnalyticsId();
         if (gaId) url.searchParams.set('utm_ga', gaId);
 
-        var nextHref = url.toString();
-        if (links[i].href !== nextHref) links[i].href = nextHref;
+        links[i].href = url.toString();
       } catch (e) {
         console.warn('Failed to update cloud link', e);
       }
@@ -409,23 +370,9 @@
     if (!isCanonicalDocs) return;
 
     updateCloudLinks();
-    new MutationObserver(function (records) {
-      var roots = [];
-      for (var i = 0; i < records.length; i++) {
-        if (records[i].type === 'attributes') {
-          roots.push(records[i].target);
-          continue;
-        }
-        for (var j = 0; j < records[i].addedNodes.length; j++) {
-          if (records[i].addedNodes[j].nodeType === 1) roots.push(records[i].addedNodes[j]);
-        }
-      }
-      if (roots.length > 0) updateCloudLinks(roots);
-    }).observe(document.body, {
+    new MutationObserver(updateCloudLinks).observe(document.body, {
       childList: true,
       subtree: true,
-      attributes: true,
-      attributeFilter: ['href'],
     });
   }
 
