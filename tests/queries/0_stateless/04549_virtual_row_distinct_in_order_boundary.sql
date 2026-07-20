@@ -15,6 +15,10 @@ CREATE TABLE t_virtual_row_distinct (CounterID UInt32, EventDate UInt64, s Strin
 ENGINE = MergeTree ORDER BY (CounterID, EventDate)
 SETTINGS index_granularity = 8;
 
+-- Keep the parts unmerged so the cross-part in-order merge (which consumes the virtual row) is
+-- exercised deterministically instead of being collapsed into a single part by a background merge.
+SYSTEM STOP MERGES t_virtual_row_distinct;
+
 -- Several unmerged parts with small granules so an in-order merge across parts is used.
 INSERT INTO t_virtual_row_distinct SELECT number % 5, 16000 + (number % 1000), toString(number) FROM numbers(20000);
 INSERT INTO t_virtual_row_distinct SELECT number % 5, 16000 + (number % 1000), toString(number) FROM numbers(20000, 20000);
@@ -37,6 +41,32 @@ SELECT
   = (SELECT groupArray((CounterID, EventDate)) FROM (SELECT DISTINCT CounterID, EventDate FROM t_virtual_row_distinct ORDER BY CounterID DESC, EventDate SETTINGS optimize_read_in_order = 0, read_in_order_use_virtual_row = 0));
 
 DROP TABLE t_virtual_row_distinct;
+
+-- Fixed-key widening on key (a, b): ORDER BY a builds a one-column virtual row for a, then
+-- distinct-in-order widens the read prefix to (a, b). The virtual row still covers only a, so b was
+-- default-filled and reverse order announced b = 0 (its max), tripping the boundary check across
+-- parts. Dropping the stale conversion on the widened re-request must fix this while the read stays
+-- correct. This case fails without the requestReadingInOrder fix even though the fixed-middle-key
+-- build-time guard below does not apply here (b is the last key, not a skipped middle key).
+DROP TABLE IF EXISTS t_virtual_row_widen;
+
+CREATE TABLE t_virtual_row_widen (a UInt32, b UInt32)
+ENGINE = MergeTree ORDER BY (a, b)
+SETTINGS index_granularity = 8;
+
+SYSTEM STOP MERGES t_virtual_row_widen;
+
+INSERT INTO t_virtual_row_widen SELECT number % 10, 1 FROM numbers(2000);
+INSERT INTO t_virtual_row_widen SELECT number % 10, 1 FROM numbers(2000, 2000);
+INSERT INTO t_virtual_row_widen SELECT number % 10, 1 FROM numbers(4000, 2000);
+INSERT INTO t_virtual_row_widen SELECT number % 10, 1 FROM numbers(6000, 2000);
+
+-- Must not throw and must match the unoptimized read.
+SELECT
+    (SELECT groupArray((a, b)) FROM (SELECT DISTINCT a, b FROM t_virtual_row_widen WHERE b = 1 ORDER BY a DESC SETTINGS optimize_read_in_order = 1, read_in_order_use_virtual_row = 1, optimize_distinct_in_order = 1, read_in_order_two_level_merge_threshold = 3, max_threads = 2, max_block_size = 64))
+  = (SELECT groupArray((a, b)) FROM (SELECT DISTINCT a, b FROM t_virtual_row_widen WHERE b = 1 ORDER BY a DESC SETTINGS optimize_read_in_order = 0, read_in_order_use_virtual_row = 0));
+
+DROP TABLE t_virtual_row_widen;
 
 -- A fixed MIDDLE key (WHERE b = 1 ORDER BY a, c on key (a, b, c)) is skipped without adding it to
 -- the virtual row, so the columns after it are no longer a contiguous key prefix. The virtual row
