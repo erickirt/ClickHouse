@@ -3843,7 +3843,7 @@ public:
     }
 
     /// Conversion of a native integer (Unix timestamp in whole seconds) to Nullable(DateTime64):
-    /// NULL for values out of the [1900-01-01 00:00:00, 2299-12-31 23:59:59] range of DateTime64.
+    /// NULL for values out of the [MIN_DATETIME64_TIMESTAMP, MAX_DATETIME64_TIMESTAMP] range of DateTime64.
     template <typename FromDataType>
     ColumnPtr convertIntegerToDateTime64OrNull(const ColumnsWithTypeAndName & arguments, size_t input_rows_count, UInt32 scale) const
     {

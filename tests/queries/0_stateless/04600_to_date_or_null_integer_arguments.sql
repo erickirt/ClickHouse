@@ -26,8 +26,8 @@ SELECT toTypeName(toDateOrNull(18000));
 SELECT toDateTime64OrNull(1583851242, 3, 'UTC');
 SELECT toDateTime64OrNull(1583851242) SETTINGS session_timezone = 'UTC';
 SELECT toTypeName(toDateTime64OrNull(1583851242, 3, 'UTC'));
-SELECT toDateTime64OrNull(toInt64(-1), 3, 'UTC'), toDateTime64OrNull(toInt64(-2208988800), 3, 'UTC'), toDateTime64OrNull(toInt64(-2208988801), 3, 'UTC');
-SELECT toDateTime64OrNull(toUInt64(10413791999), 3, 'UTC'), toDateTime64OrNull(toUInt64(10413792000), 3, 'UTC'), toDateTime64OrNull(toInt64(9223372036854775807), 3, 'UTC');
+SELECT toDateTime64OrNull(toInt64(-1), 3, 'UTC'), toDateTime64OrNull(toInt64(-62167219200), 3, 'UTC'), toDateTime64OrNull(toInt64(-62167219201), 3, 'UTC');
+SELECT toDateTime64OrNull(toInt64(253402300799), 3, 'UTC'), toDateTime64OrNull(toInt64(253402300800), 3, 'UTC'), toDateTime64OrNull(toInt64(9223372036854775807), 3, 'UTC');
 SELECT toDateTime64OrNull(toUInt8(255), 3, 'UTC'), toDateTime64OrNull(toUInt16(65535), 3, 'UTC'), toDateTime64OrNull(toUInt32(4294967295), 3, 'UTC');
 -- Overflow of the value scaled to a high precision produces NULL as well.
 SELECT toDateTime64OrNull(10413791999, 9, 'UTC');
