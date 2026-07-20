@@ -53,6 +53,14 @@ namespace DB
 
 /// Heap-owning value types used inside log elements that are self-contained (own their data, no shared
 /// ownership) but cannot be reflected by boost::pfr. Trusted wholesale by the self-containment gate below.
+///
+/// Field (and Array/Map/Tuple, which are containers of Field) is a known limitation of the gate: its
+/// CustomType alternative is backed by a std::shared_ptr<const CustomTypeImpl>, so the type can carry
+/// shared ownership that the gate cannot see through and will still report as Ok. This is deliberate:
+/// the gate is a cheap compile-time tripwire, not a proof, and Field is pervasive in log elements. The
+/// elements that use these types (CrashLog, MetricLog, ZooKeeperConnectionLog) only ever store scalar
+/// and string values, never a CustomType; the runtime memory-tracking sanitizer covers what the gate
+/// cannot. Do not store a Field that may hold a CustomType in a log element.
 template <> struct SelfContainedLeaf<Field> : std::true_type {};
 template <> struct SelfContainedLeaf<Array> : std::true_type {};
 template <> struct SelfContainedLeaf<Map> : std::true_type {};
