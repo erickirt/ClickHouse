@@ -234,6 +234,19 @@ TEST(IcebergSchemaProcessor, GeographyTypeWhitespaceIsInsensitive)
     EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
 }
 
+/// A geo type string carrying leading/trailing whitespace must map to its alias just like the
+/// space-free spelling. The alias prefix match (geography -> binary) runs on the canonicalized
+/// spelling, so " geography(C,A)" and "geography(C, A)" under the same schema-id compare equal
+/// instead of one skipping aliasing (staying "geography") and the other becoming "binary".
+TEST(IcebergSchemaProcessor, GeographyTypeEdgeWhitespaceIsInsensitive)
+{
+    auto first = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":" geography(C,A) "}]})json");
+    auto second = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"geography(C, A)"}]})json");
+    IcebergSchemaProcessor processor(/*allow_geo_parser_=*/true);
+    processor.addIcebergTableSchema(first);
+    EXPECT_NO_THROW(processor.addIcebergTableSchema(second));
+}
+
 /// Schema-evolution path: renaming a geo field across two schema-ids while only changing the
 /// whitespace of its parameterized type string must resolve to a rename, so the transform DAG
 /// exposes the NEW column name. Without whitespace-insensitive comparison the old node is kept

@@ -162,14 +162,32 @@ bool typesAreStructurallyIdentical(
     Poco::Dynamic::Var second = second_in;
 
     /// Apply configured type aliases (e.g. geography -> binary) to string types.
+    /// Canonicalize spacing before the alias prefix match so leading/trailing whitespace does not
+    /// defeat it: " geography(C,A)" must map to the same alias as "geography(C, A)". Otherwise the
+    /// same schema-id serialized with one spelling that skips aliasing and another that maps to
+    /// "binary" would compare unequal and be wrongly rejected.
     if (first.isString())
+    {
+        const String canon = canonicalizeTypeSpacing(first.toString());
+        first = canon;
         for (const auto & [prefix, mapped] : type_mapping)
-            if (first.toString().starts_with(prefix))
+            if (canon.starts_with(prefix))
+            {
                 first = mapped;
+                break;
+            }
+    }
     if (second.isString())
+    {
+        const String canon = canonicalizeTypeSpacing(second.toString());
+        second = canon;
         for (const auto & [prefix, mapped] : type_mapping)
-            if (second.toString().starts_with(prefix))
+            if (canon.starts_with(prefix))
+            {
                 second = mapped;
+                break;
+            }
+    }
 
     /// Primitive type strings: e.g. both "decimal(20,0)" and "decimal(20, 0)" denote the same
     /// type. Different writers emit different spacing, so ignore ASCII whitespace.
