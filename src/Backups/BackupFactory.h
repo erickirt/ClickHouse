@@ -75,7 +75,7 @@ private:
     struct RegisteredEngine
     {
         CreatorFn creator;
-        DestinationIdentityFn get_destination_identity;
+        DestinationIdentityFn destination_identity;
     };
 
     BackupFactory();

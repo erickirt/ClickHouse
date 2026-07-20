@@ -1,6 +1,10 @@
 #include <Backups/BackupFactory.h>
 #include <Common/Exception.h>
 
+#include <fmt/format.h>
+
+#include <iterator>
+
 
 namespace DB
 {
@@ -15,10 +19,7 @@ namespace
 {
     void appendIdentityComponent(String & identity, std::string_view component)
     {
-        identity += ':';
-        identity += std::to_string(component.size());
-        identity += ':';
-        identity += component;
+        fmt::format_to(std::back_inserter(identity), ":{}:{}", component.size(), component);
     }
 }
 
@@ -73,7 +74,7 @@ String BackupFactory::getDestinationIdentity(const BackupInfo & backup_info, Con
 
     String identity = "backup-destination-v1";
     appendIdentityComponent(identity, engine_name);
-    for (const auto & component : it->second.get_destination_identity(backup_info, context))
+    for (const auto & component : it->second.destination_identity(backup_info, context))
         appendIdentityComponent(identity, component);
     return identity;
 }
