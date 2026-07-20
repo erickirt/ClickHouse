@@ -106,6 +106,7 @@ class WriteBuffer;
     M(CLASS_NAME, Seconds) \
     M(CLASS_NAME, SetOperationMode) \
     M(CLASS_NAME, ShortCircuitFunctionEvaluation) \
+    M(CLASS_NAME, SnappyMode) \
     M(CLASS_NAME, S3UriStyle) \
     M(CLASS_NAME, SQLSecurityType) \
     M(CLASS_NAME, StreamingHandleErrorMode) \
@@ -169,7 +170,6 @@ struct Settings
     void dumpToSystemSettingsColumns(MutableColumnsAndConstraints & params) const;
     void dumpToMapColumn(IColumn * column, bool changed_only = true) const;
     std::map<String, String> changedToMap() const;
-    NameToNameMap toNameToNameMap() const;
 
     void write(WriteBuffer & out, SettingsWriteFormat format = SettingsWriteFormat::DEFAULT) const;
     void read(ReadBuffer & in, SettingsWriteFormat format = SettingsWriteFormat::DEFAULT);
@@ -192,4 +192,11 @@ struct Settings
 private:
     std::unique_ptr<SettingsImpl> impl;
 };
+
+/// Query parameters are transported as raw (name, value) string pairs using the Custom-setting
+/// wire encoding (SettingsWriteFormat::STRINGS_WITH_FLAGS), but bypassing Settings::set/read and
+/// the builtin-setting accessor entirely, so a parameter name colliding with a builtin setting or
+/// alias can never be value-normalized, alias-resolved, or misquoted (issue #85768).
+void writeQueryParameters(const NameToNameMap & parameters, WriteBuffer & out);
+NameToNameMap readQueryParameters(ReadBuffer & in);
 }
