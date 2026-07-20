@@ -1,7 +1,10 @@
--- Dropping a column must not abort with LOGICAL_ERROR "No set is registered for key"
--- when the table has an ALIAS column referencing another ALIAS column that uses an IN
--- expression. Validation expands ALIAS expressions via PlannerActionsVisitor, so the IN
--- set must be registered (collectSets) before collectSourceColumns runs.
+-- ALTER validation and mutations must not abort with LOGICAL_ERROR "No set is registered
+-- for key" when the table has an ALIAS column referencing another ALIAS column that uses an
+-- IN expression. Expanding such ALIAS expressions runs PlannerActionsVisitor, which resolves
+-- IN via the prepared sets, so the sets must be registered (collectSets) before the columns
+-- are collected. Covers the DROP COLUMN validator and the DELETE/UPDATE mutation paths.
+
+SET mutations_sync = 2;
 
 DROP TABLE IF EXISTS t_alias_in_set;
 
@@ -16,10 +19,23 @@ CREATE TABLE t_alias_in_set
 ENGINE = MergeTree()
 ORDER BY id;
 
-ALTER TABLE t_alias_in_set DROP COLUMN extra;
+INSERT INTO t_alias_in_set (id, category) VALUES (1, 'electronics'), (2, 'other'), (3, 'food');
 
-INSERT INTO t_alias_in_set (id, category) VALUES (1, 'electronics'), (2, 'other');
-SELECT id, is_special, label FROM t_alias_in_set ORDER BY id;
+-- DROP COLUMN validation expands ALIAS expressions (AlterCommands::validate).
+ALTER TABLE t_alias_in_set DROP COLUMN extra;
+SELECT 'after drop', id, is_special, label FROM t_alias_in_set ORDER BY id;
+
+-- Mutation predicate references ALIAS -> ALIAS -> IN (MutationsInterpreter).
+ALTER TABLE t_alias_in_set DELETE WHERE label = 'YES';
+SELECT 'after delete', id, is_special, label FROM t_alias_in_set ORDER BY id;
+
+-- Mutation update value references ALIAS -> ALIAS -> IN (MutationsInterpreter).
+ALTER TABLE t_alias_in_set UPDATE category = if(is_special, 'clothing', 'food') WHERE id = 2;
+SELECT 'after update', id, is_special, label FROM t_alias_in_set ORDER BY id;
+
+-- Lightweight DELETE goes through the same mutation preparation.
+DELETE FROM t_alias_in_set WHERE label = 'YES';
+SELECT 'after lightweight delete', count() FROM t_alias_in_set;
 
 ALTER TABLE t_alias_in_set DROP COLUMN IF EXISTS nonexistent_col;
 

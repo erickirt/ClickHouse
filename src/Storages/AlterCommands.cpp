@@ -14,7 +14,6 @@
 #include <Analyzer/TableNode.h>
 #include <Analyzer/Utils.h>
 #include <Planner/PlannerContext.h>
-#include <Planner/CollectSets.h>
 #include <Planner/CollectTableExpressionData.h>
 #include <Interpreters/ExpressionActions.h>
 #include <Interpreters/addTypeConversionToAST.h>
@@ -1869,11 +1868,7 @@ void AlterCommands::validate(const StoragePtr & table, ContextPtr context) const
                                 analyzer.resolve(expression, fake_table_expression, execution_context);
                                 GlobalPlannerContextPtr global_planner_context = std::make_shared<GlobalPlannerContext>(nullptr, nullptr, nullptr, FiltersForTableExpressionMap{});
                                 auto planner_context = std::make_shared<PlannerContext>(execution_context, global_planner_context, SelectQueryOptions{});
-                                /// Sets must be registered before collectSourceColumns, which expands ALIAS
-                                /// column expressions via PlannerActionsVisitor; an unregistered IN set there
-                                /// throws "No set is registered for key".
-                                collectSets(expression, *planner_context);
-                                collectSourceColumns(expression, planner_context);
+                                collectSetsAndSourceColumns(expression, planner_context);
                                 if (const auto * table_expression = planner_context->getTableExpressionDataOrNull(fake_table_expression))
                                 {
                                     for (const auto & selected_column : table_expression->getSelectedColumnsNames())

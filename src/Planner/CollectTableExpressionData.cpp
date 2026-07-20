@@ -12,6 +12,7 @@
 #include <Analyzer/UnionNode.h>
 #include <Analyzer/Utils.h>
 
+#include <Planner/CollectSets.h>
 #include <Planner/PlannerActionsVisitor.h>
 #include <Planner/PlannerContext.h>
 #include <Planner/PlannerCorrelatedSubqueries.h>
@@ -463,6 +464,12 @@ void collectSourceColumns(QueryTreeNodePtr & expression_node, PlannerContextPtr 
 {
     CollectSourceColumnsVisitor collect_source_columns_visitor(planner_context, keep_alias_columns);
     collect_source_columns_visitor.visit(expression_node);
+}
+
+void collectSetsAndSourceColumns(QueryTreeNodePtr & expression_node, PlannerContextPtr & planner_context, bool keep_alias_columns)
+{
+    collectSets(expression_node, *planner_context);
+    collectSourceColumns(expression_node, planner_context, keep_alias_columns);
 }
 
 }
