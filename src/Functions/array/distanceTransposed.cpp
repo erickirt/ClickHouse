@@ -506,9 +506,14 @@ public:
             }
             else
             {
+                /// Downcast only while the centre-fill midpoint (the most significant dropped bit) stays representable in the
+                /// narrower calculation word, i.e. `precision` is strictly below the narrow width. At `precision == 16` a Float32
+                /// element still drops 16 mantissa bits and its midpoint is the bit just below a BFloat16 word, so that boundary
+                /// case must keep the full Float32 width; a BFloat16 element at `precision == 16` drops nothing and stays BFloat16.
                 auto calc_type
-                    = (precision <= 16 ? TypeToTypeIndex<BFloat16>
-                                       : (precision <= 32 ? TypeToTypeIndex<Float32> : TypeToTypeIndex<Float64>));
+                    = (precision < 16 || std::is_same_v<RefT, BFloat16>
+                           ? TypeToTypeIndex<BFloat16>
+                           : (precision <= 32 ? TypeToTypeIndex<Float32> : TypeToTypeIndex<Float64>));
 
                 /// Float64 cannot be downcasted to Float32 or BFloat16 in an easy way by reordering bits. That is why with it we always do
                 /// calculations in full width. Alternatively, we could static_cast each element when calculating, but it is slower.
@@ -720,8 +725,10 @@ private:
         /// dropped bit (the direct analogue of `top | (1 << (7 - precision))` in `LloydMax::transposedDequantLUT`). Zero-filling the
         /// dropped bits would instead reconstruct the cell's lower edge, which biases every value towards zero and degenerates at low
         /// precision: e.g. for BFloat16 at precision 1 only the sign bit survives, so every value would be reconstructed as +-0.0 and
-        /// the distance would be the same for every row. When `precision` covers the whole word, no bits are dropped and the fill is
-        /// zero. `centre_fill` is a single bit strictly below the `precision` kept planes.
+        /// the distance would be the same for every row. When `precision` covers the whole word, the fill is zero; the dispatch in
+        /// `executeImpl` downcasts to a narrower CalcT only while `precision` is strictly below the narrow width, so this happens
+        /// exactly when `precision` covers the whole *element* and no bits are dropped at all. `centre_fill` is a single bit strictly
+        /// below the `precision` kept planes.
         const Word centre_fill = precision < sizeof(Word) * 8 ? static_cast<Word>(Word(1) << (sizeof(Word) * 8 - 1 - precision)) : Word(0);
 
 #if USE_SIMSIMD

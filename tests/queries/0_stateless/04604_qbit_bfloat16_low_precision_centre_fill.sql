@@ -157,3 +157,16 @@ SELECT dotProductTransposed([nan]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 10
        dotProductTransposed([nan]::QBit(Float32, 1), [1.0]::Array(Float32), 9) AS f32_nan_dropped,
        dotProductTransposed([nan]::QBit(Float64, 1), [1.0]::Array(Float64), 13) AS f64_nan_kept,
        dotProductTransposed([nan]::QBit(Float64, 1), [1.0]::Array(Float64), 12) AS f64_nan_dropped;
+
+-- Boundary case of the CalcT downcast: a Float32 element at precision 16 still drops 16 mantissa bits, but a downcast to
+-- BFloat16 would make the calculation word exactly `precision` bits wide, so the midpoint (the most significant dropped
+-- bit) would not be representable and the value would silently reconstruct to the lower edge of its cell. The dispatch
+-- therefore downcasts only while `precision` is strictly below the narrow width: Float32 at precision 16 computes in full
+-- Float32, where `[1.0]` reconstructs to the midpoint 1.00390625 of its `0x3F800000..0x3F80FFFF` cell, not to 1.0. A
+-- BFloat16 element at precision 16 drops nothing and must stay exactly 1.0; Float64 at precision 16 never downcasts and
+-- centres within its own cell.
+SELECT '-- Float32 precision 16 (downcast boundary): midpoint applied, not the lower edge';
+SELECT dotProductTransposed([1.0]::QBit(Float32, 1), [1.0]::Array(Float32), 16) AS f32_p16_midpoint,
+       dotProductTransposed([1.0]::QBit(Float32, 1), [1.0]::Array(Float32), 15) AS f32_p15_midpoint,
+       dotProductTransposed([1.0]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 16) AS bf16_p16_exact,
+       dotProductTransposed([1.0]::QBit(Float64, 1), [1.0]::Array(Float64), 16) AS f64_p16_midpoint;

@@ -42,3 +42,5 @@ inf	-inf	inf	inf	-inf
 64	-64	64
 -- NaN policy in the mantissa-truncation regime: NaN with kept payload bit stays NaN, NaN with dropped payload -> inf
 nan	inf	nan	inf	nan	inf
+-- Float32 precision 16 (downcast boundary): midpoint applied, not the lower edge
+1.00390625	1.0078125	1	1.03125
