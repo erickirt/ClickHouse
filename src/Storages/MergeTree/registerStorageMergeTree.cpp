@@ -8,6 +8,7 @@
 #include <Storages/StorageReplicatedMergeTree.h>
 #include <Storages/TableZnodeInfo.h>
 
+#include <Compression/CompressionFactory.h>
 #include <Core/ServerSettings.h>
 #include <Core/Settings.h>
 #include <Common/Jemalloc.h>
@@ -47,6 +48,7 @@ namespace DB
 namespace Setting
 {
     extern const SettingsBool allow_deprecated_syntax_for_merge_tree;
+    extern const SettingsBool allow_experimental_codecs;
     extern const SettingsBool allow_experimental_unique_key;
     extern const SettingsBool allow_suspicious_primary_key;
     extern const SettingsBool allow_suspicious_ttl_expressions;
@@ -71,8 +73,11 @@ namespace MergeTreeSetting
     extern const MergeTreeSettingsBool enable_block_number_column;
     extern const MergeTreeSettingsBool enable_block_offset_column;
     extern const MergeTreeSettingsString auto_statistics_types;
+    extern const MergeTreeSettingsString default_compression_codec;
     extern const MergeTreeSettingsBool escape_index_filenames;
     extern const MergeTreeSettingsString disk;
+    extern const MergeTreeSettingsString marks_compression_codec;
+    extern const MergeTreeSettingsString primary_key_compression_codec;
     extern const MergeTreeSettingsString storage_policy;
 }
 
@@ -833,6 +838,22 @@ static StoragePtr create(const StorageFactory::Arguments & args)
             if (args.mode <= LoadingStrictnessLevel::CREATE)
                 args.getLocalContext()->checkMergeTreeSettingsConstraints(initial_storage_settings, storage_settings->changes());
             metadata.settings_changes = args.storage_def->settings->ptr();
+        }
+
+        /// The codec-valued MergeTree settings accept an arbitrary codec expression and are applied without
+        /// going through the experimental-codec gate that column codecs and `TTL ... RECOMPRESS` use, so an
+        /// experimental codec (e.g. `ZXC`) could slip in through `SETTINGS default_compression_codec = ...`.
+        /// Enforce `allow_experimental_codecs` here, at CREATE time only: the load path (server restart,
+        /// `ATTACH`, `SECONDARY_CREATE`) skips the check so that existing tables remain loadable, mirroring
+        /// how the column codec gate is skipped on `ATTACH`.
+        if (args.mode <= LoadingStrictnessLevel::CREATE && !local_settings[Setting::allow_experimental_codecs])
+        {
+            if (const auto & codec = (*storage_settings)[MergeTreeSetting::marks_compression_codec].value; !codec.empty())
+                CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
+            if (const auto & codec = (*storage_settings)[MergeTreeSetting::primary_key_compression_codec].value; !codec.empty())
+                CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
+            if (const auto & codec = (*storage_settings)[MergeTreeSetting::default_compression_codec].value; !codec.empty())
+                CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
         }
 
         /// UNIQUE KEY tables must reside on local-only storage policies.
