@@ -92,15 +92,25 @@ struct RUsageCounters
         ///                                  seconds/microseconds pair). `count` is an in/out field count,
         ///                                  initialized to THREAD_BASIC_INFO_COUNT (the struct's size in
         ///                                  natural_t words). On success it returns KERN_SUCCESS.
+        /// current() always reads the calling thread, so cache the last successful reading per thread.
+        /// thread_info on one's own port does not realistically fail, but if it ever did we must not
+        /// report a zeroed sample: these CPU counters are monotonic and feed unsigned deltas in
+        /// incrementProfileEvents, so a regression to zero would underflow into a huge bogus delta (and
+        /// trip its chassert in debug). Carry the previous value forward instead (a fresh thread starts
+        /// at zero, which is also its true CPU time).
+        thread_local time_value_t last_user_time{};
+        thread_local time_value_t last_system_time{};
         thread_basic_info_data_t info{};
         mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
         if (thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) == KERN_SUCCESS)
         {
-            rusage.ru_utime.tv_sec = info.user_time.seconds;
-            rusage.ru_utime.tv_usec = info.user_time.microseconds;
-            rusage.ru_stime.tv_sec = info.system_time.seconds;
-            rusage.ru_stime.tv_usec = info.system_time.microseconds;
+            last_user_time = info.user_time;
+            last_system_time = info.system_time;
         }
+        rusage.ru_utime.tv_sec = last_user_time.seconds;
+        rusage.ru_utime.tv_usec = last_user_time.microseconds;
+        rusage.ru_stime.tv_sec = last_system_time.seconds;
+        rusage.ru_stime.tv_usec = last_system_time.microseconds;
 #elif defined(OS_SUNOS)
         ::getrusage(RUSAGE_LWP, &rusage);
 #else
