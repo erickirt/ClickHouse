@@ -111,6 +111,25 @@ FROM (
     SETTINGS optimize_use_projections = 1, optimize_use_implicit_projections = 1, optimize_trivial_count_query = 1
 );
 
+-- `tryGetConstant` peels only an outer `Nullable`, so a `LowCardinality(Nullable(FixedString(N)))`
+-- constant reaches the guard with the inner `Nullable` intact. Stripping `LowCardinality` alone
+-- leaves `Nullable(FixedString(N))`, `isFixedString()` stays false, and the constant slips past the
+-- guard back onto the mis-pruning path. `Nullable(FixedString(N))` alone is already peeled by
+-- `tryGetConstant`, but is asserted here too. Both must return the ground-truth 9000.
+SET allow_suspicious_low_cardinality_types = 1;
+DROP TABLE IF EXISTS t_lcn_gt;
+DROP TABLE IF EXISTS t_lcn_skip;
+CREATE TABLE t_lcn_gt (p String) ENGINE = MergeTree ORDER BY tuple() SETTINGS index_granularity = 1024;
+INSERT INTO t_lcn_gt SELECT if(number < 9000, 'abc', concat('x', toString(number))) FROM numbers(10000);
+CREATE TABLE t_lcn_skip (p String, INDEX idx p TYPE minmax GRANULARITY 1) ENGINE = MergeTree ORDER BY p SETTINGS index_granularity = 1024;
+INSERT INTO t_lcn_skip SELECT if(number < 9000, 'abc', concat('x', toString(number))) FROM numbers(10000);
+SELECT count() FROM t_lcn_gt   WHERE p = CAST(toFixedString('abc', 257) AS LowCardinality(Nullable(FixedString(257))));
+SELECT count() FROM t_lcn_skip WHERE p = CAST(toFixedString('abc', 257) AS LowCardinality(Nullable(FixedString(257))));
+SELECT count() FROM t_lcn_gt   WHERE p = CAST(toFixedString('abc', 257) AS Nullable(FixedString(257)));
+SELECT count() FROM t_lcn_skip WHERE p = CAST(toFixedString('abc', 257) AS Nullable(FixedString(257)));
+SELECT count() FROM t_lcn_skip WHERE p = CAST(toFixedString('abc', 257) AS LowCardinality(Nullable(FixedString(257)))) GROUP BY ALL
+SETTINGS optimize_use_projections = 1, optimize_use_implicit_projections = 1, optimize_trivial_count_query = 1;
+
 DROP TABLE IF EXISTS t_gt;
 DROP TABLE IF EXISTS t_pk_str;
 DROP TABLE IF EXISTS t_pk_inj;
@@ -121,3 +140,5 @@ DROP TABLE IF EXISTS t_fs;
 DROP TABLE IF EXISTS t_fs5;
 DROP TABLE IF EXISTS t_lc_gt;
 DROP TABLE IF EXISTS t_lc_inj;
+DROP TABLE IF EXISTS t_lcn_gt;
+DROP TABLE IF EXISTS t_lcn_skip;
