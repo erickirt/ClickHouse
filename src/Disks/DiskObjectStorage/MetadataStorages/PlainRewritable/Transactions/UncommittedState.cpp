@@ -14,47 +14,69 @@ namespace DB
 
 class UncommittedState::PathResolver
 {
+    enum class EventType
+    {
+        Remove,
+        Move,
+    };
+
+    struct Event
+    {
+        EventType type = EventType::Remove;
+        NormalizedPath from = {};
+        NormalizedPath to = {};
+    };
+
 public:
     void recordMove(const NormalizedPath & from, const NormalizedPath & to)
     {
-        owned_prefixes.push_back(resolveToSnapshotPath(from));
-        moves.emplace_back(from, to);
+        events.push_back({.type = EventType::Move, .from = from, .to = to});
     }
 
     void recordRemove(const NormalizedPath & directory)
     {
-        owned_prefixes.push_back(resolveToSnapshotPath(directory));
+        events.push_back({.type = EventType::Remove, .from = directory});
     }
 
     void recordCreate(const NormalizedPath & directory)
     {
-        created_directories.insert(resolveToSnapshotPath(directory));
+        if (const auto snapshot_path = resolveToSnapshotPath(directory))
+            created_directories.insert(*snapshot_path);
     }
 
-    NormalizedPath resolveToSnapshotPath(const NormalizedPath & path) const
+    std::optional<NormalizedPath> resolveToSnapshotPath(const NormalizedPath & path) const
     {
         auto resolved = path.string();
 
-        for (const auto & [from, to] : moves | std::views::reverse)
+        for (const auto & event : events | std::views::reverse)
         {
-            if (resolved == to)
-                resolved = from;
-            else if (resolved.starts_with(to + '/'))
-                resolved = from + resolved.substr(to.size());
+            const auto & from = event.from.native();
+            const auto & to = event.to.native();
+
+            switch (event.type)
+            {
+                case EventType::Remove:
+                {
+                    if (resolved == from || resolved.starts_with(from + '/'))
+                        return std::nullopt;
+
+                    break;
+                }
+                case EventType::Move:
+                {
+                    if (resolved == to)
+                        resolved = from;
+                    else if (resolved.starts_with(to + '/'))
+                        resolved = from + resolved.substr(to.size());
+                    else if (resolved == from || resolved.starts_with(from + '/'))
+                        return std::nullopt;
+
+                    break;
+                }
+            }
         }
 
         return NormalizedPath{resolved};
-    }
-
-    bool isOwnedByTransaction(const NormalizedPath & path) const
-    {
-        const auto & path_string = path.native();
-
-        for (const auto & prefix : owned_prefixes)
-            if (path_string == prefix || path_string.starts_with(prefix + '/'))
-                return true;
-
-        return false;
     }
 
     bool isCreatedByTransaction(const NormalizedPath & path) const
@@ -63,8 +85,7 @@ public:
     }
 
 private:
-    std::vector<std::pair<std::string, std::string>> moves;
-    std::vector<std::string> owned_prefixes;
+    std::vector<Event> events;
     std::unordered_set<std::string> created_directories;
 };
 
@@ -83,11 +104,11 @@ void UncommittedState::createDirectory(const std::string & path)
         return;
     }
 
-    const auto snapshot_path = path_resolver->resolveToSnapshotPath(normalizePath(path));
-    if (!path_resolver->isOwnedByTransaction(snapshot_path))
-        preconditions->checkDirectoryMissing(snapshot_path);
+    const auto normalized_path = normalizePath(path);
+    if (const auto snapshot_path = path_resolver->resolveToSnapshotPath(normalized_path))
+        preconditions->checkDirectoryMissing(*snapshot_path);
 
-    path_resolver->recordCreate(normalizePath(path));
+    path_resolver->recordCreate(normalized_path);
     tx_snapshot->recordDirectoryPath(path, DirectoryRemoteInfo{ .remote_path = getRandomASCIIString(32), .etag = "", .files = {}});
 }
 
@@ -129,8 +150,8 @@ void UncommittedState::useDirectory(const std::string & path) const
         return;
 
     const auto snapshot_path = path_resolver->resolveToSnapshotPath(normalizePath(path));
-    if (!path_resolver->isCreatedByTransaction(snapshot_path))
-        preconditions->checkDirectoryPresent(snapshot_path, info->remote_path);
+    if (snapshot_path && !path_resolver->isCreatedByTransaction(*snapshot_path))
+        preconditions->checkDirectoryPresent(*snapshot_path, info->remote_path);
 }
 
 std::shared_ptr<Preconditions> UncommittedState::getTxPreconditions() const
