@@ -4242,19 +4242,28 @@ customElements.define('query-result', QueryResultElement);
 ///     so a query keeps streaming into its background tab and a late response still lands there.
 let activation_num = 0;
 
-/// Monotonic run identity, bumped once per run launch (`postOne` / `postAll`) into the launching
-/// tab's `launchRunId`. Unlike the launch query text, it is UNIQUE per execution: a rerun of the
+/// Run identity, minted once per run launch (`postOne` / `postAll`) into the launching tab's
+/// `launchRunId`. Unlike the launch query text, it is UNIQUE per execution: a rerun of the
 /// identical query gets a fresh id, and a partial `Run selected` shares it with the full-editor
 /// history entry it wrote even though their query texts differ. `window.onpopstate` uses it to tell
 /// whether a tab's live state (still-running launch, or completed snapshot) truly belongs to the
 /// run a mid-run (`result: null`) history entry was written for, instead of inferring "same run"
 /// from matching query/params (which both a rerun and a selection defeat). The completed snapshot
 /// carries it as `tab.result.run_id`, and every history entry as `state.run_id`. Those persisted
-/// ids outlive the page (browser history, `IndexedDB` tab snapshots), so the counter must too:
-/// `persist` stores it in the meta record and `reconcileStartup` re-seeds it above every persisted
-/// `run_id` it can see — otherwise the first launch after a reload would start back at `1` and
-/// could alias an old mid-run entry's identity.
+/// ids outlive the page (browser history, `IndexedDB` tab snapshots), and the set of surviving
+/// entries is NOT enumerable at startup — a deeper Back/Forward entry can outlive a reload without
+/// ever reaching `IndexedDB` (the deferred `persist`, private mode) — so no re-seeded counter can
+/// promise uniqueness against them. Instead, every id is qualified by `run_epoch`, a random token
+/// drawn once per page instance: ids minted by different page instances can never be equal, so a
+/// post-reload launch can never alias an entry written before the reload, while ids persisted
+/// TOGETHER by a previous instance (a tab snapshot and the history entries of the same run) still
+/// match each other after a reload.
+const run_epoch = Array.from(crypto.getRandomValues(new Uint32Array(2)), n => n.toString(36)).join('');
 let run_seq = 0;
+function nextRunId()
+{
+    return run_epoch + '-' + (++run_seq);
+}
 
 /// While a tab activation is rebuilding the active tab's parameter inputs, this holds the
 /// activation's request token. `restoreEditor` sets it right before the `updateQueryParams`
@@ -7156,7 +7165,7 @@ function tabRuntimeDefaults() {
         downloadVisible: false, /// whether the download / copy buttons apply to this tab
         copyVisible: false,
         launchQuery: undefined, /// editor text snapshotted when this tab's run was launched (see `saveHistory`)
-        launchRunId: undefined, /// unique run identity of this tab's current launch (see `run_seq` / `window.onpopstate`)
+        launchRunId: undefined, /// unique run identity of this tab's current launch (see `run_epoch` / `window.onpopstate`)
         runEditorInteraction: 0,  /// `editorInteractionGen` snapshot at this tab's run launch (see `beginFlight`)
         queryErrorOwnerStart: -1, /// editor offset of the statement owning the error marker in this tab's run, or -1
         barEl: null,            /// cached tab-bar row + indicator nodes (see renderTabBar/updateTabIndicator)
@@ -7766,7 +7775,6 @@ async function persist() {
             tabOrder: tabs.map(t => t.id),
             tabSeq: tabSeq,
             tabTitleSeq: tabTitleSeq,
-            runSeq: run_seq,
         });
     } catch (e) {
         /// Ignore persistence failures (private mode, quota, etc.).
@@ -7972,7 +7980,7 @@ function writeHistoryEntry(tab, titleForDoc, forceReplace, fromRun) {
         /// survives re-authentication with a different password on the same server/user.
         connectionServer: entry_server,
         connectionUser: entry_user,
-        /// The run identity this entry currently reflects (see `run_seq`): the still-running launch
+        /// The run identity this entry currently reflects (see `run_epoch`): the still-running launch
         /// while the tab is in flight (so a mid-run `result: null` entry is stamped with the run that
         /// wrote it), otherwise the completed snapshot's id. `window.onpopstate` matches it against
         /// the tab's live state to decide whether that state stands in for a null entry.
@@ -8145,7 +8153,7 @@ function saveHistory(stateData, titleForDoc, tab) {
         /// Pinned columns in effect when this result was produced; travels with the snapshot so
         /// re-activating the tab (or navigating / reloading) restores them, like `color_modes`.
         pinned_columns: tab.pinnedColumns,
-        /// The run identity that produced this result (see `run_seq`). A completing run still owns
+        /// The run identity that produced this result (see `run_epoch`). A completing run still owns
         /// its tab here (the caller bailed on a superseding `reqNum`), so `tab.launchRunId` is this
         /// run's. Lets `window.onpopstate` recognize the mid-run history entry this run wrote —
         /// which carries the same `run_id` — as belonging to the live snapshot.
@@ -8348,15 +8356,16 @@ window.onpopstate = function(event) {
     ///
     /// The live state may only stand in for this null entry when it is provably the SAME run the
     /// entry was written for. Every entry records the identity of the run it reflects (`run_id`, see
-    /// `run_seq`), and the tab carries that identity as either the still-running launch
+    /// `run_epoch`), and the tab carries that identity as either the still-running launch
     /// (`launchRunId`) or the completed in-memory snapshot (`tab.result.run_id`). A `run_id` match is
     /// exact where the old query/params heuristic was not: a partial `Run selected` writes the full
     /// editor text into the entry but only the selected statement into `tab.result.query`, and a
     /// rerun of the identical text produces a NEW run — both of which a text comparison would
     /// mis-handle (blanking a completed background partial run, or attaching a later rerun to an
-    /// older entry's URL). The match stays exact across reloads because startup re-seeds `run_seq`
-    /// above every persisted `run_id` (see `reconcileStartup`), so a post-reload launch can never
-    /// reuse the identity of an entry written before the reload. If the tab has since launched or
+    /// older entry's URL). The match stays exact across reloads because every id carries the minting
+    /// page instance's `run_epoch`, so a post-reload launch can never reuse the identity of an entry
+    /// written before the reload — no matter which history entries survived, or whether the previous
+    /// instance's state ever reached `IndexedDB`. If the tab has since launched or
     /// completed a DIFFERENT run — jump straight
     /// back to an old mid-run entry (history menu / `history.go`) after the tab moved on — the ids no
     /// longer match, so fall through to plain time-travel and render the entry itself.
@@ -8568,9 +8577,9 @@ async function postOne()
     /// moved on (an edit made while the query ran must not be clobbered by the launch text).
     const editor_text = query_area.value;
     tab.launchQuery = editor_text;
-    /// Fresh run identity for this launch (see `run_seq`): stamped onto the mid-run history entry
+    /// Fresh run identity for this launch (see `run_epoch`): stamped onto the mid-run history entry
     /// and the completed snapshot so a later Back/Forward can match THIS run exactly.
-    tab.launchRunId = ++run_seq;
+    tab.launchRunId = nextRunId();
     const sel_start = query_area.selectionStart;
     const sel_end = query_area.selectionEnd;
     const has_selection = sel_start !== sel_end;
@@ -8677,7 +8686,7 @@ async function postAll()
 
     const editor_text = query_area.value;
     tab.launchQuery = editor_text;   /// see `postOne`: lets `saveHistory` detect a newer draft
-    tab.launchRunId = ++run_seq;     /// see `postOne`: fresh run identity for this launch
+    tab.launchRunId = nextRunId();   /// see `postOne`: fresh run identity for this launch
     const sel_start = query_area.selectionStart;
 
     /// See `postOne`: bind the parameter names to the run's own text, and on a no-lexer /
@@ -11073,24 +11082,8 @@ async function reconcileStartup() {
         if (loaded.meta) {
             tabSeq = Math.max(tabSeq, loaded.meta.tabSeq || 0);
             tabTitleSeq = Math.max(tabTitleSeq, loaded.meta.tabTitleSeq || 0);
-            run_seq = Math.max(run_seq, loaded.meta.runSeq || 0);
         }
     }
-
-    /// Re-seed the run-identity counter above every persisted `run_id` (see `run_seq`): the ids
-    /// live on in saved tab snapshots and in `history.state` across reloads, so a fresh page-local
-    /// counter would hand a post-reload launch an identity an old mid-run history entry already
-    /// carries, letting `window.onpopstate`'s null-entry shortcut adopt the newer run's result for
-    /// the older entry. The meta record's `runSeq` (restored above) is the primary source; the
-    /// per-snapshot maximum covers meta records written before the counter was persisted, and the
-    /// current `history.state` covers a reload whose `IndexedDB` state is gone (cleared site data,
-    /// private mode) while the browser-history entry survived. Deeper history entries are not
-    /// enumerable, but their ids never exceed the counter persisted after the run that wrote them.
-    for (const t of savedTabs)
-        if (t.result && t.result.run_id)
-            run_seq = Math.max(run_seq, t.result.run_id);
-    if (history.state && history.state.run_id)
-        run_seq = Math.max(run_seq, history.state.run_id);
 
     /// A bare `?tab=Name` URL is a stale echo of a blank tab this load just pruned — and so NOT
     /// authoritative — only when the reloaded history entry still describes one of those pruned
