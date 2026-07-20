@@ -105,9 +105,12 @@ namespace
 
         std::optional<StackTrace> stack_trace;
 
-#if defined(THREAD_SANITIZER)
-        /// Under TSan, use abseil's frame-pointer-based unwinding (via the default
-        /// StackTrace constructor) instead of the ucontext_t constructor which uses libunwind.
+#if defined(THREAD_SANITIZER) && !defined(OS_DARWIN)
+        /// Under TSan on Linux, use abseil's frame-pointer-based unwinding (via the default StackTrace
+        /// constructor) instead of the ucontext_t constructor which uses libunwind. abseil validates the
+        /// frame chain and does not fault, so no async-unwind recovery is needed. On macOS there is no
+        /// abseil path (StackTrace always uses backtrace()), which can fault in frame-pointer-less
+        /// libsystem code, so Darwin takes the recovery branch below even under TSan.
         UNUSED(context);
         stack_trace.emplace();
 #else
