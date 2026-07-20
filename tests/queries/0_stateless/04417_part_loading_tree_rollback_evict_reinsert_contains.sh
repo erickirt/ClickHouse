@@ -67,7 +67,12 @@ DATA_PATH=$($CLICKHOUSE_CLIENT -q "
     WHERE database = currentDatabase() AND name = '${TABLE}'
 ")
 
-$CLICKHOUSE_CLIENT -q "DETACH TABLE ${TABLE}"
+# `PERMANENTLY` keeps the table detached across server restarts (stress tests restart the
+# server at arbitrary moments). With a plain `DETACH` the table is loaded again at startup
+# while this script is still fabricating part directories out-of-band, and the server's
+# version-metadata machinery races with the script on the same `txn_version.txt(.tmp)`
+# files, leaving corrupted metadata behind that fails every subsequent server start.
+$CLICKHOUSE_CLIENT -q "DETACH TABLE ${TABLE} PERMANENTLY"
 
 SOURCE="${DATA_PATH}/all_1_1_0"
 
