@@ -194,6 +194,7 @@ function makeElement(tag) {
         renderGraph() {},
         renderTotals() {},
         applyColumnColors() {},
+        applyPinnedColumns() {},
         refreshColumnColor() {},
         transposeIfNeeded() {},
         _changeTableLayout() {},
