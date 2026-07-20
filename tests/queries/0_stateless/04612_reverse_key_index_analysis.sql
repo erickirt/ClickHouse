@@ -205,3 +205,37 @@ INSERT INTO t_asc VALUES ('manual', 2), ('manual', 1), ('novel', 3), ('novel', 3
 SELECT count() FROM t_asc WHERE g = 'novel' AND r = 3;
 SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_asc WHERE g = 'novel' AND r = 3) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
 DROP TABLE t_asc;
+
+SELECT 'NaN runs in a float key column form mark boundaries';
+SET allow_suspicious_primary_key = 1;
+DROP TABLE IF EXISTS t_nan;
+CREATE TABLE t_nan (g UInt32, r Float64)
+ENGINE = MergeTree ORDER BY (g, r DESC) SETTINGS index_granularity = 1;
+INSERT INTO t_nan VALUES (1, 0/0), (1, 0/0), (1, 5), (1, 3), (2, 0/0), (2, 7);
+SELECT count() FROM t_nan WHERE g = 1 AND r >= 4 SETTINGS use_lightweight_primary_key_index_analysis = 1;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan WHERE g = 1 AND r >= 4 SETTINGS use_lightweight_primary_key_index_analysis = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan WHERE g = 1 AND r >= 4 SETTINGS use_lightweight_primary_key_index_analysis = 0;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan WHERE g = 1 AND r >= 4 SETTINGS use_lightweight_primary_key_index_analysis = 0) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan WHERE g = 1 AND r = 5;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan WHERE g = 1 AND r = 5) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan WHERE g = 1 AND r <= 3;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan WHERE g = 1 AND r <= 3) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan WHERE g = 2;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan WHERE g = 2) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan WHERE g = 1 AND isNaN(r);
+DROP TABLE t_nan;
+
+DROP TABLE IF EXISTS t_nan_asc;
+CREATE TABLE t_nan_asc (g UInt32, r Float64)
+ENGINE = MergeTree ORDER BY (g, r) SETTINGS index_granularity = 1;
+INSERT INTO t_nan_asc VALUES (1, 3), (1, 5), (1, 0/0), (1, 0/0), (2, 7), (2, 0/0);
+SELECT count() FROM t_nan_asc WHERE g = 1 AND r = 5 SETTINGS use_lightweight_primary_key_index_analysis = 1;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan_asc WHERE g = 1 AND r = 5 SETTINGS use_lightweight_primary_key_index_analysis = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan_asc WHERE g = 1 AND r = 5 SETTINGS use_lightweight_primary_key_index_analysis = 0;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan_asc WHERE g = 1 AND r = 5 SETTINGS use_lightweight_primary_key_index_analysis = 0) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan_asc WHERE g = 1 AND r >= 4;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan_asc WHERE g = 1 AND r >= 4) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan_asc WHERE g = 2 AND r = 7;
+SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nan_asc WHERE g = 2 AND r = 7) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
+SELECT count() FROM t_nan_asc WHERE g = 1 AND isNaN(r);
+DROP TABLE t_nan_asc;
