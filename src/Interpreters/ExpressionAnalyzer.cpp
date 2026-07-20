@@ -1,4 +1,4 @@
-#include <memory>
+#include <Interpreters/ExpressionAnalyzer.h>
 
 #include <AggregateFunctions/AggregateFunctionFactory.h>
 #include <AggregateFunctions/WindowFunction.h>
@@ -28,12 +28,11 @@
 #include <Interpreters/Aggregator.h>
 #include <Interpreters/ArrayJoinAction.h>
 #include <Interpreters/ConcurrentHashJoin.h>
-#include <Interpreters/Context.h>
 #include <Interpreters/ConstantJoin.h>
+#include <Interpreters/Context.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/DirectJoin.h>
 #include <Interpreters/ExpressionActions.h>
-#include <Interpreters/ExpressionAnalyzer.h>
 #include <Interpreters/ExternalDictionariesLoader.h>
 #include <Interpreters/FullSortingMergeJoin.h>
 #include <Interpreters/GetAggregatesVisitor.h>
@@ -74,6 +73,7 @@
 #include <Common/StringUtils.h>
 #include <Common/logger_useful.h>
 #include <Common/typeid_cast.h>
+
 
 namespace DB
 {
