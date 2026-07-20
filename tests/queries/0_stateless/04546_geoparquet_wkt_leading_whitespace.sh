@@ -2,15 +2,19 @@
 # Tags: no-fasttest
 #       ^ no Parquet support in fasttest
 #
-# Regression test: parseWKTFormat (ArrowGeoTypes.cpp) must accept the same
-# ' \t\n\r' whitespace class as the SQL readWKT dispatcher and the WKT grammar
-# (boost::geometry::read_wkt tokenizes on " \n\t\r"). Two parts:
+# Regression test: parseWKTFormat (ArrowGeoTypes.cpp) must match the SQL readWKT
+# dispatcher and the WKT grammar (boost::geometry::read_wkt tokenizes on " \n\t\r").
+# Three parts:
 #   1. Leading whitespace before the type keyword ('  POINT (1 2)') used to give
 #      BAD_ARGUMENTS (type "  POINT" matched nothing). Sibling of issue #110700.
 #   2. Interior whitespace between the type keyword and '(', and between/around
 #      coordinates ('POINT\t(1 2)', 'POINT(1  2)', 'LINESTRING(1 1,\n2 2)') used
 #      to throw BAD_ARGUMENTS / CANNOT_PARSE_NUMBER, or silently drop a coordinate,
 #      while readWKT parsed them. Both are now consistent.
+#   3. Trailing / interior non-separator garbage ('POINT x(1 2)', 'POINT(1 2) x',
+#      'POINT(1 2))', 'LINESTRING(1 1 xx, 2 2)', missing ')') used to be SILENTLY
+#      accepted here (wrong data on import) while readWKT rejects them. Now the
+#      import rejects them too (BAD_ARGUMENTS).
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -69,6 +73,20 @@ write_geoparquet(
     ],
     geometry_types=[],
 )
+
+# Malformed values readWKT rejects: non-separator garbage before '(', trailing
+# garbage after the geometry, an extra ')', garbage inside the coordinate list,
+# and a missing ')'. Each in its own file so the throwing row is isolated.
+bad_values = [
+    "POINT x(1 2)",
+    "POINT(1 2) trailing",
+    "POINT(1 2))",
+    "LINESTRING(1 1, 2 2) zzz",
+    "LINESTRING(1 1 xx, 2 2)",
+    "POINT(1 2",
+]
+for i, wkt in enumerate(bad_values):
+    write_geoparquet(out + f"/wkt_bad_{i}.parquet", ids=[1], wkts=[wkt], geometry_types=[])
 PYEOF
 
 GEO_SETTINGS="--input_format_parquet_use_native_reader_v3=1 --input_format_parquet_allow_geoparquet_parser=1"
@@ -78,3 +96,10 @@ $CLICKHOUSE_LOCAL $GEO_SETTINGS -q \
 
 $CLICKHOUSE_LOCAL $GEO_SETTINGS -q \
     "SELECT id, variantType(geom), geom FROM file('$TMP_DIR/wkt_interior.parquet', Parquet) ORDER BY id"
+
+# Malformed inputs must be rejected (consistent with readWKT), not silently accepted.
+for i in 0 1 2 3 4 5; do
+    $CLICKHOUSE_LOCAL $GEO_SETTINGS -q \
+        "SELECT geom FROM file('$TMP_DIR/wkt_bad_$i.parquet', Parquet)" 2>&1 \
+        | grep -c -F "BAD_ARGUMENTS"
+done
