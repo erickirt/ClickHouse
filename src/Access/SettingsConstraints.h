@@ -166,8 +166,7 @@ private:
         SettingChange & change,
         ReactionOnViolation reaction,
         SettingSource source,
-        bool ignore_unchanged_settings = false,
-        const Settings * compatibility_settings = nullptr) const;
+        bool ignore_unchanged_settings = false) const;
 
     bool checkImpl(const MergeTreeSettings & current_settings, SettingChange & change, ReactionOnViolation reaction) const;
 
