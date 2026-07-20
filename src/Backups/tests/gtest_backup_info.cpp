@@ -374,13 +374,17 @@ TEST(BackupInfo, FreezeNamedCollectionPreservesDestinationSnapshot)
     SCOPE_EXIT({ drop_collection(); });
 
     auto context = getContext().context;
-    auto info = BackupInfo::fromString("S3(" + collection_name + ", url='s3://bucket/overridden')");
+    auto info = BackupInfo::fromString("S3(" + collection_name + ", url='https://user:URLPASSWORD@bucket.s3.amazonaws.com/overridden')");
     auto frozen = info.freezeNamedCollection(context);
     const String identity = BackupFactory::instance().getDestinationIdentity(frozen, context);
+    auto redacted = frozen.withoutS3Credentials(context);
 
     EXPECT_TRUE(frozen.frozen_named_collection->isQueryOverridden("url"));
+    EXPECT_NE(frozen.getNamedCollection(context)->get<String>("url").find("URLPASSWORD"), String::npos);
+    EXPECT_FALSE(redacted.frozen_named_collection);
+    EXPECT_EQ(redacted.toString().find("URLPASSWORD"), String::npos);
     drop_collection();
-    EXPECT_EQ(frozen.getNamedCollection(context)->get<String>("url"), "s3://bucket/overridden");
+    EXPECT_THROW((void)redacted.getNamedCollection(context), Exception);
     EXPECT_EQ(BackupFactory::instance().getDestinationIdentity(frozen, context), identity);
 }
 #endif

@@ -282,6 +282,8 @@ BackupInfo BackupInfo::withoutS3Credentials(ContextPtr context) const
         return *this;
 
     BackupInfo res = *this;
+    /// The resolved snapshot contains the original overrides and cannot be kept after redacting them.
+    res.frozen_named_collection.reset();
 
     /// S3('url', 'access_key_id', 'secret_access_key') -> S3('url')
     if (res.id_arg.empty() && res.args.size() == 3)
