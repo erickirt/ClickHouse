@@ -814,7 +814,12 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::prepare() const
             if (part->isEmpty())
                 continue;
 
-            global_ctx->new_data_part->getMinMaxIndex()->merge(*part->getMinMaxIndex());
+            {
+                /// Populate the merged part's minmax index in the parts arena (the object and the
+                /// hyperrectangle/Field allocations of `merge` both land there).
+                ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+                global_ctx->new_data_part->getMinMaxIndex()->merge(*part->getMinMaxIndex());
+            }
             const auto & result_statistics = global_ctx->gathered_data.statistics;
 
             if (result_statistics.empty())
@@ -1599,7 +1604,12 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::executeImpl() const
         const_cast<MergedBlockOutputStream &>(*global_ctx->to).write(block);
 
         if (global_ctx->merge_may_reduce_rows)
+        {
+            /// Same rationale as the horizontal-stage `merge` above: keep the row-reducing merge's
+            /// incrementally-built minmax index in the parts arena.
+            ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
             global_ctx->new_data_part->getMinMaxIndex()->update(block, global_ctx->minmax_idx_columns);
+        }
 
         calculateProjections(block, starting_offset);
 

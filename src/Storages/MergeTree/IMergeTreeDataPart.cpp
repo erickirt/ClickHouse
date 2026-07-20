@@ -359,6 +359,10 @@ IMergeTreeDataPart::MinMaxIndexPtr IMergeTreeDataPart::getMinMaxIndex() const
     if (minmax_idx)
         return minmax_idx;
 
+    /// Build the lazily-materialized index in the parts arena. Reloaded parts and the zero-level path
+    /// that resets a virtual minmax column to null (see MergeTreeDataWriter) first create it here.
+    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+
     if (is_temp || isEmpty())
     {
         minmax_idx = std::make_shared<MinMaxIndex>();
@@ -374,6 +378,15 @@ IMergeTreeDataPart::MinMaxIndexPtr IMergeTreeDataPart::getMinMaxIndex() const
 
 void IMergeTreeDataPart::setMinMaxIndex(MinMaxIndexPtr minmax_index) const
 {
+    /// Re-home the index into the parts arena (deep copy under the scope, then adopt), same rationale as
+    /// `setColumns`. The index is one of the larger part-lifetime metadata structures and is built outside
+    /// the arena on the insert and mutation paths.
+    if (minmax_index && JemallocMergeTreeArena::isEnabled())
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        minmax_index = std::make_shared<MinMaxIndex>(*minmax_index);
+    }
+
     std::lock_guard lock(minmax_idx_mutex);
     minmax_idx = std::move(minmax_index);
 }
@@ -2210,8 +2223,9 @@ void IMergeTreeDataPart::moveMetadataToDedicatedArena()
     reallocateByCopy(partition);
     reallocateByCopy(ttl_infos);
     reallocateByCopy(expired_columns);
-    if (auto minmax = getMinMaxIndex())
-        setMinMaxIndex(std::make_shared<MinMaxIndex>(*minmax));
+    /// The minmax index is re-homed at its population sites instead (`setMinMaxIndex`, the lazy
+    /// `getMinMaxIndex` build, and the in-place merge/update sites in MergeTask): here it is either not
+    /// yet populated (merge/mutation) or would be reset again later (zero-level virtual columns).
     if (info.isPatch())
         reallocateByCopy(source_parts_set);
 }
