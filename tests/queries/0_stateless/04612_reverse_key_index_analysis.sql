@@ -133,7 +133,7 @@ SELECT 'part without a final mark';
 DROP TABLE IF EXISTS t_nofinal;
 CREATE TABLE t_nofinal (g UInt8, r UInt8)
 ENGINE = MergeTree ORDER BY (g, r DESC)
-SETTINGS index_granularity = 3, index_granularity_bytes = 0;
+SETTINGS index_granularity = 3, index_granularity_bytes = 0, min_rows_for_wide_part = 0, min_bytes_for_wide_part = 0;
 INSERT INTO t_nofinal SELECT 1 + intDiv(number, 5), 5 - number % 5 FROM numbers(10);
 SELECT count() FROM t_nofinal WHERE g = 2 AND r = 1 SETTINGS use_lightweight_primary_key_index_analysis = 1;
 SELECT trimLeft(explain) FROM (EXPLAIN indexes = 1, actions = 0, pretty = 0 SELECT count() FROM t_nofinal WHERE g = 2 AND r = 1 SETTINGS use_lightweight_primary_key_index_analysis = 1) WHERE explain LIKE '%Condition%' OR explain LIKE '%Parts%' OR explain LIKE '%Granules%' OR explain LIKE '%Search Algorithm%';
