@@ -417,6 +417,20 @@ std::vector<DeduplicationHash> DeduplicationInfo::getDeduplicationHashes(const s
 }
 
 
+void DeduplicationInfo::prewarmDataHashes() const
+{
+    if (!original_block || !original_block->rows())
+        return;
+
+    for (size_t i = 0; i < tokens.size(); ++i)
+    {
+        if (!tokens[i].by_user.empty())
+            continue;
+        calculateDataHashColumnWise(i, *original_block);
+    }
+}
+
+
 size_t DeduplicationInfo::getCount() const
 {
     return offsets.size();

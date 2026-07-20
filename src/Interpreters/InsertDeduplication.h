@@ -93,6 +93,8 @@ public:
 
     std::vector<DeduplicationHash> getDeduplicationHashes(const std::string & partition_id, bool deduplication_enabled) const;
 
+    void prewarmDataHashes() const;
+
     size_t getCount() const;
     size_t getRows() const;
 

@@ -299,6 +299,9 @@ void ReplicatedMergeTreeSink::consume(Chunk & chunk)
     size_t total_streams = 0;
     bool support_parallel_write = false;
 
+    if (deduplication_info && deduplicate)
+        deduplication_info->prewarmDataHashes();
+
     for (auto & current_block : part_blocks)
     {
         Stopwatch watch;
