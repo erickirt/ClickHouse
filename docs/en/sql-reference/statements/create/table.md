@@ -484,6 +484,29 @@ CREATE TABLE codec_example
 ENGINE = MergeTree()
 ```
 
+#### Quantized {#quantized}
+
+<ExperimentalBadge/>
+
+`Quantized(method, dimensions[, ...])` — A codec for vector-search columns of type `Array(Float32)`, `Array(Float64)` or `Array(BFloat16)`. It stores the full-precision vectors unchanged and, alongside them, a compact *quantized code* per vector. On `MergeTree`-family tables, a top-`k` vector-search query can then scan the small codes to build a shortlist and rescore only that shortlist against the full-precision vectors, reading far fewer bytes than a full-precision scan while keeping the ranking accurate. `dimensions` is the vector length; supported `method` values are `rabitq`, `turboquant`, `int8`, `prefix` and `product`, each a different size / accuracy / distance-function trade-off.
+
+The codec is fixed at table creation and cannot be added or changed with `ALTER TABLE`. It is a `NONE`-category codec, so it cannot be chained with any other codec (not even an encryption codec such as `AES_128_GCM_SIV`). The two-stage shortlist-and-rescore path is opt-in via the `vector_search_use_quantized_codes` setting and applies only to `MergeTree`-family tables; when it is off (the default), or on non-`MergeTree` engines where the setting has no effect, the same query runs as an exact scan, so the codec never changes results. For the methods, settings, and query examples, see [Vector search with quantized codecs](/engines/table-engines/mergetree-family/annindexes#vector-search-with-quantized-codecs).
+
+```sql
+SET allow_experimental_codecs = 1;
+
+CREATE TABLE vectors
+(
+    id UInt32,
+    vec Array(Float32) CODEC(Quantized('rabitq', 1536))
+)
+ENGINE = MergeTree ORDER BY id;
+```
+
+:::note
+This codec is experimental and requires `SET allow_experimental_codecs = 1` to use.
+:::
+
 ### Encryption Codecs {#encryption-codecs}
 
 These codecs don't actually compress data, but instead encrypt data on disk. These are only available when an encryption key is specified by [encryption](/operations/server-configuration-parameters/settings#encryption) settings. Note that encryption only makes sense at the end of codec pipelines, because encrypted data usually can't be compressed in any meaningful way.
