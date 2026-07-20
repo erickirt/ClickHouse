@@ -25,12 +25,16 @@ FROM numbers(8192);
 
 SELECT '-- empty needle, index lookup';
 SET use_skip_indexes = 1;
+-- The wrong-results path is only reached when the direct read from the text index is enabled, which
+-- otherwise gets randomized by clickhouse-test. Force it on so the regression is deterministic.
+SET query_plan_direct_read_from_text_index = 1;
 SELECT count() FROM tab WHERE has(arr, '');
 SELECT count() FROM tab WHERE has(mp, '');
 SELECT count() FROM tab WHERE mapContainsKey(mp, '');
 SELECT count() FROM tab WHERE mapContainsValue(mp, '');
 SELECT count() FROM tab WHERE mapContainsKeyLike(mp, '');
 SELECT count() FROM tab WHERE mapContainsValueLike(mp, '');
+SET query_plan_direct_read_from_text_index = default;
 SET use_skip_indexes = default;
 
 SELECT '-- empty needle, no index';
