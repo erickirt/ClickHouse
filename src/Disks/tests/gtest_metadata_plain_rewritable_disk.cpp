@@ -2245,3 +2245,31 @@ TEST_F(MetadataPlainRewritableDiskTest, ConcurrentCreateUnderUnlinkFile)
     EXPECT_FALSE(metadata->existsFile("A/file"));
     EXPECT_TRUE(metadata->existsDirectory("A"));
 }
+
+TEST_F(MetadataPlainRewritableDiskTest, ConcurrentRemoveOfMoveTarget)
+{
+    auto metadata = getMetadataStorage("ConcurrentRemoveOfMoveTarget");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectory("A");
+        tx->createDirectory("B");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    /// A move whose target existed in the snapshot must keep failing
+    /// after the target is removed concurrently.
+    auto tx1 = metadata->createTransaction();
+    tx1->moveDirectory("A", "B");
+
+    {
+        auto tx2 = metadata->createTransaction();
+        tx2->removeDirectory("B");
+        tx2->commit(DB::NoCommitOptions{});
+    }
+
+    EXPECT_ANY_THROW(tx1->commit(DB::NoCommitOptions{}));
+
+    EXPECT_TRUE(metadata->existsDirectory("A"));
+    EXPECT_FALSE(metadata->existsDirectory("B"));
+}

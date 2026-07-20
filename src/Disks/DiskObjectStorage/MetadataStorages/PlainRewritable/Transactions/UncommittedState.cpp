@@ -144,7 +144,10 @@ void UncommittedState::moveDirectory(const std::string & path_from, const std::s
     }
 
     if (tx_snapshot->existsDirectory(path_to).first || tx_snapshot->existsFile(path_to))
+    {
+        useDirectory(path_to);
         return;
+    }
 
     useDirectory(path_from);
     path_resolver->recordMove(normalizePath(path_from), normalizePath(path_to));
