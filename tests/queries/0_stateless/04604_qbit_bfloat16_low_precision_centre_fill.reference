@@ -40,3 +40,5 @@ inf	-inf	inf	inf	-inf
 2	0	0
 2	0
 64	-64	64
+-- NaN policy in the mantissa-truncation regime: NaN with kept payload bit stays NaN, NaN with dropped payload -> inf
+nan	inf	nan	inf	nan	inf

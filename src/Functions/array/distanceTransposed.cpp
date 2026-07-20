@@ -784,9 +784,15 @@ private:
             ///    cell exactly when it is still zero *after masking off the sign bit* - so both `+0.0` (an all-zero word) and
             ///    `-0.0` (only the sign bit kept) stay zero; `centre_fill` lies strictly below the kept planes, so any word
             ///    outside the zero cell keeps at least one non-sign bit and is centred. The non-finite cell (all exponent bits
-            ///    set) is carved out for the same reason: `+-inf` has
-            ///    a zero kept mantissa, so OR-ing `centre_fill` would flip it to a `NaN` and change the IEEE category of a
-            ///    legitimate input; it (and any stored `NaN` payload) is left untouched so `+-inf` stays infinite.
+            ///    set) is carved out for the same reason: `+-inf` has a zero kept mantissa, so OR-ing `centre_fill` would flip it
+            ///    to a `NaN` and change the IEEE category of a legitimate input; it is left untouched so `+-inf` stays exactly
+            ///    infinite. The policy for this inherently ambiguous cell is explicit and lossy: a stored `NaN` keeps its `NaN`
+            ///    category only if at least one of its set mantissa bits survives the `precision` truncation (the truncated word
+            ///    then still has a non-zero kept mantissa and reads back as a `NaN`); a `NaN` whose payload sits entirely in the
+            ///    dropped mantissa bits truncates to the `+-inf` encoding and is indistinguishable from a genuine `+-inf` at this
+            ///    precision, so it reconstructs to `+-inf`. We preserve the canonical infinity encoding exactly rather than
+            ///    fabricate a `NaN` here, because doing so would corrupt a genuinely stored `+-inf`; either way the value stays
+            ///    non-finite.
             ///
             /// For a float at `2 <= precision <= exponent_bits` the most significant dropped bit is an *exponent* bit, so setting
             /// it is a multiplicative jump across many binades - not a usable approximation in value space, and (once squared in
@@ -827,7 +833,10 @@ private:
                     ///    non-zero negative subnormal;
                     ///  - the non-finite cell (all exponent bits set): `+-inf` has a zero kept mantissa, so OR-ing `centre_fill`
                     ///    would flip it to a `NaN` and change the IEEE category of a legitimate input. Leaving it untouched keeps
-                    ///    `+-inf` infinite (and preserves a stored `NaN` payload).
+                    ///    `+-inf` exactly infinite, and keeps a `NaN` a `NaN` whenever a set mantissa bit survives the truncation;
+                    ///    a `NaN` whose payload lies entirely in the dropped bits truncates to the `+-inf` encoding and therefore
+                    ///    reconstructs to `+-inf` (see the reconstruction-policy comment above - this cell is inherently ambiguous
+                    ///    at reduced precision, and preserving the canonical infinity avoids corrupting a genuine `+-inf`).
                     /// Only the finite, non-zero words in between are centred. `exponent_bits` is only meaningful for a float, so
                     /// this branch (and its `exponent_mask`) is guarded from the `Int8` instantiation by `is_int8` above.
                     constexpr Word non_sign_mask = static_cast<Word>(~(Word(1) << (sizeof(Word) * 8 - 1)));

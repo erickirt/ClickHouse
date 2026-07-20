@@ -137,3 +137,23 @@ WITH [100, -100, 50]::QBit(Int8, 3) AS v
 SELECT dotProductTransposed(v, [1, 0, 0]::Array(Int8), 1) AS int8_dim3_first,
        dotProductTransposed(v, [0, 1, 0]::Array(Int8), 1) AS int8_dim3_second,
        dotProductTransposed(v, [1, 1, 1]::Array(Int8), 1) AS int8_dim3_dot;
+
+-- Explicit, documented policy for the ambiguous non-finite cell in the mantissa-truncation regime. A truncated word with
+-- all exponent bits set and a zero *kept* mantissa is indistinguishable from `+-inf`: it could be a genuine `+-inf` or a
+-- `NaN` whose set mantissa bits were all dropped by the precision truncation. The reconstruction preserves the canonical
+-- infinity exactly rather than fabricate a `NaN` (which would corrupt a real `+-inf`), so:
+--   - A `NaN` keeps its `NaN` category only when a set mantissa bit survives the truncation. A canonical quiet `NaN` has
+--     its top (quiet) mantissa bit set, which is the first mantissa bit and is kept as soon as one mantissa bit is kept:
+--     precision E+2 (BFloat16/Float32 -> 10, Float64 -> 13) keeps it, so the word stays a `NaN` and the dot product is
+--     `nan`.
+--   - A `NaN` whose payload lies entirely in the dropped bits reconstructs to `+-inf`. At precision E+1 (BFloat16/Float32
+--     -> 9, Float64 -> 12) no mantissa bit is kept, so the canonical `NaN` truncates to the `+-inf` encoding and the dot
+--     product is `inf`, not `nan`. This is the reviewer's exact repro; it is intended, documented, lossy behavior, not a
+--     preserved payload.
+SELECT '-- NaN policy in the mantissa-truncation regime: NaN with kept payload bit stays NaN, NaN with dropped payload -> inf';
+SELECT dotProductTransposed([nan]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 10) AS bf16_nan_kept,
+       dotProductTransposed([nan]::QBit(BFloat16, 1), [1.0]::Array(BFloat16), 9) AS bf16_nan_dropped,
+       dotProductTransposed([nan]::QBit(Float32, 1), [1.0]::Array(Float32), 10) AS f32_nan_kept,
+       dotProductTransposed([nan]::QBit(Float32, 1), [1.0]::Array(Float32), 9) AS f32_nan_dropped,
+       dotProductTransposed([nan]::QBit(Float64, 1), [1.0]::Array(Float64), 13) AS f64_nan_kept,
+       dotProductTransposed([nan]::QBit(Float64, 1), [1.0]::Array(Float64), 12) AS f64_nan_dropped;
