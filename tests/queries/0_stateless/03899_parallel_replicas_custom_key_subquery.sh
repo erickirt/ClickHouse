@@ -37,7 +37,11 @@ for mode in 'custom_key_sampling' 'custom_key_range'; do
     # Engagement guard (the footgun in #110678): a comparison test passes vacuously if
     # custom-key mode silently does not engage. Assert per mode that the read actually ran
     # on remote replicas by counting the non-initial (remote) sub-queries in query_log.
-    query_id="03899_ck_engage_${mode}_${CLICKHOUSE_DATABASE}"
+    # Fresh per-invocation query_id (initial_query_id propagates to the remote sub-queries)
+    # plus a tight event_time bound isolate the guard from earlier runs in the same database
+    # (--test-runs, CI retries, same-day reruns cannot satisfy the count). See #110690.
+    query_id="03899_ck_engage_${mode}_${CLICKHOUSE_DATABASE}_${RANDOM}${RANDOM}"
+    start_time=$($CLICKHOUSE_CLIENT -q "SELECT now()")
     $CLICKHOUSE_CLIENT --query_id="$query_id" -q "SELECT * FROM (SELECT id, k, v FROM 03899_ck WHERE id < 20) ORDER BY k, id $(settings "$mode") FORMAT Null"
     $CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS query_log"
     echo -n "engaged remote replicas > 1: "
@@ -46,7 +50,7 @@ for mode in 'custom_key_sampling' 'custom_key_range'; do
         FROM system.query_log
         WHERE has(databases, currentDatabase()) AND initial_query_id = '$query_id'
           AND is_initial_query = 0 AND type = 'QueryFinish'
-          AND event_date >= yesterday()"
+          AND event_date >= yesterday() AND event_time >= '$start_time'"
 done
 
 $CLICKHOUSE_CLIENT -q "DROP TABLE 03899_ck"
