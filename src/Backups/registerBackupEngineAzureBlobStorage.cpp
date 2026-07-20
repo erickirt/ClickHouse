@@ -58,6 +58,7 @@ namespace
 
     String stripOneTrailingSlash(String str)
     {
+        /// Path joining consumes one trailing slash after a non-root prefix but preserves additional slashes in blob keys.
         if (str.size() > 1 && str.back() == '/' && str.find_first_not_of('/') != String::npos)
             str.pop_back();
         return str;

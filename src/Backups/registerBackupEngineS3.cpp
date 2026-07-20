@@ -74,6 +74,7 @@ namespace
 
     String stripTrailingSlashes(String str)
     {
+        /// `S3::URI` rejects repeated slashes, and path joining consumes the only valid trailing slash.
         while (str.size() > 1 && str.back() == '/')
             str.pop_back();
         return str;
