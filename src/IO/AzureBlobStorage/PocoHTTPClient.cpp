@@ -353,7 +353,7 @@ std::unique_ptr<Azure::Core::Http::RawResponse> PocoAzureHTTPClient::makeRequest
         /// transport did that). Without it the request body is sent with no framing at all,
         /// and Azure responds with `411 Length Required`. Body-less requests get a `NullBodyStream`,
         /// so mirror the curl transport and skip only the methods that never carry a body.
-        if (method != "GET" && method != "HEAD" && method != "DELETE"
+        if (method != "GET" && method != "HEAD"
             && !poco_request.has(Poco::Net::HTTPRequest::CONTENT_LENGTH))
         {
             if (const auto * request_body_stream = request.GetBodyStream())
