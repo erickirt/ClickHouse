@@ -104,7 +104,6 @@ private:
     const std::shared_ptr<PlainRewritableMetrics> metrics;
 
     bool written = false;
-    /// Set when the path already existed and was rewritten; used to restore the entry on undo.
     std::optional<FileRemoteInfo> previous_info;
 
 public:

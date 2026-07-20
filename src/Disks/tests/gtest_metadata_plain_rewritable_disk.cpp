@@ -643,8 +643,6 @@ TEST_F(MetadataPlainRewritableDiskTest, RewriteFileUpdatesSize)
     EXPECT_EQ(metadata->getFileSize("A/file"), 4u);
     EXPECT_EQ(metadata->getFileSize("root_file"), 4u);
 
-    /// Rewrite the same paths with content of a different size: the recorded sizes must be
-    /// updated, because readers take the file size from the metadata tree.
     {
         auto tx = metadata->createTransaction();
         size_t file_size = writeObject(object_storage, tx->generateObjectKeyForPath("A/file").serialize(), "Hello world!");
