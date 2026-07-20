@@ -105,29 +105,36 @@ std::unordered_map<String, GeoColumnMetadata> parseGeoMetadataEncoding(const std
     return geo_columns;
 }
 
+/// The whitespace class the WKT grammar (boost::geometry::read_wkt, used by readWKT) treats as
+/// token separators: space, tab, newline, carriage return. Not isWhitespaceASCII, which also
+/// includes \f and \v that read_wkt rejects.
+inline bool isWKTSeparator(char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r';
+}
+
+inline void skipWKTSeparators(ReadBuffer & in_buffer)
+{
+    char ch = 0;
+    while (in_buffer.peek(ch) && isWKTSeparator(ch))
+        in_buffer.ignore();
+}
+
 inline CartesianPoint parseWKTPoint(ReadBuffer & in_buffer, bool precise_float_parsing)
 {
     Float64 x = 0;
     Float64 y = 0;
-    char ch = 0;
-    while (true)
-    {
-        if (!in_buffer.peek(ch))
-            break;
-        if (ch != ' ')
-            break;
-        in_buffer.ignore();
-    }
+    skipWKTSeparators(in_buffer);
     if (precise_float_parsing)
     {
         tryReadFloatTextPrecise(x, in_buffer);
-        in_buffer.ignore();
+        skipWKTSeparators(in_buffer);
         readFloatTextPrecise(y, in_buffer);
     }
     else
     {
         tryReadFloatImpreciseForCompatibility(x, in_buffer);
-        in_buffer.ignore();
+        skipWKTSeparators(in_buffer);
         readFloatImpreciseForCompatibility(y, in_buffer);
     }
     return {x, y};
@@ -235,28 +242,21 @@ inline MultiPolygon<CartesianPoint> parseWKTMultiPolygon(ReadBuffer & in_buffer,
 
 GeometricObject parseWKTFormat(ReadBuffer & in_buffer, bool precise_float_parsing)
 {
+    /// The type keyword is a single WKT token: skip leading separators, then read the keyword up
+    /// to the first separator or '('. readOpenBracket consumes any separators before '('. This
+    /// matches readWKT (boost::geometry::read_wkt), which treats ' \t\n\r' as token separators.
     std::string type;
-    bool seen_type_char = false;
+    skipWKTSeparators(in_buffer);
     while (true)
     {
         char current_symbol = 0;
         if (!in_buffer.peek(current_symbol))
             break;
-        if (current_symbol == '(')
+        if (current_symbol == '(' || isWKTSeparator(current_symbol))
             break;
-        /// Skip leading whitespace before the type keyword, consistent with the WKT grammar and readWKT.
-        if (!seen_type_char && (current_symbol == ' ' || current_symbol == '\t' || current_symbol == '\n' || current_symbol == '\r'))
-        {
-            in_buffer.ignore();
-            continue;
-        }
-        seen_type_char = true;
         type.push_back(current_symbol);
         in_buffer.ignore();
     }
-
-    while (!type.empty() && type.back() == ' ')
-        type.pop_back();
 
     if (type == "POINT")
     {

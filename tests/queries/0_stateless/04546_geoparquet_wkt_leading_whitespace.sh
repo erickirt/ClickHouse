@@ -2,11 +2,15 @@
 # Tags: no-fasttest
 #       ^ no Parquet support in fasttest
 #
-# Regression test: parseWKTFormat (ArrowGeoTypes.cpp) must skip leading
-# whitespace before the geometry type keyword, matching the SQL readWKT
-# dispatcher and the WKT grammar. Before the fix a WKT-encoded GeoParquet
-# value like '  POINT (1 2)' produced BAD_ARGUMENTS (type "  POINT" matched
-# nothing). Sibling of issue #110700 (readWKT).
+# Regression test: parseWKTFormat (ArrowGeoTypes.cpp) must accept the same
+# ' \t\n\r' whitespace class as the SQL readWKT dispatcher and the WKT grammar
+# (boost::geometry::read_wkt tokenizes on " \n\t\r"). Two parts:
+#   1. Leading whitespace before the type keyword ('  POINT (1 2)') used to give
+#      BAD_ARGUMENTS (type "  POINT" matched nothing). Sibling of issue #110700.
+#   2. Interior whitespace between the type keyword and '(', and between/around
+#      coordinates ('POINT\t(1 2)', 'POINT(1  2)', 'LINESTRING(1 1,\n2 2)') used
+#      to throw BAD_ARGUMENTS / CANNOT_PARSE_NUMBER, or silently drop a coordinate,
+#      while readWKT parsed them. Both are now consistent.
 
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -50,9 +54,27 @@ write_geoparquet(
     ],
     geometry_types=[],
 )
+
+# Interior whitespace: tab / newline / crlf between the type keyword and '(',
+# multiple spaces or tab between coordinates, newline after a coordinate comma.
+write_geoparquet(
+    out + "/wkt_interior.parquet",
+    ids=[1, 2, 3, 4, 5],
+    wkts=[
+        "POINT\t(1 2)",
+        "POINT\r\n(1 2)",
+        "POINT(1  2)",
+        "POINT(1\t2)",
+        "LINESTRING(1 1,\n2 2)",
+    ],
+    geometry_types=[],
+)
 PYEOF
 
 GEO_SETTINGS="--input_format_parquet_use_native_reader_v3=1 --input_format_parquet_allow_geoparquet_parser=1"
 
 $CLICKHOUSE_LOCAL $GEO_SETTINGS -q \
     "SELECT id, variantType(geom), geom FROM file('$TMP_DIR/wkt_ws.parquet', Parquet) ORDER BY id"
+
+$CLICKHOUSE_LOCAL $GEO_SETTINGS -q \
+    "SELECT id, variantType(geom), geom FROM file('$TMP_DIR/wkt_interior.parquet', Parquet) ORDER BY id"
