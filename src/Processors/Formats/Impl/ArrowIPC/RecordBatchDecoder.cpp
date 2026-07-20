@@ -673,22 +673,32 @@ ColumnPtr RecordBatchDecoder::decodeInner(const ArrowField & field, size_t rows,
         {
             /// Map is List<Struct<key, value>>: read the list offsets, then the entries struct.
             const Slice offsets_slice = nextBuffer();
-            checkBufferSize(offsets_slice, requiredBytes(rows + 1, sizeof(Int32)), "map offsets");
+            /// A zero-row map may omit its offsets buffer entirely (Apache Arrow Java < 19.0.0 emits a
+            /// 0-byte offsets buffer for an empty nested Map). No offset is read for zero rows.
+            /// Validate the buffer BEFORE allocating `offsets_col`: this bounds `rows` to the actual
+            /// buffer size, so a forged-huge `rows` cannot drive an allocation before being rejected.
+            if (rows > 0)
+                checkBufferSize(offsets_slice, requiredBytes(rows + 1, sizeof(Int32)), "map offsets");
             const auto * arrow_offsets = reinterpret_cast<const Int32 *>(offsets_slice.ptr);
-            const Int64 base = arrow_offsets[0];
-            if (base < 0)
-                throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC map has a negative first offset {}", base);
             auto offsets_col = ColumnUInt64::create(rows);
             auto & offs = offsets_col->getData();
-            /// Offsets must be monotonic non-decreasing: compare each with the previous one, not only `base`.
-            Int64 prev = base;
-            for (size_t i = 0; i < rows; ++i)
+            Int64 base = 0;
+            Int64 prev = 0;
+            if (rows > 0)
             {
-                const Int64 end = arrow_offsets[i + 1];
-                if (end < prev)
-                    throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC map has non-monotonic offsets");
-                offs[i] = static_cast<UInt64>(end - base);
-                prev = end;
+                base = arrow_offsets[0];
+                if (base < 0)
+                    throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC map has a negative first offset {}", base);
+                /// Offsets must be monotonic non-decreasing: compare each with the previous one, not only `base`.
+                prev = base;
+                for (size_t i = 0; i < rows; ++i)
+                {
+                    const Int64 end = arrow_offsets[i + 1];
+                    if (end < prev)
+                        throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC map has non-monotonic offsets");
+                    offs[i] = static_cast<UInt64>(end - base);
+                    prev = end;
+                }
             }
 
             /// The entries struct's (key, value) get their hints from a synthetic Tuple(keyType, valueType)
@@ -728,7 +738,13 @@ ColumnPtr RecordBatchDecoder::readOffsetsAndChild(
 {
     const Slice offsets_slice = nextBuffer();
     const size_t offset_size = large ? sizeof(Int64) : sizeof(Int32);
-    checkBufferSize(offsets_slice, requiredBytes(rows + 1, offset_size), "list offsets");
+
+    /// A zero-row list may omit its offsets buffer entirely (Apache Arrow Java < 19.0.0 emits a 0-byte
+    /// offsets buffer for an empty nested List). No offset is read for zero rows, so require no bytes.
+    /// Validate the buffer BEFORE allocating `offsets_col`: this bounds `rows` to the actual buffer
+    /// size, so a forged-huge `rows` cannot drive an `rows * 8` byte allocation before being rejected.
+    if (rows > 0)
+        checkBufferSize(offsets_slice, requiredBytes(rows + 1, offset_size), "list offsets");
 
     auto read_offset = [&](size_t i) -> Int64
     {
@@ -737,21 +753,26 @@ ColumnPtr RecordBatchDecoder::readOffsetsAndChild(
         return reinterpret_cast<const Int32 *>(offsets_slice.ptr)[i];
     };
 
-    const Int64 base = read_offset(0);
-    /// The first offset must be non-negative; the per-row offsets below are stored relative to it.
-    if (base < 0)
-        throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC list has a negative first offset {}", base);
     auto offsets_col = ColumnUInt64::create(rows);
     auto & offs = offsets_col->getData();
-    /// Offsets must be monotonic non-decreasing: compare each with the previous one, not only `base`.
-    Int64 prev = base;
-    for (size_t i = 0; i < rows; ++i)
+    Int64 base = 0;
+    Int64 prev = 0;
+    if (rows > 0)
     {
-        const Int64 end = read_offset(i + 1);
-        if (end < prev)
-            throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC list has non-monotonic offsets");
-        offs[i] = static_cast<UInt64>(end - base);
-        prev = end;
+        base = read_offset(0);
+        /// The first offset must be non-negative; the per-row offsets below are stored relative to it.
+        if (base < 0)
+            throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC list has a negative first offset {}", base);
+        /// Offsets must be monotonic non-decreasing: compare each with the previous one, not only `base`.
+        prev = base;
+        for (size_t i = 0; i < rows; ++i)
+        {
+            const Int64 end = read_offset(i + 1);
+            if (end < prev)
+                throw Exception(ErrorCodes::INCORRECT_DATA, "Arrow IPC list has non-monotonic offsets");
+            offs[i] = static_cast<UInt64>(end - base);
+            prev = end;
+        }
     }
 
     /// `target_hint`/`path` are this list's element hint and dotted name, threaded for the recursive
