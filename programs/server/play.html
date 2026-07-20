@@ -4249,7 +4249,11 @@ let activation_num = 0;
 /// whether a tab's live state (still-running launch, or completed snapshot) truly belongs to the
 /// run a mid-run (`result: null`) history entry was written for, instead of inferring "same run"
 /// from matching query/params (which both a rerun and a selection defeat). The completed snapshot
-/// carries it as `tab.result.run_id`, and every history entry as `state.run_id`.
+/// carries it as `tab.result.run_id`, and every history entry as `state.run_id`. Those persisted
+/// ids outlive the page (browser history, `IndexedDB` tab snapshots), so the counter must too:
+/// `persist` stores it in the meta record and `reconcileStartup` re-seeds it above every persisted
+/// `run_id` it can see — otherwise the first launch after a reload would start back at `1` and
+/// could alias an old mid-run entry's identity.
 let run_seq = 0;
 
 /// While a tab activation is rebuilding the active tab's parameter inputs, this holds the
@@ -7762,6 +7766,7 @@ async function persist() {
             tabOrder: tabs.map(t => t.id),
             tabSeq: tabSeq,
             tabTitleSeq: tabTitleSeq,
+            runSeq: run_seq,
         });
     } catch (e) {
         /// Ignore persistence failures (private mode, quota, etc.).
@@ -8349,7 +8354,10 @@ window.onpopstate = function(event) {
     /// editor text into the entry but only the selected statement into `tab.result.query`, and a
     /// rerun of the identical text produces a NEW run — both of which a text comparison would
     /// mis-handle (blanking a completed background partial run, or attaching a later rerun to an
-    /// older entry's URL). If the tab has since launched or completed a DIFFERENT run — jump straight
+    /// older entry's URL). The match stays exact across reloads because startup re-seeds `run_seq`
+    /// above every persisted `run_id` (see `reconcileStartup`), so a post-reload launch can never
+    /// reuse the identity of an entry written before the reload. If the tab has since launched or
+    /// completed a DIFFERENT run — jump straight
     /// back to an old mid-run entry (history menu / `history.go`) after the tab moved on — the ids no
     /// longer match, so fall through to plain time-travel and render the entry itself.
     ///
@@ -11065,8 +11073,24 @@ async function reconcileStartup() {
         if (loaded.meta) {
             tabSeq = Math.max(tabSeq, loaded.meta.tabSeq || 0);
             tabTitleSeq = Math.max(tabTitleSeq, loaded.meta.tabTitleSeq || 0);
+            run_seq = Math.max(run_seq, loaded.meta.runSeq || 0);
         }
     }
+
+    /// Re-seed the run-identity counter above every persisted `run_id` (see `run_seq`): the ids
+    /// live on in saved tab snapshots and in `history.state` across reloads, so a fresh page-local
+    /// counter would hand a post-reload launch an identity an old mid-run history entry already
+    /// carries, letting `window.onpopstate`'s null-entry shortcut adopt the newer run's result for
+    /// the older entry. The meta record's `runSeq` (restored above) is the primary source; the
+    /// per-snapshot maximum covers meta records written before the counter was persisted, and the
+    /// current `history.state` covers a reload whose `IndexedDB` state is gone (cleared site data,
+    /// private mode) while the browser-history entry survived. Deeper history entries are not
+    /// enumerable, but their ids never exceed the counter persisted after the run that wrote them.
+    for (const t of savedTabs)
+        if (t.result && t.result.run_id)
+            run_seq = Math.max(run_seq, t.result.run_id);
+    if (history.state && history.state.run_id)
+        run_seq = Math.max(run_seq, history.state.run_id);
 
     /// A bare `?tab=Name` URL is a stale echo of a blank tab this load just pruned — and so NOT
     /// authoritative — only when the reloaded history entry still describes one of those pruned
