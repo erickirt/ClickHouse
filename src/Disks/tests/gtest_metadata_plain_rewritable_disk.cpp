@@ -2216,3 +2216,32 @@ TEST_F(MetadataPlainRewritableDiskTest, SnapshotDecisionPreservedOnConcurrentCha
     EXPECT_ANY_THROW(tx1->commit(DB::NoCommitOptions{}));
     EXPECT_TRUE(metadata->existsDirectory("X"));
 }
+
+TEST_F(MetadataPlainRewritableDiskTest, ConcurrentCreateUnderUnlinkFile)
+{
+    auto metadata = getMetadataStorage("ConcurrentCreateUnderUnlinkFile");
+    auto object_storage = getObjectStorage("ConcurrentCreateUnderUnlinkFile");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectory("A");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    /// The unlink removes the file as of the commit time: a file committed
+    /// concurrently serializes before the unlink and gets removed by it.
+    auto tx1 = metadata->createTransaction();
+    tx1->unlinkFile("A/file", /*if_exists=*/false, /*should_remove_objects=*/true);
+
+    {
+        auto tx2 = metadata->createTransaction();
+        size_t size = writeObject(object_storage, tx2->generateObjectKeyForPath("A/file").serialize(), "New content");
+        tx2->createMetadataFile("A/file", {StoredObject("A/file", "file", size)});
+        tx2->commit(DB::NoCommitOptions{});
+    }
+
+    tx1->commit(DB::NoCommitOptions{});
+
+    EXPECT_FALSE(metadata->existsFile("A/file"));
+    EXPECT_TRUE(metadata->existsDirectory("A"));
+}
