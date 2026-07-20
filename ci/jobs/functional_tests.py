@@ -103,12 +103,20 @@ def run_tests(
     if "--no-zookeeper" not in extra_args:
         extra_args += " --zookeeper"
     # Remove --report-logs-stats, it hides sanitizer errors in def reportLogStats(args): clickhouse_execute(args, "SYSTEM FLUSH LOGS")
-    # During bugfix validation the same job runs several build types, so the
-    # memory limit must follow the binary under test (`build_type`) rather than
-    # the job name. Otherwise an `amd_asan_ubsan` run gets the 5 GiB default and
-    # a master-side memory-limit failure would be inverted as a reproduced bug.
+    # Sanitizer client binaries carry ~500 MiB RSS each (ASan redzones +
+    # quarantine, TSan/MSan shadow); a per-test cgroup holding ~10 concurrent
+    # clients needs 10 GiB, not the 5 GiB non-sanitizer default, or it OOM-kills
+    # them mid-test. Match ALL sanitizer builds via `SANITIZERS`, not the literal
+    # `asan_ubsan` substring: the `tsan` / `msan` lanes (and the private
+    # `amd_ubsan` lane, which runs the ASan+UBSan binary) are sanitizer builds
+    # too but their names don't contain `asan_ubsan`, so the old check under-sized
+    # them. During bugfix validation the same job runs several build types, so the
+    # limit must follow the binary under test (`build_type`) rather than the job
+    # name, or a master-side memory-limit failure would be inverted as a bug.
     limit_source = build_type if build_type is not None else Info().job_name
-    memory_limit = 10 * 2**30 if "asan_ubsan" in limit_source else 5 * 2**30
+    memory_limit = (
+        10 * 2**30 if any(san in limit_source for san in SANITIZERS) else 5 * 2**30
+    )
     # Hand the time budget to `clickhouse-test` itself via `--global_time_limit`
     # so it stops *gracefully* between tests and exits with
     # `GLOBAL_TIME_LIMIT_EXIT_CODE` - reported as a benign "time limit reached"
@@ -1209,7 +1217,9 @@ def main():
             )
         elif failed_tests:
             memory_limit = (
-                10 * 2**30 if "asan_ubsan" in Info().job_name else 5 * 2**30
+                10 * 2**30
+                if any(san in Info().job_name for san in SANITIZERS)
+                else 5 * 2**30
             )
             diag_command = (
                 f"clickhouse-test --testname --check-zookeeper-session --hung-check"
