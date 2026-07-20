@@ -843,10 +843,16 @@ static StoragePtr create(const StorageFactory::Arguments & args)
         /// The codec-valued MergeTree settings accept an arbitrary codec expression and are applied without
         /// going through the experimental-codec gate that column codecs and `TTL ... RECOMPRESS` use, so an
         /// experimental codec (e.g. `ZXC`) could slip in through `SETTINGS default_compression_codec = ...`.
-        /// Enforce `allow_experimental_codecs` here, at CREATE time only: the load path (server restart,
-        /// `ATTACH`, `SECONDARY_CREATE`) skips the check so that existing tables remain loadable, mirroring
-        /// how the column codec gate is skipped on `ATTACH`.
-        if (args.mode <= LoadingStrictnessLevel::CREATE && !local_settings[Setting::allow_experimental_codecs])
+        /// Enforce `allow_experimental_codecs` for freshly introduced definitions only. A full-definition
+        /// `ATTACH TABLE t UUID '...' (...) ENGINE = MergeTree ...` is CREATE-like user input that also runs
+        /// under `LoadingStrictnessLevel::ATTACH`, so it must be checked too. Definitions read back from
+        /// metadata stored on this server (short `ATTACH TABLE t`, `ATTACH DATABASE`, server restart) are
+        /// marked with `attach_short_syntax` (see `createTableFromAST`) and skip the check, as does
+        /// `SECONDARY_CREATE` (DDL replay in `Replicated` databases, `RESTORE`), so that existing tables
+        /// remain loadable.
+        const bool is_fresh_definition = args.mode <= LoadingStrictnessLevel::CREATE
+            || (args.mode == LoadingStrictnessLevel::ATTACH && !args.query.attach_short_syntax);
+        if (is_fresh_definition && !local_settings[Setting::allow_experimental_codecs])
         {
             if (const auto & codec = (*storage_settings)[MergeTreeSetting::marks_compression_codec].value; !codec.empty())
                 CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
