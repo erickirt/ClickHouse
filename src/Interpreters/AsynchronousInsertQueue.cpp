@@ -1095,7 +1095,8 @@ try
         const InsertData::EntryPtr & entry,
         const String & parsing_exception,
         size_t num_rows,
-        size_t num_bytes) mutable
+        size_t num_bytes,
+        bool is_flush_error = false) mutable
     {
         /// Track per-entry stats for reporting back to clients on success.
         if (parsing_exception.empty())
@@ -1138,7 +1139,12 @@ try
         /// If there was a parsing error,
         /// the entry won't be flushed anyway,
         /// so add the log element immediately.
-        if (!elem.exception.empty())
+        if (is_flush_error)
+        {
+            /// Per-entry conversion failure at flush: log immediately as `FlushError` with a real `flush_time`.
+            appendElementsToLogSafe(*async_insert_log, {std::move(elem)}, std::chrono::system_clock::now(), parsing_exception);
+        }
+        else if (!elem.exception.empty())
         {
             elem.status = AsynchronousInsertLogElement::ParsingError;
             async_insert_log->add(std::move(elem));
@@ -1400,10 +1406,11 @@ Chunk AsynchronousInsertQueue::processPreprocessedEntries(
         }
         catch (...)
         {
-            /// Isolate the failure to this entry, mirroring the parsing path (processEntriesWithParsing)
-            auto exception = getCurrentExceptionMessage(/*with_stacktrace=*/ false);
-            LOG_ERROR(logger, "Failed conversion for insert query id {}. {}", entry->query_id, exception);
-            add_to_async_insert_log(entry, exception, /*num_rows=*/ 0, block->bytes());
+            /// Per-entry isolation: log as `FlushError` (not `ParsingError`) with a real
+            /// `flush_time`, via the `is_flush_error` path in `add_to_async_insert_log`.
+            const auto exception_msg = getCurrentExceptionMessage(/*with_stacktrace=*/ false);
+            LOG_ERROR(logger, "Failed conversion for insert query id {}. {}", entry->query_id, exception_msg);
+            add_to_async_insert_log(entry, exception_msg, /*num_rows=*/ 0, block->bytes(), /*is_flush_error=*/ true);
             entry->finish(std::current_exception());
             entry->resetChunk();
             continue;
