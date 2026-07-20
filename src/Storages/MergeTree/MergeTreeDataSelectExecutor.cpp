@@ -2216,10 +2216,10 @@ MarkRanges MergeTreeDataSelectExecutor::markRangesFromPKRange(
                     else
                     {
                         /// Key column not loaded in the in-memory index: unknown at both boundaries.
-                        /// The (-inf, +inf) pair makes the decomposition take the whole universe at
-                        /// this column, a safe over-approximation regardless of direction.
-                        index_left[i] = NEGATIVE_INFINITY;
-                        index_right[i] = POSITIVE_INFINITY;
+                        /// The (start, end) extreme pair makes the decomposition take the whole
+                        /// universe at this column, a safe over-approximation.
+                        index_left[i] = key_order.physicalStartExtreme(i);
+                        index_right[i] = key_order.physicalEndExtreme(i);
                     }
                 }
             }
@@ -2234,8 +2234,8 @@ MarkRanges MergeTreeDataSelectExecutor::markRangesFromPKRange(
                     }
                     else
                     {
-                        index_left[i] = NEGATIVE_INFINITY;
-                        index_right[i] = POSITIVE_INFINITY;
+                        index_left[i] = key_order.physicalStartExtreme(i);
+                        index_right[i] = key_order.physicalEndExtreme(i);
                     }
                 }
             }

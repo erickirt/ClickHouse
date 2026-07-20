@@ -34,6 +34,12 @@ public:
         return isReversed(column) ? FieldRef(NEGATIVE_INFINITY) : FieldRef(POSITIVE_INFINITY);
     }
 
+    /// Mirror of physicalEndExtreme: the stand-in for an unknown value on the physical-start side.
+    FieldRef physicalStartExtreme(size_t column) const
+    {
+        return isReversed(column) ? FieldRef(POSITIVE_INFINITY) : FieldRef(NEGATIVE_INFINITY);
+    }
+
     /// Whether NULLs are stored physically last on this column: they are on an ascending column and
     /// physically first on a descending one.
     /// mark range starting with a NULL known to be NULL up to the end of the part.
