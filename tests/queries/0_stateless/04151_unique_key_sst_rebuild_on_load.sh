@@ -29,6 +29,9 @@
 #    load fails for retry. Inducing a real transient (FD/OOM) failure in a
 #    stateless test is not practical, so that path is covered by code structure +
 #    reasoning, not asserted here.
+# 4. Readonly startup (`table_readonly = 1`) still validates but cannot
+#    remove/rebuild/detach: a corrupt SST fails the ATTACH (fail closed) with
+#    the file left untouched; a valid SST loads fine readonly.
 
 CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
@@ -141,3 +144,32 @@ ${CLICKHOUSE_CLIENT} --query "SELECT id, v FROM uk_rebuild_load ORDER BY id"
 rm -f "$ONE_SST"
 
 ${CLICKHOUSE_CLIENT} --query "DROP TABLE uk_rebuild_load"
+
+# --- Readonly startup: with `table_readonly = 1` the load still VALIDATES the
+# SST (read-only I/O) but cannot remove/rebuild/detach (all writes). A corrupt
+# SST must fail the ATTACH (fail closed, error names the readonly cause) and the
+# file must be left untouched; restoring the valid SST lets the readonly ATTACH
+# succeed. Previously the readonly gate skipped validation entirely (fail-open).
+${CLICKHOUSE_CLIENT} --query "DROP TABLE IF EXISTS uk_ro"
+${CLICKHOUSE_CLIENT} --query "
+    SET allow_experimental_unique_key = 1;
+    CREATE TABLE uk_ro (id UInt64, v String)
+    ENGINE = MergeTree UNIQUE KEY (id) ORDER BY (id)
+    SETTINGS min_rows_for_wide_part = 1, min_bytes_for_wide_part = 1;
+"
+${CLICKHOUSE_CLIENT} --query "INSERT INTO uk_ro VALUES (1, 'x'), (2, 'y')"
+${CLICKHOUSE_CLIENT} --query "ALTER TABLE uk_ro MODIFY SETTING table_readonly = 1"
+RO_PATH=$(${CLICKHOUSE_CLIENT} --query "SELECT path FROM system.parts WHERE database = currentDatabase() AND table = 'uk_ro' AND active")
+${CLICKHOUSE_CLIENT} --query "DETACH TABLE uk_ro"
+cp "${RO_PATH}unique_key_index.sst" "${RO_PATH}unique_key_index.sst.keep"
+: > "${RO_PATH}unique_key_index.sst"
+echo "readonly_attach_with_corrupt_sst_fails"
+${CLICKHOUSE_CLIENT} --query "ATTACH TABLE uk_ro" 2>&1 | grep -q "UNIQUE_KEY_DENSE_INDEX_UNREADABLE" && echo "yes" || echo "no"
+echo "corrupt_sst_left_in_place"
+[ -f "${RO_PATH}unique_key_index.sst" ] && echo "yes" || echo "no"
+mv "${RO_PATH}unique_key_index.sst.keep" "${RO_PATH}unique_key_index.sst"
+${CLICKHOUSE_CLIENT} --query "ATTACH TABLE uk_ro"
+echo "readonly_attach_after_restore"
+${CLICKHOUSE_CLIENT} --query "SELECT count() FROM uk_ro"
+${CLICKHOUSE_CLIENT} --query "ALTER TABLE uk_ro MODIFY SETTING table_readonly = 0"
+${CLICKHOUSE_CLIENT} --query "DROP TABLE uk_ro"

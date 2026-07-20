@@ -32,3 +32,9 @@ rows_after_wrongcount_attach
 10	a
 20	b
 30	c
+readonly_attach_with_corrupt_sst_fails
+yes
+corrupt_sst_left_in_place
+yes
+readonly_attach_after_restore
+2

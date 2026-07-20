@@ -193,7 +193,7 @@ void UniqueKeyDenseIndexOps::sweepOrphans(const DataPartsLock & /*part_lock*/)
 }
 
 
-void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part) const
+void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part, bool storage_is_writable) const
 {
     if (!part || part->rows_count == 0)
         return;
@@ -228,6 +228,14 @@ void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part) co
             case DenseIndexSSTStatus::Valid:
                 return;
             case DenseIndexSSTStatus::Corrupt:
+                /// On readonly storage neither removal nor rebuild (both writes)
+                /// is possible; fail the load closed instead of activating an
+                /// unprobeable part. The file is left untouched.
+                if (!storage_is_writable)
+                    throw Exception(ErrorCodes::UNIQUE_KEY_DENSE_INDEX_UNREADABLE,
+                        "ensureValidDenseIndex: part {} has a corrupt `{}` ({}) and the "
+                        "storage is readonly, so it cannot be rebuilt; failing the load",
+                        part->name, SSTIndexWriter::FILE_NAME, reason);
                 LOG_WARNING(log, "ensureValidDenseIndex: part {} has a corrupt `{}` ({}); "
                             "removing and rebuilding",
                             part->name, SSTIndexWriter::FILE_NAME, reason);
@@ -249,6 +257,15 @@ void UniqueKeyDenseIndexOps::ensureValidDenseIndex(MutableDataPartPtr & part) co
         return;
 #endif
     }
+
+    /// From here on a rebuild (a write) is required. On readonly storage fail
+    /// the load closed — the part must not activate without a probeable index,
+    /// and detaching (a rename) is not possible either.
+    if (!storage_is_writable)
+        throw Exception(ErrorCodes::UNIQUE_KEY_DENSE_INDEX_UNREADABLE,
+            "ensureValidDenseIndex: part {} is missing `{}` and the storage is "
+            "readonly, so it cannot be rebuilt; failing the load",
+            part->name, SSTIndexWriter::FILE_NAME);
 
     /// Fail closed if any UK column is missing from the part: a non-empty UK
     /// part with no dense index would let duplicate keys slip past the probe.
@@ -320,7 +337,9 @@ void UniqueKeyDenseIndexOps::onPartAttach(MutableDataPartPtr & part) const
                     SST_STAGING_FILE_NAME, part->name);
         storage.removeFileIfExists(SST_STAGING_FILE_NAME);
     }
-    ensureValidDenseIndex(part);
+    /// Attach paths write (the part was just moved/created), so the storage is
+    /// writable by construction.
+    ensureValidDenseIndex(part, /*storage_is_writable=*/true);
 }
 
 

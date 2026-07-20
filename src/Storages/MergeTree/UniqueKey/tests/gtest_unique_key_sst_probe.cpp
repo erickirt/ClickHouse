@@ -50,6 +50,11 @@ namespace ProfileEvents
     extern const Event UniqueKeyLoadTimeSSTRebuildMicroseconds;
 }
 
+namespace DB::ErrorCodes
+{
+    extern const int SUPPORT_IS_DISABLED;
+}
+
 namespace
 {
     struct SSTFixture : public ::testing::Test
@@ -481,6 +486,43 @@ TEST_F(SSTFixture, WriteFromBlockConstUKColumnAccepted)
         *storage, block, Names{"k"}, /*permutation=*/nullptr, /*max_encoded_size=*/256, getContext().context);
     EXPECT_EQ(written, 1u);
     EXPECT_TRUE(std::filesystem::exists(finalPath()));
+}
+
+/// A duplicate UNIQUE KEY inside one block must be rejected with the defined
+/// SUPPORT_IS_DISABLED (interim stance: no INSERT-time dedup yet), not surface
+/// RocksDB's raw non-increasing-key error. Covers the sorted writer directly
+/// and the unsorted writer via `write` with a non-UK sort key.
+TEST_F(SSTFixture, DuplicateKeyInBlockRejected)
+{
+    auto block = makeUInt64Block({7, 7});
+    try
+    {
+        SSTIndexWriter::writeFromBlock(
+            *storage, block, Names{"k"}, /*permutation=*/nullptr, /*max_encoded_size=*/256, getContext().context);
+        FAIL() << "expected SUPPORT_IS_DISABLED for a duplicate UNIQUE KEY in the block";
+    }
+    catch (const DB::Exception & e)
+    {
+        EXPECT_EQ(e.code(), DB::ErrorCodes::SUPPORT_IS_DISABLED);
+        EXPECT_NE(e.message().find("duplicate UNIQUE KEY"), std::string::npos) << e.message();
+    }
+    EXPECT_FALSE(std::filesystem::exists(finalPath()));
+
+    /// Unsorted path: duplicates not adjacent in the input; the writer's UK sort
+    /// makes them adjacent before the check.
+    auto block_unsorted = makeUInt64Block({9, 3, 9});
+    try
+    {
+        SSTIndexWriter::write(
+            *storage, block_unsorted, /*uk_names=*/Names{"k"}, /*sort_names=*/Names{"other"},
+            /*sort_reverse_flags=*/{}, /*permutation=*/nullptr, /*max_encoded_size=*/256, getContext().context);
+        FAIL() << "expected SUPPORT_IS_DISABLED for a duplicate UNIQUE KEY (unsorted path)";
+    }
+    catch (const DB::Exception & e)
+    {
+        EXPECT_EQ(e.code(), DB::ErrorCodes::SUPPORT_IS_DISABLED);
+    }
+    EXPECT_FALSE(std::filesystem::exists(finalPath()));
 }
 
 /// DESC UK prefix: `SSTIndexWriter::write` must fall back to the unsorted

@@ -2752,11 +2752,17 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks, std::optional<std::un
     /// corrupt/truncated SST that survived because it carries no checksums.txt
     /// entry). The active set is captured here under `part_lock`; the I/O-heavy
     /// per-part validate+rebuild runs below, after the lock is released.
+    ///
+    /// The sweep deletes files, so it stays gated on writability. Validation is
+    /// read-only I/O and runs regardless: a UK part with a missing/corrupt SST
+    /// on readonly storage must fail the load, not activate unprobeable. (UK
+    /// tables require local disks per the storage-policy guard, so static/web
+    /// UK parts are practically unreachable — still fail closed, not skip.)
     MutableDataPartsVector active_uk_parts_to_rebuild;
-    if (!is_static_storage && !all_disks_are_readonly && !is_table_readonly)
-    {
+    const bool uk_storage_is_writable = !is_static_storage && !all_disks_are_readonly && !is_table_readonly;
+    if (uk_storage_is_writable)
         unique_key_dense_index_ops->sweepOrphans(part_lock);
-
+    {
         auto metadata_snapshot_for_rebuild = getInMemoryMetadataPtr(getContext(), /*bypass_metadata_cache=*/false);
         if (metadata_snapshot_for_rebuild && metadata_snapshot_for_rebuild->hasUniqueKey())
         {
@@ -2781,13 +2787,13 @@ void MergeTreeData::loadDataParts(bool skip_sanity_checks, std::optional<std::un
     {
         try
         {
-            unique_key_dense_index_ops->ensureValidDenseIndex(p);
+            unique_key_dense_index_ops->ensureValidDenseIndex(p, uk_storage_is_writable);
         }
         catch (...)
         {
-            /// A transient failure to VALIDATE an existing SST (I/O error, not
-            /// corruption) must not destroy a healthy part: `ensureValidDenseIndex`
-            /// leaves the file in place and raises UNIQUE_KEY_DENSE_INDEX_UNREADABLE.
+            /// UNIQUE_KEY_DENSE_INDEX_UNREADABLE marks the cases where the part
+            /// must not be touched: a transient validation failure (file may be
+            /// healthy) or readonly storage (removal/rebuild/detach are writes).
             /// Propagate it so the load fails and a retry/restart can recover.
             if (getCurrentExceptionCode() == ErrorCodes::UNIQUE_KEY_DENSE_INDEX_UNREADABLE)
                 throw;
