@@ -488,9 +488,15 @@ ENGINE = MergeTree()
 
 <ExperimentalBadge/>
 
-`Quantized(method, dimensions[, ...])` — A codec for vector-search columns of type `Array(Float32)`, `Array(Float64)` or `Array(BFloat16)`. It stores the full-precision vectors unchanged and, alongside them, a compact *quantized code* per vector. On `MergeTree`-family tables, enabling [`vector_search_use_quantized_codes`](/operations/settings/settings#vector_search_use_quantized_codes) lets a top-`k` vector-search query scan the quantized codes to build a shortlist and rescore only that shortlist against the full-precision vectors. This two-stage approximate neighbor search reads fewer bytes than a normal full-precision scan but may reduce recall. `dimensions` is the vector length; supported `method` values are `rabitq`, `turboquant`, `int8`, `prefix` and `product`, each a different size / accuracy / distance-function trade-off.
+`Quantized(method, dimensions[, ...])` — A specialized codec to support approximate vector search on columns of type `Array(Float32)`, `Array(Float64)` or `Array(BFloat16)`.
+It stores the original, full-precision vectors, as well as a compact *quantized code* per vector alongside.
+On `MergeTree`-family tables, vector search queries with setting [`vector_search_use_quantized_codes`](/operations/settings/settings#vector_search_use_quantized_codes) will scan the quantized codes to build a shortlist and subsequently rescore the results against the full-precision vectors.
+This two-stage search reads fewer bytes than a normal full-precision scan at the cost of lower recall.
+`dimensions` is the vector length; supported `method` values are `rabitq`, `turboquant`, `int8`, `prefix` and `product`, each a different size / accuracy / distance-function trade-off.
 
-The codec can only be set in `CREATE TABLE`; it cannot be added, removed, or changed through `ALTER TABLE`, including with `ADD COLUMN ... CODEC(Quantized(...))`. It cannot be chained with any other codec (not even an encryption codec such as `AES_128_GCM_SIV`). The two-stage shortlist-and-rescore path applies only to `MergeTree`-family tables; when `vector_search_use_quantized_codes` is off (the default), or on non-`MergeTree` engines where the setting has no effect, the same query runs as an exact scan, so the codec never changes results. For the methods, settings, and query examples, see [Vector search with quantized codecs](/engines/table-engines/mergetree-family/annindexes#vector-search-with-quantized-codecs).
+The codec can only be set in `CREATE TABLE`, it cannot be added, removed, or changed through `ALTER TABLE`, including with `ADD COLUMN ... CODEC(Quantized(...))`.
+It cannot be chained with any other codec (not even an encryption codec such as `AES_128_GCM_SIV`).
+For more details, see [Vector search with quantized codecs](/engines/table-engines/mergetree-family/annindexes#vector-search-with-quantized-codecs).
 
 ```sql
 SET allow_experimental_codecs = 1;
