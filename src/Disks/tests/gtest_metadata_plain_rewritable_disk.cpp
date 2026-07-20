@@ -2135,3 +2135,67 @@ TEST_F(MetadataPlainRewritableDiskTest, TransactionViewAfterMove)
     EXPECT_TRUE(metadata->existsDirectory("B"));
     EXPECT_EQ(generateObjectKeyPrefixForDirectoryPath(metadata, "B/"), a_prefix);
 }
+
+TEST_F(MetadataPlainRewritableDiskTest, ConcurrentCreateUnderMovedDirectory)
+{
+    auto metadata = getMetadataStorage("ConcurrentCreateUnderMovedDirectory");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectory("A");
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    /// The move relocates the subtree as of the commit time: a directory committed
+    /// concurrently under the source serializes before the move and travels with it.
+    auto tx1 = metadata->createTransaction();
+    tx1->moveDirectory("A", "B");
+
+    {
+        auto tx2 = metadata->createTransaction();
+        tx2->createDirectory("A/C");
+        tx2->commit(DB::NoCommitOptions{});
+    }
+
+    tx1->commit(DB::NoCommitOptions{});
+
+    EXPECT_FALSE(metadata->existsDirectory("A"));
+    EXPECT_TRUE(metadata->existsDirectory("B"));
+    EXPECT_TRUE(metadata->existsDirectory("B/C"));
+
+    metadata = restartMetadataStorage("ConcurrentCreateUnderMovedDirectory");
+    EXPECT_FALSE(metadata->existsDirectory("A"));
+    EXPECT_TRUE(metadata->existsDirectory("B/C"));
+}
+
+TEST_F(MetadataPlainRewritableDiskTest, ConcurrentRecreateUnderUnlinkFile)
+{
+    auto metadata = getMetadataStorage("ConcurrentRecreateUnderUnlinkFile");
+    auto object_storage = getObjectStorage("ConcurrentRecreateUnderUnlinkFile");
+
+    {
+        auto tx = metadata->createTransaction();
+        tx->createDirectory("A");
+        size_t size = writeObject(object_storage, tx->generateObjectKeyForPath("A/file").serialize(), "Old content");
+        tx->createMetadataFile("A/file", {StoredObject("A/file", "file", size)});
+        tx->commit(DB::NoCommitOptions{});
+    }
+
+    /// The unlink must not remove a file this transaction never observed.
+    auto tx1 = metadata->createTransaction();
+    tx1->unlinkFile("A/file", /*if_exists=*/true, /*should_remove_objects=*/true);
+
+    {
+        auto tx2 = metadata->createTransaction();
+        tx2->removeRecursive("A", /*should_remove_blob=*/nullptr);
+        tx2->createDirectory("A");
+        size_t size = writeObject(object_storage, tx2->generateObjectKeyForPath("A/file").serialize(), "New content");
+        tx2->createMetadataFile("A/file", {StoredObject("A/file", "file", size)});
+        tx2->commit(DB::NoCommitOptions{});
+    }
+
+    EXPECT_ANY_THROW(tx1->commit(DB::NoCommitOptions{}));
+
+    EXPECT_TRUE(metadata->existsFile("A/file"));
+    EXPECT_EQ(readObject(object_storage, metadata->getStorageObjects("A/file").front().remote_path), "New content");
+}
