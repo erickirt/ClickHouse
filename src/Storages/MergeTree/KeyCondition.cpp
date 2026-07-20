@@ -30,6 +30,7 @@
 #include <Common/MortonUtils.h>
 #include <Common/typeid_cast.h>
 #include <DataTypes/DataTypeArray.h>
+#include <DataTypes/DataTypeFixedString.h>
 #include <DataTypes/DataTypeTuple.h>
 #include <Columns/ColumnArray.h>
 #include <Columns/ColumnSet.h>
@@ -4062,6 +4063,26 @@ bool KeyCondition::extractAtomFromTree(const RPNBuilderTreeNode & node, const Bu
 
                     if (!should_keep_original_string_constant)
                     {
+                        /// A `FixedString(N)` constant is stored as a `String` Field of N bytes,
+                        /// right-padded with '\0', and compared zero-padded, so it can match more than
+                        /// the single padded value while `convertFieldToType` below builds a point
+                        /// range from the padding:
+                        ///   - against a `String` key it matches the family `value` + trailing '\0'*
+                        ///     (`'abc'`, `'abc\0'`, ...), not a point;
+                        ///   - against a narrower `FixedString(M)` key (N > M) it keeps the N padded
+                        ///     bytes, which no longer map into the key domain.
+                        /// Either way the point range is unsound and prunes matching granules, so
+                        /// decline index analysis (fall back to a full scan). A wider-or-equal
+                        /// `FixedString(M)` key (M >= N) pads the constant into exactly one key value,
+                        /// so pruning stays correct and is left untouched.
+                        if (WhichDataType(const_type).isFixedString() && isStringOrFixedString(key_expr_type_not_null))
+                        {
+                            const size_t const_bytes = const_value.safeGet<String>().size();
+                            const auto * fixed_key = typeid_cast<const DataTypeFixedString *>(key_expr_type_not_null.get());
+                            if (!fixed_key || fixed_key->getN() < const_bytes)
+                                return false;
+                        }
+
                         const_value = convertFieldToType(const_value, *key_expr_type_not_null);
                         if (const_value.isNull())
                             return false;
