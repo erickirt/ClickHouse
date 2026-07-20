@@ -170,8 +170,8 @@ namespace
         {
             throw Exception(
                 ErrorCodes::NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
-                "Backup AzureBlobStorage requires 3 or 5 arguments: connection string/url, container, path, "
-                "[account name], [account key]");
+                "Backup AzureBlobStorage requires 3 arguments (connection string/url, container, path) or 5 arguments "
+                "(storage account URL, container, path, account name, account key)");
         }
 
         if (hasRegisteredArchiveFileExtension(location.blob_path))
