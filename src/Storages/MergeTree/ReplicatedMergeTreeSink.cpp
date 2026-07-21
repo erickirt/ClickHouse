@@ -300,7 +300,13 @@ void ReplicatedMergeTreeSink::consume(Chunk & chunk)
     bool support_parallel_write = false;
 
     if (deduplication_info && deduplicate)
+    {
+        /// Time the prewarm under DuplicationElapsedMicroseconds so the metric still reflects
+        /// the total deduplication CPU after moving the one-off hash walk out of the
+        /// per-partition loop below (the per-partition deduplicateSelf is timed the same way).
+        ProfileEventTimeIncrement<Microseconds> duplication_elapsed(ProfileEvents::DuplicationElapsedMicroseconds);
         deduplication_info->prewarmDataHashes();
+    }
 
     for (auto & current_block : part_blocks)
     {

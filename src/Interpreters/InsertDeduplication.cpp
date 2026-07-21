@@ -18,6 +18,7 @@
 #include <Common/PODArray.h>
 #include <Common/ErrorCodes.h>
 #include <Common/SipHash.h>
+#include <Common/HashTable/Hash.h>
 #include <Common/Logger.h>
 #include <Common/logger_useful.h>
 #include <Interpreters/StorageIDMaybeEmpty.h>
@@ -164,12 +165,20 @@ std::set<size_t> DeduplicationInfo::filterSelf(const String & partition_id) cons
     if (getCount() <= 1)
         return {};
 
-    auto block_id_to_offsets = buildBlockIdToOffsetsMap(partition_id);
+    /// Hot per-partition path. Fetch the block columns once and group offsets by their raw
+    /// UInt128 unified hash. The block-id string is "{partition_id}_{hi}_{lo}" and partition_id
+    /// is constant here, so keying on the UInt128 is equivalent to keying on the formatted
+    /// block-id string while avoiding one ~60-char string allocation + string hashing per token.
+    const Columns cols = original_block ? original_block->getColumns() : Columns{};
+
+    std::unordered_map<UInt128, std::vector<size_t>, UInt128Hash> hash_to_offsets;
+    for (size_t offset = 0; offset < offsets.size(); ++offset)
+        hash_to_offsets[getBlockUnifiedHash(offset, partition_id, cols).hash].push_back(offset);
 
     std::set<size_t> fitered_offsets;
     /// fitered_offsets will contain all but first offsets for each block id
     /// so that only first occurrence of each block id will remain
-    for (auto & [_, block_offsets] : block_id_to_offsets)
+    for (auto & [_, block_offsets] : hash_to_offsets)
     {
         if (block_offsets.size() > 1)
             fitered_offsets.insert(block_offsets.begin() + 1, block_offsets.end());
@@ -323,16 +332,12 @@ DeduplicationInfo::FilterResult DeduplicationInfo::filterImpl(const std::set<siz
 }
 
 
-UInt128 DeduplicationInfo::calculateDataHashColumnWise(size_t offset, const Block & block) const
+UInt128 DeduplicationInfo::calculateDataHashColumnWise(size_t offset, const Columns & cols) const
 {
     chassert(offset < offsets.size());
 
     if (tokens[offset].data_hash_batch.has_value())
         return tokens[offset].data_hash_batch.value();
-
-    chassert(block.rows() == getRows());
-
-    auto cols = block.getColumns();
 
     SipHash hash;
     size_t begin = getTokenBegin(offset);
@@ -345,7 +350,7 @@ UInt128 DeduplicationInfo::calculateDataHashColumnWise(size_t offset, const Bloc
 }
 
 
-DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const std::string & partition_id) const
+DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const std::string & partition_id, const Columns & cols) const
 {
     // when there is no user token, compute the full column-wise hash of the data
     // this hash is used for deduplication of sync and async inserts in a unified manner
@@ -359,7 +364,7 @@ DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const st
     }
     else
     {
-        auto data_hash = calculateDataHashColumnWise(offset, *original_block);
+        auto data_hash = calculateDataHashColumnWise(offset, cols);
         extension = fmt::format("{}_{}", data_hash.items[0], data_hash.items[1]);
     }
 
@@ -387,10 +392,14 @@ DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const st
 
 std::unordered_map<std::string, std::vector<size_t>> DeduplicationInfo::buildBlockIdToOffsetsMap(const std::string & partition_id) const
 {
+    /// Fetch the block columns once here instead of on every getBlockUnifiedHash ->
+    /// calculateDataHashColumnWise call (each Block::getColumns() ref-counts all columns).
+    const Columns cols = original_block ? original_block->getColumns() : Columns{};
+
     std::unordered_map<std::string, std::vector<size_t>> result;
 
     for (size_t offset = 0; offset < offsets.size(); ++offset)
-        result[getBlockUnifiedHash(offset, partition_id).getBlockId()].push_back(offset);
+        result[getBlockUnifiedHash(offset, partition_id, cols).getBlockId()].push_back(offset);
 
     return result;
 }
@@ -404,8 +413,10 @@ std::vector<DeduplicationHash> DeduplicationInfo::getDeduplicationHashes(const s
     std::vector<DeduplicationHash> result;
     result.reserve(offsets.size());
 
+    const Columns cols = original_block ? original_block->getColumns() : Columns{};
+
     for (size_t offset = 0; offset < offsets.size(); ++offset)
-        result.push_back(getBlockUnifiedHash(offset, partition_id));
+        result.push_back(getBlockUnifiedHash(offset, partition_id, cols));
 
     /// Release block columns now that all hashes are cached.
     /// The block data is no longer needed — hashes are stored in tokens.
@@ -422,11 +433,14 @@ void DeduplicationInfo::prewarmDataHashes() const
     if (!original_block || !original_block->rows())
         return;
 
+    /// Fetch the block columns once for the whole warm-up pass.
+    const Columns cols = original_block->getColumns();
+
     for (size_t i = 0; i < tokens.size(); ++i)
     {
         if (!tokens[i].by_user.empty())
             continue;
-        calculateDataHashColumnWise(i, *original_block);
+        calculateDataHashColumnWise(i, cols);
     }
 }
 

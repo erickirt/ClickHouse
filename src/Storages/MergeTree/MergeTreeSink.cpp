@@ -116,7 +116,20 @@ void MergeTreeSink::consume(Chunk & chunk)
     auto process_list_element = context->getProcessListElement();
 
     if (deduplication_info && deduplicate)
+    {
+        /// Preserve the pre-loop interrupt point that used to be the first checkTimeLimit()
+        /// inside the partition loop: a killed or timed-out insert should be noticed before
+        /// the full O(N) prewarm hash pass, not after it.
+        if (process_list_element)
+            process_list_element->checkTimeLimit();
+
+        /// Warm the data hashes once here: the per-partition clones below share this object's
+        /// tokens via the copy ctor, so they reuse the cache instead of rehashing per partition.
+        /// Time it under DuplicationElapsedMicroseconds like the per-partition dedup below, so
+        /// the profile event still reflects the total deduplication CPU.
+        ProfileEventTimeIncrement<Microseconds> duplication_elapsed(ProfileEvents::DuplicationElapsedMicroseconds);
         deduplication_info->prewarmDataHashes();
+    }
 
     for (auto & current_block : part_blocks)
     {

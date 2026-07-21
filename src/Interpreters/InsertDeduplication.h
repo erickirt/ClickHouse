@@ -7,6 +7,7 @@
 #include <Interpreters/Context_fwd.h>
 #include <Interpreters/StorageIDMaybeEmpty.h>
 #include <Core/Block_fwd.h>
+#include <Columns/IColumn_fwd.h>
 
 #include <Common/Logger.h>
 #include <base/defines.h>
@@ -118,8 +119,8 @@ private:
     explicit DeduplicationInfo(bool async_insert_);
 
     /// Column-major hash: for each column, hash the row range. Used by the unified path.
-    UInt128 calculateDataHashColumnWise(size_t offset, const Block & block) const;
-    DeduplicationHash getBlockUnifiedHash(size_t offset, const std::string & partition_) const;
+    UInt128 calculateDataHashColumnWise(size_t offset, const Columns & cols) const;
+    DeduplicationHash getBlockUnifiedHash(size_t offset, const std::string & partition_, const Columns & cols) const;
 
 
     Ptr cloneSelfFilterImpl() const;
