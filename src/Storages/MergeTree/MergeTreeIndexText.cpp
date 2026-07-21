@@ -1636,13 +1636,8 @@ void MergeTreeIndexTextGranuleBuilder::addDocument(std::string_view document)
 
 void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 token_position)
 {
-    /// Drop before inserting so dropped tokens allocate nothing (bounds `NOT IN` memory); still counted
-    /// toward the segment-flush threshold.
     if (postprocessor_drop_filter && postprocessor_drop_filter->shouldDrop(token))
-    {
-        ++num_processed_tokens;
         return;
-    }
 
     bool inserted = false;
     TokenToPostingsBuilderMap::LookupResult it;
