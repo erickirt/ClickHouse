@@ -44,8 +44,13 @@ static void assertOutputNotInsideInput(
     fs::path out;
     if (!disk_in->isRemote() && !disk_out->isRemote())
     {
-        in = (fs::path(disk_in->getPath()) / normalizePath(input_dir)).lexically_normal();
-        out = (fs::path(disk_out->getPath()) / normalizePath(output_dir)).lexically_normal();
+        /// A local disk root is not guaranteed absolute: `clickhouse disks` roots `default`/`local` at
+        /// absolute paths, but the standalone clickhouse-packed-io builds DiskLocal("./"), so a relative
+        /// root mixed with an absolute operand (e.g. `-i /abs/part -o ./out`) would leave one side
+        /// relative and the other absolute, and lexically_relative returns empty for such a pair. Anchor
+        /// both against the current directory so they are comparable and reflect where files actually land.
+        in = fs::absolute(fs::path(disk_in->getPath()) / normalizePath(input_dir)).lexically_normal();
+        out = fs::absolute(fs::path(disk_out->getPath()) / normalizePath(output_dir)).lexically_normal();
     }
     else
     {
