@@ -5,8 +5,9 @@
 -- are collected. Covers the DROP COLUMN validator and the DELETE/UPDATE mutation paths.
 
 SET mutations_sync = 2;
--- The bug and its fix are in the new analyzer's Planner (`collectSets`); the old analyzer takes
--- a different path where the correlated subquery below yields a plain UNKNOWN_IDENTIFIER instead.
+-- The bug and its fix are in the Analyzer's Planner (`collectSets`); with `enable_analyzer = 0`
+-- the query takes a different path where the correlated subquery below yields a plain
+-- UNKNOWN_IDENTIFIER instead.
 SET enable_analyzer = 1;
 
 DROP TABLE IF EXISTS t_alias_in_set;
