@@ -61,7 +61,7 @@ $CLICKHOUSE_CLIENT -q "CREATE TABLE values_decimal (x Decimal32(2)) ENGINE = Mem
 $CLICKHOUSE_CLIENT -q "CREATE TABLE values_decimal_retry (x Decimal32(2)) ENGINE = Memory"
 
 ${CLICKHOUSE_CURL} -sS \
-    "${CLICKHOUSE_URL}&query_id=${fallback_query_id}&async_insert=1&wait_for_async_insert=1&input_format_values_deduce_templates_of_expressions=0" \
+    "${CLICKHOUSE_URL}&query_id=${fallback_query_id}&async_insert=1&wait_for_async_insert=1" \
     --data-binary "
         INSERT INTO values_fallback (id, target_tags, raw_json_as_string, raw_json_as_map, activity_type)
         VALUES (1 + 0, {'3f37a58df98ba6e2': ['aaaa']}, '{}', {}, 'ADMINISTRATION'),

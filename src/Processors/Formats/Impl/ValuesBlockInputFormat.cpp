@@ -266,7 +266,18 @@ bool ValuesBlockInputFormat::tryParseExpressionUsingTemplate(MutableColumnPtr & 
 
     /// Try to parse expression using template if one was successfully deduced while parsing the first row
     const auto & settings = context->getSettingsRef();
-    if (templates[column_idx]->parseExpression(*buf, *token_iterator, format_settings, settings))
+    bool parsed;
+    try
+    {
+        Exception::SuppressErrorCodesScope suppress_error_codes;
+        parsed = templates[column_idx]->parseExpression(*buf, *token_iterator, format_settings, settings);
+    }
+    catch (Exception & e)
+    {
+        e.recordToSystemErrors();
+        throw;
+    }
+    if (parsed)
     {
         ++rows_parsed_using_template[column_idx];
         return true;
@@ -556,11 +567,14 @@ bool ValuesBlockInputFormat::parseExpression(IColumn & column, size_t column_idx
                 ++attempts_to_deduce_template[column_idx];
 
             buf->rollbackToCheckpoint();
-            if (templates[column_idx]->parseExpression(*buf, *ti_start, format_settings, settings))
             {
-                ++rows_parsed_using_template[column_idx];
-                parser_type_for_column[column_idx] = ParserType::BatchTemplate;
-                return true;
+                Exception::SuppressErrorCodesScope suppress_error_codes;
+                if (templates[column_idx]->parseExpression(*buf, *ti_start, format_settings, settings))
+                {
+                    ++rows_parsed_using_template[column_idx];
+                    parser_type_for_column[column_idx] = ParserType::BatchTemplate;
+                    return true;
+                }
             }
         }
         catch (...)
@@ -570,7 +584,17 @@ bool ValuesBlockInputFormat::parseExpression(IColumn & column, size_t column_idx
         if (!format_settings.values.interpret_expressions)
         {
             if (exception)
-                std::rethrow_exception(exception);
+            {
+                try
+                {
+                    std::rethrow_exception(exception);
+                }
+                catch (Exception & e)
+                {
+                    e.recordToSystemErrors();
+                    throw;
+                }
+            }
             else
             {
                 buf->rollbackToCheckpoint();
