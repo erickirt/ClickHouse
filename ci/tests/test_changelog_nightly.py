@@ -482,14 +482,15 @@ def test_verify_edit_deletion_needs_revert(scratch_repo):
             fd.write(dropped_both)
         error = m.verify_edit("26.7", base_sha)
         assert "disappeared" in error and "111111" in error
-    # An unresolvable revert (no `Reverts owner/repo#N` marker) falls back to
-    # licensing one arbitrary deletion.
+    # An unresolvable revert (no `Reverts owner/repo#N` marker or a failed
+    # lookup) grants no deletion credit: fail closed.
     with mock.patch.object(
-        m, "resolve_reverted_originals", return_value=(set(), 1)
+        m, "resolve_reverted_originals", return_value=(set(), ["111130"])
     ):
         with open(m.CHANGELOG_FILE, "w") as fd:
             fd.write(dropped_bar)
-        assert m.verify_edit("26.7", base_sha) is None
+        error = m.verify_edit("26.7", base_sha)
+        assert "could not be resolved" in error and "111112" in error
 
 
 def test_revert_entry_detection():

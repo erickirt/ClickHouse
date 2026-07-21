@@ -311,11 +311,11 @@ def raw_strict_prs_and_reverts(text):
 def resolve_reverted_originals(revert_prs):
     """Map revert PRs to the PRs they revert, via the `Reverts owner/repo#N`
     line GitHub puts into revert PR bodies. Returns (originals, unresolved):
-    a deletion is bound to a resolved original; each unresolved revert (a
-    manual revert without the marker, or a failed lookup) keeps licensing
-    one arbitrary deletion instead."""
+    unresolved reverts (a manual revert without the marker, or a failed
+    lookup) grant no deletion credit — the caller fails closed on any
+    disappearance they cannot bind to a resolved original."""
     originals = set()
-    unresolved = 0
+    unresolved = []
     for pr in revert_prs:
         body = Shell.get_output(
             f"gh pr view {pr} --repo {shlex.quote(Info().repo_name)} "
@@ -325,7 +325,7 @@ def resolve_reverted_originals(revert_prs):
         if found:
             originals.update(found)
         else:
-            unresolved += 1
+            unresolved.append(pr)
     return originals, unresolved
 
 
@@ -593,11 +593,17 @@ def verify_edit(version, base_sha, pre_untracked=frozenset()):
     if disappeared:
         originals, unresolved = resolve_reverted_originals(revert_prs)
         unmatched = disappeared - originals
-        if len(unmatched) > unresolved:
+        if unmatched:
             return (
                 f"Entries disappeared in the edit without a matching revert "
                 f"({sorted(unmatched)}); the raw block's reverts resolve to "
-                f"{sorted(originals) or 'nothing'} plus {unresolved} unresolved"
+                f"{sorted(originals) or 'nothing'}"
+                + (
+                    f", and reverts {unresolved} could not be resolved "
+                    f"(no `Reverts owner/repo#N` marker or failed lookup)"
+                    if unresolved
+                    else ""
+                )
             )
     _, old_tail = split_at_first_released_section(old_text, anchor)
     _, new_tail = split_at_first_released_section(text, anchor)
