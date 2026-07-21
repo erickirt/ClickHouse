@@ -28,10 +28,12 @@ CREATE TABLE m107946 ENGINE = Merge(currentDatabase(), '^d107946_(1|4)$');
 -- replica over the classic protocol, which cannot deserialize distributed-plan steps (Code 47).
 -- distributed_plan_max_rows_to_broadcast = 0 forces shuffle aggregation and bucketed reads, so the
 -- child plan deterministically contains exchanges.
+-- distributed_plan_default_shuffle_join_bucket_count is pinned > 1: with 1 bucket the broken path
+-- is not exercised.
 SET make_distributed_plan = 1, enable_parallel_replicas = 0, distributed_plan_execute_locally = 1,
     use_statistics = 1, distributed_plan_optimize_exchanges = 1, enable_join_runtime_filters = 0,
     max_rows_to_group_by = 0, prefer_localhost_replica = 1, distributed_plan_max_rows_to_broadcast = 0,
-    explain_query_plan_default = 'legacy';
+    distributed_plan_default_shuffle_join_bucket_count = 8, explain_query_plan_default = 'legacy';
 
 -- The outer plan stays single-stage: the children aggregate up to the mergeable state themselves,
 -- so there are no exchanges above ReadFromMerge. Each child plan under it carries a single layer

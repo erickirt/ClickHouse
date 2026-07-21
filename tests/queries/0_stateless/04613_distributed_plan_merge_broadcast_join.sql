@@ -25,12 +25,14 @@ CREATE TABLE merge04613 ENGINE = Merge(currentDatabase(), '^join04613$');
 
 -- distributed_plan_max_rows_to_broadcast = 1000 pins the join strategy: the small side (5 rows) is
 -- broadcast, the big side (100000 rows) gets a bucketed read. query_plan_join_swap_table = 0 keeps
--- the small table on the broadcast side. The rest is pinned for the same reasons as in
+-- the small table on the broadcast side. distributed_plan_default_shuffle_join_bucket_count > 1
+-- pins the number of broadcast copies. The rest is pinned for the same reasons as in
 -- 04367_distributed_plan_merge_scatter_multishard.
 SET make_distributed_plan = 1, enable_parallel_replicas = 0, distributed_plan_execute_locally = 1,
     use_statistics = 1, distributed_plan_optimize_exchanges = 1, enable_join_runtime_filters = 0,
     max_rows_to_group_by = 0, prefer_localhost_replica = 1, distributed_plan_max_rows_to_broadcast = 1000,
-    query_plan_join_swap_table = 0, explain_query_plan_default = 'legacy';
+    distributed_plan_default_shuffle_join_bucket_count = 8, query_plan_join_swap_table = 0,
+    explain_query_plan_default = 'legacy';
 
 -- The view's plan is also the plan every Merge child builds: the small side is broadcast to every
 -- join bucket. If this shape changes, the queries below may stop covering the broadcast path.
