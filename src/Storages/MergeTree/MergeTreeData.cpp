@@ -11227,7 +11227,12 @@ StorageMetadataPtr MergeTreeData::getPatchPartMetadata(const ColumnsDescription 
 
     auto & metadata_snapshot = patch_parts_metadata_cache[patch_partition_id];
     if (!metadata_snapshot)
+    {
+        /// This snapshot is cached per patch partition for the table's lifetime, so build it in the
+        /// dedicated arena like the rest of the per-table metadata.
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
         metadata_snapshot = DB::getPatchPartMetadata(patch_part_desc, local_context);
+    }
 
     return metadata_snapshot;
 }
