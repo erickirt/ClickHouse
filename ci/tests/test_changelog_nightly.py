@@ -354,6 +354,40 @@ def test_verify_edit_rejects_agent_commit_and_reset_recovers(scratch_repo):
     assert m.RAW_BEGIN_PREFIX in open(m.CHANGELOG_FILE).read()
 
 
+def test_verify_edit_rejects_created_files_and_cleanup_removes_them(scratch_repo):
+    """Untracked files created by the editing agent are rejected and removed;
+    files that existed before the edit are left alone."""
+    m.checkout_branch(m._branch("26.7"), False)
+    _make_generate_commit()
+    with open("preexisting.txt", "w") as fd:
+        fd.write("not the agent's")
+    base_sha = m._sha("HEAD")
+    pre = m._untracked_files()
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(mini_edited())
+    with open("agent_notes.md", "w") as fd:
+        fd.write("scratch")
+    error = m.verify_edit("26.7", base_sha, pre)
+    assert "created files" in error and "agent_notes.md" in error
+    m._reset_worktree(base_sha, pre)
+    assert not os.path.exists("agent_notes.md")
+    assert os.path.exists("preexisting.txt")
+    # With no new files the same edit passes.
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(mini_edited())
+    assert m.verify_edit("26.7", base_sha, pre) is None
+
+
+def test_ci_tmp_is_gitignored():
+    """_untracked_files relies on the job's scratch space being ignored."""
+    root = os.path.join(os.path.dirname(__file__), "../..")
+    res = subprocess.run(
+        ["git", "-C", root, "check-ignore", "-q", "ci/tmp/anything"],
+        check=False,
+    )
+    assert res.returncode == 0
+
+
 def test_cycle_skip_reason():
     open_pr = [("1", "OPEN")]
     closed = [("1", "CLOSED")]

@@ -284,11 +284,26 @@ def compose_on_master(master_text, version, toc_line, raw_blocks, section):
     return text
 
 
-def _reset_worktree(base_sha):
-    """Restore the branch and all tracked files to the given commit
+def _untracked_files():
+    """Untracked, not-ignored files (the gitignored ci/tmp scratch space is
+    excluded, so the job's own temporary files never show up here)."""
+    return set(
+        Shell.get_output(
+            "git ls-files --others --exclude-standard", strict=True
+        ).split()
+    )
+
+
+def _reset_worktree(base_sha, pre_untracked=None):
+    """Restore the branch and all tracked files to the given commit, and
+    remove untracked files that appeared since `pre_untracked` was snapshot
     (fail-closed cleanup after a bad edit attempt, including one where the
-    editing agent created commits of its own)."""
+    editing agent created commits or new files of its own)."""
     Shell.check(f"git reset --hard {base_sha}", verbose=True, strict=True)
+    if pre_untracked is not None:
+        for path in sorted(_untracked_files() - pre_untracked):
+            print(f"Removing file left behind by the editing agent: {path}")
+            os.unlink(path)
 
 
 def _read_changelog():
@@ -452,7 +467,7 @@ The `gh` CLI is authenticated; use `gh pr view <N> --json title,body` when the s
 """
 
 
-def verify_edit(version, base_sha):
+def verify_edit(version, base_sha, pre_untracked=frozenset()):
     """Fail-closed checks after the editing agent ran, all against the
     pre-edit generate commit `base_sha` rather than a mutable HEAD (the agent
     has git access, and an agent-made commit must not bypass the checks).
@@ -462,6 +477,9 @@ def verify_edit(version, base_sha):
     changed = Shell.get_output(f"git diff --name-only {base_sha}", strict=True).split()
     if changed != [CHANGELOG_FILE]:
         return f"Unexpected working tree changes after edit: {changed or 'none'}"
+    created = _untracked_files() - pre_untracked
+    if created:
+        return f"The editing agent created files: {sorted(created)}"
     text = _read_changelog()
     anchor = _anchor_id(version)
     if RAW_BEGIN_PREFIX in text or RAW_END in text:
@@ -512,13 +530,14 @@ def edit_raw_entries(version):
     # The generate commit the edit must be based on; every verification and
     # cleanup is pinned to this SHA, not to HEAD, which the agent can move.
     base_sha = _sha("HEAD")
+    pre_untracked = _untracked_files()
     last_error = None
     for attempt in range(1, MAX_EDIT_ATTEMPTS + 1):
         # Full reset to the generate commit: a failed attempt may have left
-        # changes beyond CHANGELOG.md or even commits (both are verify_edit
-        # failure modes), and they must not leak into the next attempt or the
-        # next processed version.
-        _reset_worktree(base_sha)
+        # changes beyond CHANGELOG.md, new files, or even commits (all are
+        # verify_edit failure modes), and they must not leak into the next
+        # attempt or the next processed version.
+        _reset_worktree(base_sha, pre_untracked)
         # The GitHub App token expires after an hour and an editing attempt
         # can run long; refresh so the agent's `gh pr view` calls work.
         GHAuth.auth_from_settings()
@@ -548,7 +567,7 @@ def edit_raw_entries(version):
             last_error = f"{type(e).__name__}: {e}"
             traceback.print_exc()
         if not last_error:
-            last_error = verify_edit(version, base_sha)
+            last_error = verify_edit(version, base_sha, pre_untracked)
         if not last_error:
             break
         print(
@@ -558,7 +577,7 @@ def edit_raw_entries(version):
             time.sleep(min(2**attempt, 60))
 
     if last_error:
-        _reset_worktree(base_sha)
+        _reset_worktree(base_sha, pre_untracked)
         raise RuntimeError(
             f"Editing failed after {MAX_EDIT_ATTEMPTS} attempts: {last_error}. "
             f"The raw entries stay committed and will be edited by the next run."
@@ -702,7 +721,7 @@ def process_version(version, master_version, results):
     from_ref = determine_from_ref(version, branch, exists)
 
     ok = True
-    if exists and is_current:
+    if exists:
         ok = _step(
             results,
             f"{version}: reconcile with master",
