@@ -165,20 +165,10 @@ std::set<size_t> DeduplicationInfo::filterSelf(const String & partition_id) cons
     if (getCount() <= 1)
         return {};
 
-    /// Hot per-partition path. Fetch the block columns once and group offsets by their raw
-    /// UInt128 unified hash. The block-id string is "{partition_id}_{hi}_{lo}" and partition_id
-    /// is constant here, so keying on the UInt128 is equivalent to keying on the formatted
-    /// block-id string while avoiding one ~60-char string allocation + string hashing per token.
-    const Columns cols = original_block ? original_block->getColumns() : Columns{};
-
-    std::unordered_map<UInt128, std::vector<size_t>, UInt128Hash> hash_to_offsets;
-    for (size_t offset = 0; offset < offsets.size(); ++offset)
-        hash_to_offsets[getBlockUnifiedHash(offset, partition_id, cols).hash].push_back(offset);
-
     std::set<size_t> fitered_offsets;
     /// fitered_offsets will contain all but first offsets for each block id
     /// so that only first occurrence of each block id will remain
-    for (auto & [_, block_offsets] : hash_to_offsets)
+    for (const auto & [_, block_offsets] : buildOffsetsMapImpl(partition_id))
     {
         if (block_offsets.size() > 1)
             fitered_offsets.insert(block_offsets.begin() + 1, block_offsets.end());
@@ -390,16 +380,38 @@ DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const st
 }
 
 
-std::unordered_map<std::string, std::vector<size_t>> DeduplicationInfo::buildBlockIdToOffsetsMap(const std::string & partition_id) const
+std::vector<std::pair<UInt128, std::vector<size_t>>> DeduplicationInfo::buildOffsetsMapImpl(const std::string & partition_id) const
 {
     /// Fetch the block columns once here instead of on every getBlockUnifiedHash ->
     /// calculateDataHashColumnWise call (each Block::getColumns() ref-counts all columns).
+    /// Group token offsets by their unified UInt128 hash, preserving first-seen order.
     const Columns cols = original_block ? original_block->getColumns() : Columns{};
 
-    std::unordered_map<std::string, std::vector<size_t>> result;
+    std::vector<std::pair<UInt128, std::vector<size_t>>> result;
+    std::unordered_map<UInt128, size_t, UInt128Hash> hash_to_pos;
 
     for (size_t offset = 0; offset < offsets.size(); ++offset)
-        result[getBlockUnifiedHash(offset, partition_id, cols).getBlockId()].push_back(offset);
+    {
+        const UInt128 hash = getBlockUnifiedHash(offset, partition_id, cols).hash;
+        auto [it, inserted] = hash_to_pos.try_emplace(hash, result.size());
+        if (inserted)
+            result.emplace_back(hash, std::vector<size_t>{});
+        result[it->second].second.push_back(offset);
+    }
+
+    return result;
+}
+
+
+std::unordered_map<std::string, std::vector<size_t>> DeduplicationInfo::buildBlockIdToOffsetsMap(const std::string & partition_id) const
+{
+    /// partition_id is constant here, so the unified UInt128 hash maps 1:1 to the block-id
+    /// string "{partition_id}_{hi}_{lo}"; reuse the shared grouping and format the key once
+    /// per distinct block id.
+    std::unordered_map<std::string, std::vector<size_t>> result;
+
+    for (auto & [hash, offsets_for_hash] : buildOffsetsMapImpl(partition_id))
+        result.emplace(DeduplicationHash::createUnifiedHash(hash, partition_id).getBlockId(), std::move(offsets_for_hash));
 
     return result;
 }

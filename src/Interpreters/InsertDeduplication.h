@@ -139,6 +139,7 @@ private:
     size_t getTokenEnd(size_t pos) const;
     size_t getTokenRows(size_t pos) const;
 
+    std::vector<std::pair<UInt128, std::vector<size_t>>> buildOffsetsMapImpl(const std::string & partition_id) const;
     std::unordered_map<std::string, std::vector<size_t>> buildBlockIdToOffsetsMap(const std::string & partition_id) const;
 
     enum class Level

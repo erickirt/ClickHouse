@@ -115,7 +115,7 @@ void MergeTreeSink::consume(Chunk & chunk)
 
     auto process_list_element = context->getProcessListElement();
 
-    if (deduplication_info && deduplicate)
+    if (deduplication_info && deduplicate && !deduplication_info->isDisabled())
     {
         /// Preserve the pre-loop interrupt point that used to be the first checkTimeLimit()
         /// inside the partition loop: a killed or timed-out insert should be noticed before

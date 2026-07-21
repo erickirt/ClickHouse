@@ -299,7 +299,7 @@ void ReplicatedMergeTreeSink::consume(Chunk & chunk)
     size_t total_streams = 0;
     bool support_parallel_write = false;
 
-    if (deduplication_info && deduplicate)
+    if (deduplication_info && deduplicate && !deduplication_info->isDisabled())
     {
         /// Time the prewarm under DuplicationElapsedMicroseconds so the metric still reflects
         /// the total deduplication CPU after moving the one-off hash walk out of the
