@@ -32,8 +32,27 @@ CURDIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 TABLE="t_plt_reparent"
 
+# Part directories fabricated out-of-band below; `cleanup` removes them if the table is still
+# detached, because their metadata is exactly what could have made `ATTACH TABLE` throw.
+FABRICATED_PARTS="all_1_2_2_1 all_1_1_1_1 all_2_3_1_0"
+
 cleanup()
 {
+    # A permanently detached table is invisible to `DROP TABLE` (`UNKNOWN_TABLE`) while its
+    # name still blocks `CREATE TABLE`, so on failure paths that exit before `ATTACH TABLE`
+    # succeeds the table must be re-attached before dropping.
+    local still_detached part
+    still_detached=$($CLICKHOUSE_CLIENT -q "
+        SELECT count() FROM system.detached_tables
+        WHERE database = currentDatabase() AND table = '${TABLE}'" 2>/dev/null)
+    if [ "${still_detached}" = "1" ]; then
+        if [ -n "${DATA_PATH:-}" ]; then
+            for part in ${FABRICATED_PARTS}; do
+                rm -rf "${DATA_PATH:?}/${part}"
+            done
+        fi
+        $CLICKHOUSE_CLIENT -q "ATTACH TABLE ${TABLE}" 2>/dev/null
+    fi
     $CLICKHOUSE_CLIENT -q "DROP TABLE IF EXISTS ${TABLE}" 2>/dev/null
 }
 trap cleanup EXIT
