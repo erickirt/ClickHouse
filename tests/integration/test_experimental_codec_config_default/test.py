@@ -47,8 +47,7 @@ def test_create_inheriting_config_default_is_gated(started_cluster):
 
     # An explicit non-experimental override makes the config default irrelevant.
     node.query(
-        "CREATE TABLE t_create (x UInt64) ENGINE = MergeTree ORDER BY x "
-        "SETTINGS default_compression_codec = 'LZ4'",
+        "CREATE TABLE t_create (x UInt64) ENGINE = MergeTree ORDER BY x SETTINGS default_compression_codec = 'LZ4'",
         settings=DISABLED,
     )
     node.query("DROP TABLE t_create SYNC")
@@ -56,8 +55,7 @@ def test_create_inheriting_config_default_is_gated(started_cluster):
 
 def test_reset_setting_to_config_default_is_gated(started_cluster):
     node.query(
-        "CREATE TABLE t_reset (x UInt64) ENGINE = MergeTree ORDER BY x "
-        "SETTINGS default_compression_codec = 'LZ4'",
+        "CREATE TABLE t_reset (x UInt64) ENGINE = MergeTree ORDER BY x SETTINGS default_compression_codec = 'LZ4'",
         settings=DISABLED,
     )
 
@@ -94,8 +92,7 @@ def test_attach_with_stored_codec_setting_is_exempt(started_cluster):
     # A codec stored in the table's own SETTINGS clause was gated when it was
     # introduced, so re-attaching must work without the session setting.
     node.query(
-        "CREATE TABLE t_stored (x UInt64) ENGINE = MergeTree ORDER BY x "
-        "SETTINGS default_compression_codec = 'ZXC'",
+        "CREATE TABLE t_stored (x UInt64) ENGINE = MergeTree ORDER BY x SETTINGS default_compression_codec = 'ZXC'",
         settings=ENABLED,
     )
     node.query("DETACH TABLE t_stored")
