@@ -65,6 +65,57 @@ def tsv_escape(s):
     )
 
 
+def ch_median(times):
+    """Median with ClickHouse medianExact semantics, to match the report
+    (eqmed.sql): quantileExact returns sorted[floor(level * size)], so the
+    median of an even-length array is the UPPER middle element."""
+    s = sorted(times)
+    return s[len(s) // 2]
+
+
+# Enumerate all C(2k, k) balanced splits exactly up to this many runs per side
+# (C(16, 8) = 12870); sample beyond that.
+MAX_EXACT_SPLIT_RUNS = 8
+SAMPLED_SPLITS = 2000
+
+
+def stat_threshold(left_times, right_times):
+    """The relative noise threshold of this comparison, replicating the
+    randomization test of the report (ci/jobs/scripts/perf/eqmed.sql):
+    q99 of |median(A) - median(B)| over balanced splits of the pooled
+    measurements, normalized by median(left). An observed relative difference
+    is distinguishable from noise when it exceeds this threshold, so the
+    threshold is the measurement precision reached so far.
+    Returns None if it cannot be computed (no runs, or zero left median)."""
+    k = min(len(left_times), len(right_times))
+    if k == 0:
+        return None
+    left = left_times[:k]
+    pooled = left + right_times[:k]
+    median_left = ch_median(left)
+    if median_left <= 0:
+        return None
+    mid = k // 2
+    gaps = []
+    if k <= MAX_EXACT_SPLIT_RUNS:
+        for a_indexes in itertools.combinations(range(2 * k), k):
+            a_set = set(a_indexes)
+            a = sorted(pooled[i] for i in a_indexes)
+            b = sorted(pooled[i] for i in range(2 * k) if i not in a_set)
+            gaps.append(abs(a[mid] - b[mid]))
+    else:
+        indexes = list(range(2 * k))
+        for _ in range(SAMPLED_SPLITS):
+            random.shuffle(indexes)
+            a = sorted(pooled[i] for i in indexes[:k])
+            b = sorted(pooled[i] for i in indexes[k:])
+            gaps.append(abs(a[mid] - b[mid]))
+    gaps.sort()
+    # quantileExact(0.99) semantics.
+    q99 = gaps[min(int(0.99 * len(gaps)), len(gaps) - 1)]
+    return q99 / median_left
+
+
 parser = argparse.ArgumentParser(description="Run performance test.")
 # Explicitly decode files as UTF-8 because sometimes we have Russian characters in queries, and LANG=C is set.
 parser.add_argument(
@@ -119,7 +170,48 @@ parser.add_argument(
     "for the corresponding server. A shorter list is reused for every server.",
 )
 parser.add_argument(
-    "--runs", type=int, default=1, help="Number of query runs per server."
+    "--runs",
+    type=int,
+    default=1,
+    help="Deprecated and ignored, kept so that existing invocations do not "
+    "break. The number of measured runs is now decided adaptively per query, "
+    "see --tau, --min-runs, --cap, --cap-fast.",
+)
+parser.add_argument(
+    "--tau",
+    type=float,
+    default=0.1,
+    help="Precision target: stop the measured runs of a query as soon as its "
+    "noise threshold (stat_threshold of the report, the q99 relative "
+    "median gap under balanced relabelings) is at most this value.",
+)
+parser.add_argument(
+    "--min-runs",
+    type=int,
+    default=5,
+    help="Never do fewer than this many measured runs of a query per server.",
+)
+parser.add_argument(
+    "--cap",
+    type=int,
+    default=7,
+    help="Maximum number of measured runs of a query per server "
+    "(fast queries get a higher cap, see --cap-fast).",
+)
+parser.add_argument(
+    "--cap-fast",
+    type=int,
+    default=30,
+    help="Maximum number of measured runs per server for fast queries "
+    "(see --fast-query-seconds): their extra runs are cheap and they need "
+    "more runs to reach the precision target.",
+)
+parser.add_argument(
+    "--fast-query-seconds",
+    type=float,
+    default=0.02,
+    help="A query whose median run time is below this on all servers after "
+    "--cap runs is considered fast and is allowed up to --cap-fast runs.",
 )
 parser.add_argument(
     "--max-queries",
@@ -810,6 +902,15 @@ for query_index in queries_to_run:
     for conn_index, c in enumerate(this_query_connections):
         all_server_times.append([])
 
+    # Run counts at which the precision stop condition is evaluated past the
+    # ordinary cap, for fast queries only: computing the threshold is not free,
+    # and the precision gained per extra run diminishes, so check sparsely.
+    fast_check_points = sorted(
+        set(p for p in (8, 10, 14, 20, 30) if args.cap < p < args.cap_fast)
+        | {args.cap_fast}
+    )
+    is_fast_query = False
+
     while True:
         run_id = f"{query_prefix}.run{run}"
 
@@ -869,11 +970,38 @@ for query_index in queries_to_run:
 
         avg_time_per_server = server_seconds / len(this_query_connections)
 
-        # We break if all the min stop conditions are met (1 second arg.runs iterations)
-        # or at lest one of the max stop conditions is met (8 seconds or 500 iterations)
-        if (avg_time_per_server >= 1 and run >= args.runs) or (
-            avg_time_per_server >= 8 or run >= 500
+        # Precision-targeted adaptive run policy: always do at least --min-runs
+        # runs per server (each individual run is still bounded by
+        # --max-query-seconds), then stop as soon as the noise threshold of this
+        # query drops to --tau, or a cap on the number of runs is reached:
+        # --cap runs normally, --cap-fast runs for fast queries (they are cheap
+        # to rerun and, in relative terms, the noisiest). As an escape from
+        # pathologically slow queries, also stop once the cumulative time per
+        # server reaches 30 seconds, regardless of the precision reached.
+        if run < args.min_runs:
+            continue
+
+        if avg_time_per_server >= 30:
+            break
+
+        # The precision stop needs exactly two servers to compare; partial
+        # queries just run to the caps.
+        if len(all_server_times) == 2 and (
+            run <= args.cap or run in fast_check_points
         ):
+            # Connection 0 is the "left" (old) server.
+            threshold = stat_threshold(all_server_times[0], all_server_times[1])
+            if threshold is not None and threshold <= args.tau:
+                break
+
+        if run < args.cap:
+            continue
+        if run == args.cap:
+            is_fast_query = (
+                max(ch_median(t) for t in all_server_times)
+                < args.fast_query_seconds
+            )
+        if not is_fast_query or run >= args.cap_fast:
             break
 
     client_seconds = time.perf_counter() - start_seconds
