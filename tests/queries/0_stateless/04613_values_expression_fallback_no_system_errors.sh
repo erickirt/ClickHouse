@@ -9,6 +9,15 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 fallback_query_id="04613_values_fallback_${CLICKHOUSE_DATABASE}_${RANDOM}"
 overflow_query_id="04613_values_overflow_${CLICKHOUSE_DATABASE}_${RANDOM}"
 
+cleanup()
+{
+    $CLICKHOUSE_CLIENT -q "DROP TABLE IF EXISTS values_fallback" 2>/dev/null
+    $CLICKHOUSE_CLIENT -q "DROP TABLE IF EXISTS values_decimal" 2>/dev/null
+    $CLICKHOUSE_CLIENT -q "DROP TABLE IF EXISTS values_decimal_retry" 2>/dev/null
+}
+trap cleanup EXIT
+cleanup
+
 $CLICKHOUSE_CLIENT -q "
     CREATE TABLE values_fallback
     (
