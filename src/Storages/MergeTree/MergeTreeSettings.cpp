@@ -6,6 +6,7 @@
 #include <Core/BaseSettingsFwdMacrosImpl.h>
 #include <Core/BaseSettingsProgramOptions.h>
 #include <Core/MergeSelectorAlgorithm.h>
+#include <Core/SettingsEnums.h>
 #include <Core/MergeTreeSerializationEnums.h>
 #include <Core/SettingsChangesHistory.h>
 #include <Disks/DiskFromAST.h>
