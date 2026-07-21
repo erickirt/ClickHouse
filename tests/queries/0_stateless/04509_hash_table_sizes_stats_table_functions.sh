@@ -11,6 +11,12 @@ CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # (debug/sanitizer) builds, the pairs run in parallel, and only the two runs within a pair are
 # sequential. For the same reason logs are flushed and queried once, at the end; each section uses
 # its own query_id prefix so the report queries do not pick up each other's rows.
+#
+# The group counts (650e3 / 520e3) must stay above the 500e3 lower bound under which getSizeHint
+# does not preallocate at all (with a single hash table, i.e. max_threads = 1) - do not shrink
+# them further. The FINAL / SAMPLE modifiers case lives in
+# 04613_hash_table_sizes_stats_table_expression_modifiers, in a separate test to keep single runs
+# short for the flaky check.
 
 run_pair()
 {
@@ -27,19 +33,18 @@ settings=(
     --max_size_to_preallocate_for_aggregation=1000000000000
 )
 
-big_query="SELECT number AS k FROM numbers(1e6) GROUP BY k FORMAT Null"
-small_query="SELECT number AS k FROM numbers(800e3) GROUP BY k FORMAT Null"
+big_query="SELECT number AS k FROM numbers(650e3) GROUP BY k FORMAT Null"
+small_query="SELECT number AS k FROM numbers(520e3) GROUP BY k FORMAT Null"
 
 local_prefix="${CLICKHOUSE_DATABASE}_04509_local_$RANDOM$RANDOM"
 dist_prefix="${CLICKHOUSE_DATABASE}_04509_dist_$RANDOM$RANDOM"
-mod_prefix="${CLICKHOUSE_DATABASE}_04509_mod_$RANDOM$RANDOM"
 
 run_pair "$local_prefix" big "$big_query" "${settings[@]}" &
 run_pair "$local_prefix" small "$small_query" "${settings[@]}" &
 
 # The same, but through a serialized query plan (distributed execution): the read is reconstructed
 # on the shard by resolveStorages / ReadFromTableFunctionStep, which must also carry the table
-# function subtree so numbers(1e6) and numbers(800e3) do not share one stats entry. The
+# function subtree so numbers(650e3) and numbers(520e3) do not share one stats entry. The
 # preallocation happens in the shard-side (secondary) aggregation, so it is read from the secondary
 # query rows (is_initial_query = 0). process_query_plan_packet is enabled in the test server config.
 dist_settings=(
@@ -51,31 +56,11 @@ dist_settings=(
     --prefer_localhost_replica=0
 )
 
-dist_big_query="SELECT number AS k FROM cluster('test_shard_localhost', numbers(1e6)) GROUP BY k FORMAT Null"
-dist_small_query="SELECT number AS k FROM cluster('test_shard_localhost', numbers(800e3)) GROUP BY k FORMAT Null"
+dist_big_query="SELECT number AS k FROM cluster('test_shard_localhost', numbers(650e3)) GROUP BY k FORMAT Null"
+dist_small_query="SELECT number AS k FROM cluster('test_shard_localhost', numbers(520e3)) GROUP BY k FORMAT Null"
 
 run_pair "$dist_prefix" dist-big "$dist_big_query" "${dist_settings[@]}" &
 run_pair "$dist_prefix" dist-small "$dist_small_query" "${dist_settings[@]}" &
-
-# Table expression modifiers must be part of the key as well: the same table function with and
-# without FINAL sees different row sets (ReplacingMergeTree collapses duplicates under FINAL), so
-# the two reads must not share one stats entry. FINAL is serialized out-of-band of the table
-# function AST (in the ReadFromTableFunctionStep flags), so this also checks that resolveStorages
-# restores it on the shard: if FINAL were dropped there, both queries would aggregate 1e6 groups
-# and collide on one entry. The FINAL group count (600e3) must stay above the 500e3 lower bound
-# under which getSizeHint does not preallocate at all.
-$CLICKHOUSE_CLIENT -q "
-    CREATE TABLE t_04509 (k UInt64, v UInt64) ENGINE = ReplacingMergeTree ORDER BY k;
-    SYSTEM STOP MERGES t_04509;
-    INSERT INTO t_04509 SELECT number, number FROM numbers(1e6);
-    INSERT INTO t_04509 SELECT number, number % 600000 FROM numbers(1e6);
-"
-
-final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04509$')) FINAL GROUP BY v FORMAT Null"
-no_final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04509$')) GROUP BY v FORMAT Null"
-
-run_pair "$mod_prefix" final "$final_query" "${dist_settings[@]}" &
-run_pair "$mod_prefix" no-final "$no_final_query" "${dist_settings[@]}" &
 
 wait
 
@@ -99,14 +84,4 @@ $CLICKHOUSE_CLIENT -q "
     AND startsWith(initial_query_id, '$dist_prefix')
     AND endsWith(initial_query_id, '-prealloc')
     ORDER BY 1;
-
-    SELECT replace(initial_query_id, '${mod_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
-    FROM system.query_log
-    WHERE event_date >= yesterday() AND type = 'QueryFinish'
-    AND is_initial_query = 0
-    AND startsWith(initial_query_id, '$mod_prefix')
-    AND endsWith(initial_query_id, '-prealloc')
-    ORDER BY 1;
-
-    DROP TABLE t_04509;
 "
