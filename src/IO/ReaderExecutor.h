@@ -212,7 +212,7 @@ private:
 
     /// The only logical<->physical converters (physical = header-inclusive file coords, logical =
     /// payload coords); a raw `+/- data_start_offset` elsewhere is a bug.
-    size_t toPhys(size_t logical) const { return logical + data_start_offset; }
+    size_t toPhysical(size_t logical) const { return logical + data_start_offset; }
     size_t toLogical(size_t physical) const { chassert(physical >= data_start_offset); return physical - data_start_offset; }
 
     /// Whether served payload is encrypted (`data_start_offset` is the header size,

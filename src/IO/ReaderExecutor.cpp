@@ -444,8 +444,8 @@ ChainedBuffers ReaderExecutor::readNextWindow()
     if (atEnd())
         return {};
 
-    /// The offset map and object sizes are physical; `toPhys` crosses logical `position` into it.
-    const size_t position_physical = toPhys(position);
+    /// The offset map and object sizes are physical; `toPhysical` crosses logical `position` into it.
+    const size_t position_physical = toPhysical(position);
     const auto * segment = offset_map.findObjectAt(position_physical);
     if (!segment)
     {
