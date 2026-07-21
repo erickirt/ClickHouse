@@ -843,23 +843,45 @@ static StoragePtr create(const StorageFactory::Arguments & args)
         /// The codec-valued MergeTree settings accept an arbitrary codec expression and are applied without
         /// going through the experimental-codec gate that column codecs and `TTL ... RECOMPRESS` use, so an
         /// experimental codec (e.g. `ZXC`) could slip in through `SETTINGS default_compression_codec = ...`.
-        /// Enforce `allow_experimental_codecs` for freshly introduced definitions only. A full-definition
+        /// For freshly introduced definitions the merged value (explicit or inherited from the current
+        /// `<merge_tree>` config defaults) is checked against `allow_experimental_codecs`. A full-definition
         /// `ATTACH TABLE t UUID '...' (...) ENGINE = MergeTree ...` is CREATE-like user input that also runs
-        /// under `LoadingStrictnessLevel::ATTACH`, so it must be checked too. Definitions read back from
+        /// under `LoadingStrictnessLevel::ATTACH`, so it counts as fresh too. Definitions read back from
         /// metadata stored on this server (short `ATTACH TABLE t`, `ATTACH DATABASE`, server restart) are
-        /// marked with `attach_short_syntax` (see `createTableFromAST`) and skip the check, as does
-        /// `SECONDARY_CREATE` (DDL replay in `Replicated` databases, `RESTORE`), so that existing tables
-        /// remain loadable.
+        /// marked with `attach_short_syntax` (see `createTableFromAST`); for those (and for
+        /// `SECONDARY_CREATE`: DDL replay in `Replicated` databases, `RESTORE`) values written in the stored
+        /// `SETTINGS` clause were already gated when they were introduced and are exempt, so existing tables
+        /// remain loadable. Values *not* stored in the definition, however, fall back to the *current*
+        /// `<merge_tree>` config defaults, so they are validated even on load — otherwise an operator could
+        /// introduce an experimental codec into existing tables via a config default plus a restart, without
+        /// anyone enabling `allow_experimental_codecs` (at startup the check runs against the default
+        /// profile, which is where such a config default can be legitimately allowed). `FORCE_RESTORE` is
+        /// documented to skip all sanity checks and is left alone.
         const bool is_fresh_definition = args.mode <= LoadingStrictnessLevel::CREATE
             || (args.mode == LoadingStrictnessLevel::ATTACH && !args.query.attach_short_syntax);
-        if (is_fresh_definition && !local_settings[Setting::allow_experimental_codecs])
+        if (args.mode != LoadingStrictnessLevel::FORCE_RESTORE && !local_settings[Setting::allow_experimental_codecs])
         {
-            if (const auto & codec = (*storage_settings)[MergeTreeSetting::marks_compression_codec].value; !codec.empty())
-                CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
-            if (const auto & codec = (*storage_settings)[MergeTreeSetting::primary_key_compression_codec].value; !codec.empty())
-                CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
-            if (const auto & codec = (*storage_settings)[MergeTreeSetting::default_compression_codec].value; !codec.empty())
-                CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
+            const auto is_stored_in_definition = [&](std::string_view name)
+            {
+                if (!args.storage_def->settings)
+                    return false;
+                for (const auto & change : args.storage_def->settings->changes)
+                    if (change.name == name)
+                        return true;
+                return false;
+            };
+
+            const auto validate_codec_setting = [&](std::string_view name, const String & codec)
+            {
+                if (codec.empty())
+                    return;
+                if (is_fresh_definition || !is_stored_in_definition(name))
+                    CompressionCodecFactory::instance().validateCodecString(codec, /*sanity_check=*/ false, /*allow_experimental_codecs=*/ false);
+            };
+
+            validate_codec_setting("marks_compression_codec", (*storage_settings)[MergeTreeSetting::marks_compression_codec].value);
+            validate_codec_setting("primary_key_compression_codec", (*storage_settings)[MergeTreeSetting::primary_key_compression_codec].value);
+            validate_codec_setting("default_compression_codec", (*storage_settings)[MergeTreeSetting::default_compression_codec].value);
         }
 
         /// UNIQUE KEY tables must reside on local-only storage policies.
