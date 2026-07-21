@@ -24,14 +24,14 @@ SELECT count() FROM (SELECT 1 AS x WHERE 0) AS l RIGHT ANTI JOIN (SELECT 1 AS r)
 -- Once the right side is known to be non-empty, the result is provably empty and the left side
 -- must be cancelled without being fully read.
 SELECT 'left anti true short-circuits the left side';
-SELECT count() FROM numbers(100000000) AS l LEFT ANTI JOIN (SELECT 1 AS r) AS rt ON 1
+SELECT count() FROM numbers(15000000) AS l LEFT ANTI JOIN (SELECT 1 AS r) AS rt ON 1
 SETTINGS max_threads = 4, max_block_size = 65536, log_comment = '04613_left_anti_short_circuit';
 
 SYSTEM FLUSH LOGS query_log;
 
 -- The sources may produce only a few blocks before the cancellation propagates;
--- 20M rows is a generous bound, while a full scan of the left side would read 100M.
-SELECT read_rows < 20000000
+-- 2M rows is a generous bound, while a full scan of the left side would read 15M.
+SELECT read_rows < 2000000
 FROM system.query_log
 WHERE current_database = currentDatabase()
     AND log_comment = '04613_left_anti_short_circuit'
