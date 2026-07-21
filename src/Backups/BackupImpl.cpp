@@ -1385,8 +1385,8 @@ bool BackupImpl::tryRemoveAllFiles() noexcept
             files_to_remove.push_back(".backup");
             coordination->forEachFileInfoForAllHosts([&](const BackupFileInfo & file_info)
             {
-                /// Skip entries without a data file (empty file or base-backup reference): an empty name
-                /// could resolve to the backup root.
+                /// Skip entries with no data file — an empty file, or one wholly covered by the base backup.
+                /// Their `data_file_name` is empty, which would otherwise resolve to the backup root.
                 if (!file_info.data_file_name.empty())
                     files_to_remove.push_back(file_info.data_file_name);
             });
