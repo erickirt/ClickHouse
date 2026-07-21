@@ -5430,8 +5430,15 @@ MergeTreeDataPartFormat MergeTreeData::choosePartFormat(
     /// part-level. The data-independent Quantize methods are stateless per row and work in either part format.
     if (part_type == PartType::Compact)
     {
-        const auto metadata_snapshot = getInMemoryMetadataPtr(getContext(), false);
-        for (const auto & column : metadata_snapshot->getColumns())
+        /// The invariant is about the columns physically written into this part, so for a projection part
+        /// inspect the projection's own columns rather than the base table's: a `Quantize('pq')` column on
+        /// the table that the projection never materializes must not force the projection part to Wide.
+        /// Hold the table metadata snapshot in a local so its columns reference stays alive for the loop.
+        StorageMetadataHandle table_metadata;
+        if (!projection)
+            table_metadata = getInMemoryMetadataPtr(getContext(), false);
+        const auto & columns = projection ? projection->metadata->getColumns() : table_metadata->getColumns();
+        for (const auto & column : columns)
         {
             const auto params = tryExtractQuantizedCodecParams(column.codec);
             if (params && params->method == "product")
