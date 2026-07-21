@@ -379,13 +379,14 @@ def test_verify_edit_rejects_created_files_and_cleanup_removes_them(scratch_repo
 
 
 def test_ci_tmp_is_gitignored():
-    """_untracked_files relies on the job's scratch space being ignored."""
-    root = os.path.join(os.path.dirname(__file__), "../..")
-    res = subprocess.run(
-        ["git", "-C", root, "check-ignore", "-q", "ci/tmp/anything"],
-        check=False,
-    )
-    assert res.returncode == 0
+    """_untracked_files relies on the job's scratch space being ignored.
+    Checked via ci/.gitignore content rather than `git check-ignore`: in the
+    CI Tests container the repo is owned by another uid and git refuses to
+    operate on it (dubious ownership)."""
+    ci_dir = os.path.join(os.path.dirname(__file__), "..")
+    with open(os.path.join(ci_dir, ".gitignore"), encoding="utf-8") as fd:
+        patterns = [line.strip() for line in fd]
+    assert "/tmp" in patterns
 
 
 def test_cycle_skip_reason():
