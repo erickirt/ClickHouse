@@ -57,15 +57,26 @@ wait
 
 # The labels happen to sort in the order the reference expects, and unlike event_time the sort is
 # stable under the parallel execution above.
+# The preallocation is read from the secondary (is_initial_query = 0) rows. Secondary queries on
+# the executor run as the 'default' user, so their current_database is 'default' rather than the
+# test database - we cannot filter them by current_database = currentDatabase() directly. Instead,
+# scope them to this test via their initiator, which does run in currentDatabase() (the style check
+# also requires the current_database = currentDatabase() filter to appear in any test that reads
+# from system.query_log).
 $CLICKHOUSE_CLIENT -q "
     SYSTEM FLUSH LOGS query_log;
 
+    WITH (
+        SELECT groupArray(query_id) FROM system.query_log
+        WHERE event_date >= yesterday() AND type = 'QueryFinish' AND is_initial_query = 1
+        AND current_database = currentDatabase()
+        AND startsWith(query_id, '$mod_prefix') AND endsWith(query_id, '-prealloc')
+    ) AS initiators
     SELECT replace(initial_query_id, '${mod_prefix}_', ''), ProfileEvents['AggregationPreallocatedElementsInHashTables']
     FROM system.query_log
     WHERE event_date >= yesterday() AND type = 'QueryFinish'
     AND is_initial_query = 0
-    AND startsWith(initial_query_id, '$mod_prefix')
-    AND endsWith(initial_query_id, '-prealloc')
+    AND has(initiators, initial_query_id)
     ORDER BY 1;
 
     DROP TABLE t_04613;
