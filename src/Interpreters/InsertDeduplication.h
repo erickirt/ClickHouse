@@ -65,6 +65,7 @@ protected:
     /// src/Storages/MergeTree/tests/gtest_async_inserts.cpp
     friend std::vector<Int64> testSelfDeduplicate(std::vector<Int64> data, std::vector<size_t> offsets, std::vector<String> hashes);
     friend std::vector<String> testSelfDeduplicateStrings(std::vector<String> data, std::vector<size_t> offsets, std::vector<String> hashes);
+    friend std::vector<String> testPrewarmDataHashes(std::vector<String> data, std::vector<size_t> offsets);
 
 public:
     using Ptr = std::shared_ptr<DeduplicationInfo>;
