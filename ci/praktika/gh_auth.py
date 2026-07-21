@@ -40,6 +40,8 @@ _GH_AUTH_RETRY_ERRORS = [
 
 
 class GHAuth:
+    # Set once a token has been minted, so it is done at most once per process.
+    _authenticated = False
 
     @classmethod
     def _get_access_token_from_lambda(cls, lambda_name: str, region: str) -> str:
@@ -126,46 +128,82 @@ class GHAuth:
         )
 
     @classmethod
-    def auth_from_settings(cls) -> None:
+    def auth_with_lambda(cls, lambda_name: str, region: str = "") -> None:
+        """
+        Authenticate `gh` with a token minted by the given AWS Lambda.
+        """
+        print(f"Mint GitHub token via lambda [{lambda_name}]")
+        access_token = cls._get_access_token_from_lambda(lambda_name, region)
+        Shell.check(
+            "gh auth login --with-token",
+            stdin_str=f"{access_token}\n",
+            strict=True,
+            retries=4,
+            retry_errors=_GH_AUTH_RETRY_ERRORS,
+        )
+
+    @classmethod
+    def auth_from_settings(cls, workflow=None, force=False) -> bool:
+        """
+        Authenticate `gh` for GitHub API calls and return whether `gh` is usable.
+
+        A token is minted from the AWS Lambda configured for the workflow
+        (Workflow.Config.gh_auth_lambda_name) or globally
+        (Settings.GH_AUTH_LAMBDA_NAME); if no lambda is set, the GitHub App
+        secrets (SECRET_GH_APP_*) are used instead. When neither is configured,
+        the ambient `gh` token is assumed and this is a no-op.
+
+        The token is minted at most once per process unless `force` is set.
+        Returns False only if authentication was attempted and failed.
+        """
         from praktika.secret import Secret
         from praktika.settings import Settings
 
-        if Settings.GH_AUTH_LAMBDA_NAME:
-            access_token = cls._get_access_token_from_lambda(
-                Settings.GH_AUTH_LAMBDA_NAME, Settings.GH_AUTH_LAMBDA_REGION
-            )
-            Shell.check(
-                "gh auth login --with-token",
-                stdin_str=f"{access_token}\n",
-                strict=True,
-                retries=4,
-                retry_errors=_GH_AUTH_RETRY_ERRORS,
-            )
-            return
+        if cls._authenticated and not force:
+            return True
 
-        app_id, pem, installation_id = (
-            Secret.Config(
-                name=Settings.SECRET_GH_APP_ID,
-                type=Secret.Type.AWS_SSM_SECRET,
-                region=Settings.SECRET_GH_APP_REGION,
-            )
-            .join_with(
-                Secret.Config(
-                    name=Settings.SECRET_GH_APP_PEM_KEY,
-                    type=Secret.Type.AWS_SSM_SECRET,
-                    region=Settings.SECRET_GH_APP_REGION,
+        lambda_name = (
+            workflow.gh_auth_lambda_name if workflow else ""
+        ) or Settings.GH_AUTH_LAMBDA_NAME
+
+        try:
+            if lambda_name:
+                cls.auth_with_lambda(lambda_name, Settings.GH_AUTH_LAMBDA_REGION)
+            elif Settings.SECRET_GH_APP_ID:
+                app_id, pem, installation_id = (
+                    Secret.Config(
+                        name=Settings.SECRET_GH_APP_ID,
+                        type=Secret.Type.AWS_SSM_SECRET,
+                        region=Settings.SECRET_GH_APP_REGION,
+                    )
+                    .join_with(
+                        Secret.Config(
+                            name=Settings.SECRET_GH_APP_PEM_KEY,
+                            type=Secret.Type.AWS_SSM_SECRET,
+                            region=Settings.SECRET_GH_APP_REGION,
+                        )
+                    )
+                    .join_with(
+                        Secret.Config(
+                            name=Settings.SECRET_GH_APP_INSTALLATION_ID,
+                            type=Secret.Type.AWS_SSM_SECRET,
+                            region=Settings.SECRET_GH_APP_REGION,
+                        )
+                    )
+                    .get_value()
                 )
-            )
-            .join_with(
-                Secret.Config(
-                    name=Settings.SECRET_GH_APP_INSTALLATION_ID,
-                    type=Secret.Type.AWS_SSM_SECRET,
-                    region=Settings.SECRET_GH_APP_REGION,
+                cls.auth(
+                    app_id=app_id, app_key=pem, installation_id=int(installation_id)
                 )
-            )
-            .get_value()
-        )
-        cls.auth(app_id=app_id, app_key=pem, installation_id=int(installation_id))
+            else:
+                # No custom auth configured - rely on the ambient gh token.
+                return True
+        except Exception as e:
+            print(f"WARNING: GH auth failed: {e}")
+            return False
+
+        cls._authenticated = True
+        return True
 
 
 # if __name__ == "__main__":
