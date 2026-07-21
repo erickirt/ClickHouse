@@ -10,7 +10,7 @@ fetches this one file from the aggregator, and runs it.
 Steps:
   1. Shallow + sparse clone the aggregator docs repo (the docs root and the
      docs CI scripts at ``ci/jobs/scripts/docs``).
-  2. Replace one or more files or folders in it with local docs (e.g. drop the
+  2. Replace one or more folders in it with local folders (e.g. drop the
      locally edited Python client docs over
      ``integrations/language-clients/python``). The destination is wiped first,
      so deletions and renames in the local source are reflected -- the docs sync
@@ -158,29 +158,21 @@ def clone_aggregator(repo, ref, sparse, dest):
 
 def replace(src, dest):
     src = os.path.abspath(src)
-    if not os.path.isfile(src) and not os.path.isdir(src):
-        raise FileNotFoundError(
-            f"Replace source is not a file or directory: {src}"
-        )
+    if not os.path.isdir(src):
+        raise FileNotFoundError(f"Replace source is not a directory: {src}")
     print(f"Replace {dest} with {src}", flush=True)
     # Wipe dest first: the docs sync is one-way (the consuming repo is the source
     # of truth), so the checks must see exactly what the next sync produces. A
     # merge would leave stale files from the cloned aggregator behind, hiding
     # deletions and renames in the source repo.
-    if os.path.lexists(dest):
-        if os.path.isdir(dest) and not os.path.islink(dest):
-            shutil.rmtree(dest)
-        else:
-            os.remove(dest)
+    if os.path.exists(dest):
+        shutil.rmtree(dest)
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-    if os.path.isdir(src):
-        shutil.copytree(src, dest)
-    else:
-        shutil.copy2(src, dest)
+    shutil.copytree(src, dest)
 
 
 def resolve_replace_dest(docs_root, dest):
-    # `replace` wipes its destination, so a DEST that escapes the
+    # `replace` wipes its destination with rmtree, so a DEST that escapes the
     # cloned docs tree (absolute, `..`, or a symlink pointing out) would delete
     # an unrelated directory on the host. Resolve it against the docs root and
     # refuse anything that lands outside, including the docs root itself.
@@ -219,8 +211,8 @@ def main(argv=None):
     p.add_argument("--docs-root", default="docs",
                    help="Dir containing docs.json within the clone (default: docs).")
     p.add_argument("--replace", action="append", default=[], metavar="SRC:DEST",
-                   help="Replace DEST (relative to docs root) with the local file "
-                        "or folder SRC, wiping DEST first; repeatable.")
+                   help="Replace DEST (relative to docs root) with the local folder "
+                        "SRC, wiping DEST first; repeatable.")
     p.add_argument("--scoped", action="store_true",
                    help="Validate only the --replace destinations instead of running "
                         "the full (slow) `mint validate` over the whole site. "
