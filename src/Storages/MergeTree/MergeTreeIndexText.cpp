@@ -1636,7 +1636,8 @@ void MergeTreeIndexTextGranuleBuilder::addDocument(std::string_view document)
 
 void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 token_position)
 {
-    /// Drop before inserting so dropped tokens allocate nothing (bounds `NOT IN` memory); still counted for flush.
+    /// Drop before inserting so dropped tokens allocate nothing (bounds `NOT IN` memory); still counted
+    /// toward the segment-flush threshold.
     if (token_drop_filter && token_drop_filter->shouldDrop(token))
     {
         ++num_processed_tokens;
@@ -1676,9 +1677,6 @@ std::unique_ptr<MergeTreeIndexGranuleTextWritable> MergeTreeIndexTextGranuleBuil
     tokens_map.forEachValue([&](const auto & key, auto & mapped)
     {
         std::string_view token = key;
-        /// Flush fast path: skip the distinct tokens the postprocessor emptied (the hybrid path leaves none).
-        if (!dropped_tokens.empty() && dropped_tokens.contains(token))
-            return;
         sorted_tokens.push_back(SortedToken{token, &mapped, nullptr});
     });
 
@@ -1715,36 +1713,11 @@ void MergeTreeIndexTextGranuleBuilder::reset()
     tokens_map = {};
     posting_lists.clear();
     arena = std::make_unique<Arena>();
-    dropped_tokens.clear();
 
     if (params.positions)
         position_map = std::make_unique<TokenToPositionListMap>();
     else
         position_map.reset();
-}
-
-void MergeTreeIndexTextGranuleBuilder::filterTokens(const MergeTreeIndexTextPostprocessor & postprocessor)
-{
-    if (tokens_map.empty())
-        return;
-
-    std::vector<std::string_view> distinct_tokens;
-    distinct_tokens.reserve(tokens_map.size());
-    auto tokens_column = ColumnString::create();
-    tokens_column->reserve(tokens_map.size());
-    tokens_map.forEachValue([&](const auto & key, auto &)
-    {
-        std::string_view token = key;
-        distinct_tokens.push_back(token);
-        tokens_column->insertData(token.data(), token.size());
-    });
-
-    ColumnPtr transformed = postprocessor.processTokensBatch(tokens_column.get());
-
-    dropped_tokens.clear();
-    for (size_t i = 0; i < distinct_tokens.size(); ++i)
-        if (transformed->getDataAt(i).empty())
-            dropped_tokens.insert(distinct_tokens[i]);
 }
 
 MergeTreeIndexAggregatorText::MergeTreeIndexAggregatorText(
@@ -1761,29 +1734,21 @@ MergeTreeIndexAggregatorText::MergeTreeIndexAggregatorText(
     , preprocessor(preprocessor_)
     , postprocessor(postprocessor_)
 {
-    /// Both fast paths need positions disabled (phrase search needs dense position renumbering after drops).
+    /// Fast path for IN/NOT IN filter-only postprocessors only: drops are decided per distinct token in
+    /// addToken so dropped tokens never build postings. Positions must be disabled (phrase search needs
+    /// dense position renumbering after drops). Any other postprocessor uses the general per-batch path.
     if (postprocessor->hasActions() && !params.positions)
     {
         if (const auto * inline_filter = postprocessor->getInlineFilter())
         {
-            /// Hybrid path: dropped tokens are decided per distinct token in addToken and never build postings.
             granule_builder.token_drop_filter = inline_filter;
             use_hybrid_filter = true;
-        }
-        else if (postprocessor->isFilterOnly())
-        {
-            /// Flush path: build all tokens, then drop the distinct ones the postprocessor empties at flush.
-            use_filter_fast_path = true;
         }
     }
 }
 
 MergeTreeIndexGranulePtr MergeTreeIndexAggregatorText::getGranuleAndReset()
 {
-    /// Filter-only postprocessor fast path.
-    if (use_filter_fast_path)
-        granule_builder.filterTokens(*postprocessor);
-
     auto granule = granule_builder.build();
     granule_builder.reset();
     return granule;
@@ -1812,7 +1777,7 @@ void MergeTreeIndexAggregatorText::update(const Block & block, size_t * pos, siz
     const auto & index_column = block.getByName(index_column_name);
     auto [preprocessed_column, offset] = preprocessor->processColumn(index_column, *pos, rows_read);
 
-    if (postprocessor->hasActions() && !use_filter_fast_path && !use_hybrid_filter)
+    if (postprocessor->hasActions() && !use_hybrid_filter)
     {
         ColumnPtr tokenized = tokenizeToArray(*tokenizer, *preprocessed_column, offset, rows_read);
         ColumnPtr postprocessed = postprocessor->processTokensArrayBatch(assert_cast<const ColumnArray *>(tokenized.get()));

@@ -43,37 +43,6 @@ bool isTokenIdentifier(const ASTPtr & ast, std::string_view token_name)
     return identifier && identifier->name() == token_name;
 }
 
-/// Returns true when the expression maps every token either to itself (the bare token identifier) or to the
-/// empty string - i.e. a pure filter that only drops tokens and never changes their bytes. Recognizes the
-/// `if`/`multiIf` shapes that stop-word and token-length filters compile to; the branch *conditions* are not
-/// inspected (they are evaluated by the real ActionsDAG over the distinct tokens), only the result branches.
-/// Conservative: anything not matching falls back to the general per-occurrence postprocessor path.
-bool isFilterOnlyExpression(const ASTPtr & ast, std::string_view token_name)
-{
-    const auto * function = ast->as<ASTFunction>();
-    if (!function || !function->arguments)
-        return false;
-
-    const auto & args = function->arguments->children;
-    auto is_keep_or_drop = [&](const ASTPtr & branch)
-    { return isEmptyStringLiteral(branch) || isTokenIdentifier(branch, token_name); };
-
-    /// if(cond, then, else): both result branches must be the token or empty.
-    if (function->name == "if" && args.size() == 3)
-        return is_keep_or_drop(args[1]) && is_keep_or_drop(args[2]);
-
-    /// multiIf(cond1, val1, cond2, val2, ..., default): all value branches and the default must be token or empty.
-    if (function->name == "multiIf" && args.size() >= 3 && args.size() % 2 == 1)
-    {
-        for (size_t i = 1; i + 1 < args.size(); i += 2)
-            if (!is_keep_or_drop(args[i]))
-                return false;
-        return is_keep_or_drop(args.back());
-    }
-
-    return false;
-}
-
 /// Collects string literals from an `IN` right-hand side (literal / tuple / array); false if any isn't a string.
 bool collectStringLiterals(const ASTPtr & ast, std::vector<String> & out)
 {
@@ -201,11 +170,7 @@ MergeTreeIndexTextPostprocessor::MergeTreeIndexTextPostprocessor(ASTPtr expressi
 
     actions.emplace(std::move(actions_dag));
 
-    /// Recognize pure filters (output is the token unchanged or empty) so the build path can apply the
-    /// postprocessor to distinct tokens after a plain streaming build instead of to every occurrence.
-    is_filter_only = isFilterOnlyExpression(transformed_ast, postprocessor_token_name);
-
-    /// Hybrid fast path: recognize IN/NOT IN filters so the granule builder can decide drops per distinct token.
+    /// Fast path: recognize IN/NOT IN filters so the granule builder can decide drops per distinct token.
     inline_filter = tryExtractInlineFilter(transformed_ast, postprocessor_token_name);
 }
 

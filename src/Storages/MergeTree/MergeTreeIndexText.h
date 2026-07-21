@@ -474,9 +474,6 @@ struct MergeTreeIndexTextGranuleBuilder
     bool empty() const { return is_empty; }
     void reset();
 
-    /// Filter-only postprocessor fast path.
-    void filterTokens(const MergeTreeIndexTextPostprocessor & postprocessor);
-
     MergeTreeIndexTextParams params;
     TokenizerPtr tokenizer;
     const IPostingListCodec * posting_list_codec = nullptr;
@@ -493,10 +490,8 @@ struct MergeTreeIndexTextGranuleBuilder
     /// Position data for phrase query support.
     /// Only allocated when params.positions is true.
     std::unique_ptr<TokenToPositionListMap> position_map;
-    /// Tokens the filter-only postprocessor maps to the empty string.
-    absl::flat_hash_set<std::string_view> dropped_tokens;
-    /// Hybrid fast path: when set, addToken decides (once per distinct token) whether a token is dropped;
-    /// dropped tokens keep an empty posting builder as a sentinel and never build postings. Non-owning.
+    /// Fast path for IN/NOT IN filter-only postprocessors: when set, addToken drops a token before inserting it,
+    /// so dropped tokens allocate no map entry and build no postings. Non-owning.
     const MergeTreeIndexTextInlineFilter * token_drop_filter = nullptr;
 };
 
@@ -535,9 +530,7 @@ private:
     MergeTreeIndexTextGranuleBuilder granule_builder;
     MergeTreeIndexTextPreprocessorPtr preprocessor;
     MergeTreeIndexTextPostprocessorPtr postprocessor;
-    /// True when the postprocessor only drops tokens (filter-only) and positions are disabled.
-    bool use_filter_fast_path = false;
-    /// True when the postprocessor is an IN/NOT IN filter handled by the hybrid per-distinct-token drop path.
+    /// True when the postprocessor is an IN/NOT IN filter handled by the per-distinct-token drop fast path.
     bool use_hybrid_filter = false;
 };
 

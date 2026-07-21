@@ -60,14 +60,8 @@ public:
 
     bool hasActions() const { return actions.has_value(); }
 
-    /// True when the expression only ever maps a token to itself or to the empty string, i.e. it is a pure
-    /// filter (drop some tokens, never change a token's bytes) - e.g. stop-word `if(token IN (...), '', token)`
-    /// or length `if(lengthUTF8(token) < N, '', token)`. Such postprocessors can be applied to the distinct
-    /// tokens after a plain streaming build instead of to every occurrence; see the granule builder fast path.
-    bool isFilterOnly() const { return is_filter_only; }
-
-    /// Non-null when the postprocessor is an `if(token IN/NOT IN (<string literals>), '', token)` filter,
-    /// enabling the hybrid fast path (drop decided per distinct token, dropped tokens build no postings).
+    /// Non-null when the postprocessor is an `if`/`multiIf(token IN/NOT IN (<string literals>), '', token)`
+    /// filter, enabling the fast path (drop decided per distinct token, dropped tokens build no postings).
     const MergeTreeIndexTextInlineFilter * getInlineFilter() const { return inline_filter ? &*inline_filter : nullptr; }
 
     /// Returns an ActionsDAG rewriting a haystack column into the Array(String) of postprocessed tokens
@@ -81,9 +75,7 @@ private:
     String index_column_name;         ///< name of the index column in the original expression
     /// Cached to avoid repeated make_shared<DataTypeString>() allocations.
     DataTypePtr string_type;
-    /// True when the expression maps every token to itself or the empty string (a pure filter).
-    bool is_filter_only = false;
-    /// Set when the filter is an `IN`/`NOT IN` over string literals; enables the hybrid drop fast path.
+    /// Set when the filter is an `IN`/`NOT IN` over string literals; enables the drop fast path.
     std::optional<MergeTreeIndexTextInlineFilter> inline_filter;
 };
 
