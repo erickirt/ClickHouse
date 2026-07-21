@@ -450,7 +450,11 @@ bool ConstantJoin::alwaysReturnsEmptySet() const
     /// triggers it: e.g. `RIGHT ANTI JOIN ... ON 1` emits right rows only when the left side turns out empty.
     const bool may_emit_matched_rows = constant_predicate_value && total_rows_to_join != 0
         && plan.left_rows_to_join != OutputPlan::LeftRowsToJoin::None;
-    const bool may_emit_unmatched_left_rows = plan.emit_unmatched_left_rows;
+    /// With a constant-true predicate and a non-empty right side every left row matches, so no left row is
+    /// ever left unmatched. This makes `LEFT ANTI JOIN ... ON 1` provably empty once the right side is filled
+    /// (the matched rows exist but `ANTI` suppresses them), letting `JoiningTransform` cancel the left side.
+    const bool may_emit_unmatched_left_rows = plan.emit_unmatched_left_rows
+        && !(constant_predicate_value && total_rows_to_join != 0);
     const bool may_emit_unmatched_right_rows = total_rows_to_join != 0 && plan.emit_unmatched_right_rows;
 
     return !may_emit_matched_rows && !may_emit_unmatched_left_rows && !may_emit_unmatched_right_rows;
