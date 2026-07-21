@@ -67,12 +67,14 @@ DROP TABLE t_intdiv_mono;
 -- discontinuity at 2^63 and the function stays monotonic over the whole UInt64 domain. The guard must
 -- gate on the divisor being a signed integer, not on the signed result type, otherwise it falsely
 -- disables key/read-in-order pruning here. The first query asserts the index count matches ground truth;
--- the second asserts read-in-order still keeps intDiv in the prefix sort (prints 1 when monotonic).
+-- the second asserts read-in-order still keeps intDiv in the prefix sort, so exactly one Prefix sort
+-- description line appears (prints 1 when monotonic). It counts the filtered plan rows rather than a
+-- fixed substring because intDiv renders as the DIV operator in the sort description.
 CREATE TABLE t_intdiv_mono (a UInt64) ENGINE = MergeTree ORDER BY a SETTINGS index_granularity = 8192;
 INSERT INTO t_intdiv_mono SELECT number FROM numbers(1000);
 SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, 10.0) IN (5))
      = (SELECT countIf(intDiv(a, 10.0) IN (5)) FROM t_intdiv_mono);
-SELECT countSubstrings(arrayStringConcat(groupArray(explain), '\n'), 'Prefix sort description: intDiv')
+SELECT count()
        FROM (EXPLAIN actions = 1 SELECT a FROM t_intdiv_mono ORDER BY intDiv(a, 10.0)
              SETTINGS optimize_read_in_order = 1, query_plan_read_in_order = 1)
        WHERE explain LIKE '%Prefix sort description%';
@@ -90,8 +92,9 @@ SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toUInt8(200)) IN (1, 2
      = (SELECT countIf(intDiv(a, toUInt8(200)) IN (1, 2)) FROM t_intdiv_mono);
 SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toUInt8(200)) NOT IN (0))
      = (SELECT countIf(intDiv(a, toUInt8(200)) NOT IN (0)) FROM t_intdiv_mono);
--- The reinterpreted divisor is negative, so read-in-order keeps intDiv in the prefix sort under DESC.
-SELECT countSubstrings(arrayStringConcat(groupArray(explain), '\n'), 'Prefix sort description: intDiv')
+-- The reinterpreted divisor is negative, so read-in-order keeps intDiv in the prefix sort under DESC
+-- (exactly one Prefix sort description line).
+SELECT count()
        FROM (EXPLAIN actions = 1 SELECT a FROM t_intdiv_mono ORDER BY intDiv(a, toUInt8(200)) DESC
              SETTINGS optimize_read_in_order = 1, query_plan_read_in_order = 1)
        WHERE explain LIKE '%Prefix sort description%';
