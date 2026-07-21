@@ -124,7 +124,6 @@ def test_startup_failure_after_early_prometheus_bind(start_cluster):
     # path must stop the already-listening server; otherwise `server_pool.joinAll` would wait for
     # its listener thread forever and the process would hang instead of exiting.
     node_fail.stop_clickhouse()
-    log_lines_before = int(node_fail.exec_in_container(["bash", "-c", f"wc -l < {LOG_FILE}"]).strip())
     node_fail.exec_in_container(
         [
             "bash",
@@ -136,9 +135,25 @@ def test_startup_failure_after_early_prometheus_bind(start_cluster):
         # `expected_to_fail` raises if the process is still alive after the timeout, so a hang in
         # the cleanup path fails the test.
         node_fail.start_clickhouse(start_wait_sec=120, expected_to_fail=True)
-        assert node_fail.get_process_pid("clickhouse") is None
 
-        failed_startup_log = node_fail.exec_in_container(["bash", "-c", f"tail -n +{log_lines_before + 1} {LOG_FILE}"])
+        # The server rotates the log file on every start, so line offsets taken before the restart
+        # are meaningless; slice from the last startup banner instead (`tac`+`sed` prints the lines
+        # from the last match to the end of the file). `expected_to_fail` can also return before the
+        # started process is even visible, so wait until the failure has made it to the log.
+        failed_startup_log = ""
+        for _ in range(120):
+            failed_startup_log = node_fail.exec_in_container(
+                [
+                    "bash",
+                    "-c",
+                    f"tac {LOG_FILE} | sed '/Application: Starting ClickHouse/q' | tac",
+                ]
+            )
+            if "broken_db" in failed_startup_log and node_fail.get_process_pid("clickhouse") is None:
+                break
+            time.sleep(1)
+
+        assert node_fail.get_process_pid("clickhouse") is None
         # The failed startup got far enough to bind the early Prometheus listener...
         assert "Listening for Prometheus" in failed_startup_log
         # ...and exited because of the metadata loading error rather than anything else.
