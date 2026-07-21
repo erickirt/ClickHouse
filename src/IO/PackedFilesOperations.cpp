@@ -186,6 +186,13 @@ void createPacked(const DiskPtr & disk_in, const String & input_dir, const DiskP
         throw Exception(ErrorCodes::DIRECTORY_DOESNT_EXIST, "Input path {} doesn't exist or is not a directory", input_dir);
 
     auto parent_path = parentPath(output_file);
+
+    /// The output archive must not land inside the directory being packed. createPacked walks input_dir
+    /// one level deep, so if the archive's own directory is input_dir (or nested under it) a re-run would
+    /// read the previously written archive as an input member and nest a stale data.packed inside the new
+    /// one. Reject that (the recursive entrypoint already guarantees the output is outside the input).
+    assertOutputNotInsideInput(disk_in, input_dir, disk_out, parent_path);
+
     if (!disk_out->existsDirectory(parent_path))
         disk_out->createDirectories(parent_path);
 

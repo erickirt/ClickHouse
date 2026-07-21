@@ -488,3 +488,30 @@ def test_packed_io_rejects_output_inside_input_cross_disk(started_cluster):
         nothrow=True,
     )
     assert "nested under the input" in output, f"expected rejection, got: {output}"
+
+
+def test_packed_io_create_rejects_output_inside_input(started_cluster):
+    # Non-recursive `create` walks the input directory one level deep. If the output archive lands inside
+    # that directory, a re-run reads the previously written archive as an input member and nests a stale
+    # data.packed inside the new one. The guard must reject an output file whose directory is the input.
+    node.query(
+        "CREATE OR REPLACE TABLE t_packed_create_selfrec (id UInt64, s String) ENGINE = MergeTree ORDER BY id SETTINGS storage_policy = 's3', min_bytes_for_full_part_storage = '10M'"
+    )
+    node.query(
+        "INSERT INTO t_packed_create_selfrec SELECT number, toString(number) FROM numbers(10)"
+    )
+
+    part_path = get_relative_part_path("t_packed_create_selfrec", "all_1_1_0")
+    output_file = os.path.join(part_path, "data.packed")
+
+    output = node.exec_in_container(
+        [
+            "bash",
+            "-c",
+            f'clickhouse disks --config /etc/clickhouse-server/config.xml --disk s3 --query "packed-io create --disk-from s3 {part_path} {output_file}" 2>&1',
+        ],
+        privileged=True,
+        user="root",
+        nothrow=True,
+    )
+    assert "nested under the input" in output, f"expected rejection, got: {output}"
