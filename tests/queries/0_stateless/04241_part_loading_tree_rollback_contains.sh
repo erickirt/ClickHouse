@@ -40,14 +40,23 @@ cleanup()
     # A permanently detached table is invisible to `DROP TABLE` (`UNKNOWN_TABLE`) while its
     # name still blocks `CREATE TABLE`, so on failure paths that exit before `ATTACH TABLE`
     # succeeds the table must be re-attached before dropping.
-    local still_detached part
-    still_detached=$($CLICKHOUSE_CLIENT -q "
-        SELECT count() FROM system.detached_tables
+    #
+    # `cleanup` runs both from the `EXIT` trap and once at startup to recover a table leaked by
+    # a previous failed attempt. The startup call happens before the in-shell `DATA_PATH` is
+    # assigned, so the fabricated part directories (whose transaction metadata is what could
+    # make `ATTACH TABLE` throw) are located from the detached table's own `uuid` instead:
+    # the data path `<disk>/store/<uuid[0:3]>/<uuid>` is stable across restarts and is
+    # available whenever the table is present in `system.detached_tables`.
+    local detached_uuid disk_path data_path part
+    detached_uuid=$($CLICKHOUSE_CLIENT -q "
+        SELECT uuid FROM system.detached_tables
         WHERE database = currentDatabase() AND table = '${TABLE}'" 2>/dev/null)
-    if [ "${still_detached}" = "1" ]; then
-        if [ -n "${DATA_PATH:-}" ]; then
+    if [ -n "${detached_uuid}" ]; then
+        disk_path=$($CLICKHOUSE_CLIENT -q "SELECT path FROM system.disks WHERE name = 'default'" 2>/dev/null)
+        if [ -n "${disk_path}" ]; then
+            data_path="${disk_path}store/${detached_uuid:0:3}/${detached_uuid}"
             for part in ${FABRICATED_PARTS}; do
-                rm -rf "${DATA_PATH:?}/${part}"
+                rm -rf "${data_path:?}/${part}"
             done
         fi
         $CLICKHOUSE_CLIENT -q "ATTACH TABLE ${TABLE}" 2>/dev/null
