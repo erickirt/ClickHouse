@@ -158,9 +158,14 @@ def remote_branch_exists(branch):
 
 
 def get_pr_states(branch):
+    """States of the PRs from the repository's own branch `branch`. Fork PRs
+    that happen to use the same head branch name are excluded: they must not
+    make the job think its own PR already exists or was closed."""
     out = Shell.get_output(
         f"gh pr list --head {branch} --base master --state all "
-        "--json number,state --jq '.[] | \"\\(.number) \\(.state)\"'",
+        f"--repo {shlex.quote(Info().repo_name)} "
+        "--json number,state,isCrossRepository "
+        "--jq '.[] | select(.isCrossRepository | not) | \"\\(.number) \\(.state)\"'",
         strict=True,
     )
     return [tuple(line.split()) for line in out.splitlines() if line.strip()]
@@ -270,10 +275,11 @@ def compose_on_master(master_text, version, toc_line, raw_blocks, section):
     return text
 
 
-def _reset_worktree():
-    """Restore all tracked files to HEAD (fail-closed cleanup after a bad
-    edit attempt)."""
-    Shell.check("git reset --hard HEAD", verbose=True, strict=True)
+def _reset_worktree(base_sha):
+    """Restore the branch and all tracked files to the given commit
+    (fail-closed cleanup after a bad edit attempt, including one where the
+    editing agent created commits of its own)."""
+    Shell.check(f"git reset --hard {base_sha}", verbose=True, strict=True)
 
 
 def _read_changelog():
@@ -437,9 +443,14 @@ The `gh` CLI is authenticated; use `gh pr view <N> --json title,body` when the s
 """
 
 
-def verify_edit(version):
-    """Fail-closed checks after the editing agent ran. Returns error or None."""
-    changed = Shell.get_output("git diff --name-only HEAD", strict=True).split()
+def verify_edit(version, base_sha):
+    """Fail-closed checks after the editing agent ran, all against the
+    pre-edit generate commit `base_sha` rather than a mutable HEAD (the agent
+    has git access, and an agent-made commit must not bypass the checks).
+    Returns an error string or None."""
+    if _sha("HEAD") != base_sha:
+        return "The editing agent created commits instead of leaving the edit uncommitted"
+    changed = Shell.get_output(f"git diff --name-only {base_sha}", strict=True).split()
     if changed != [CHANGELOG_FILE]:
         return f"Unexpected working tree changes after edit: {changed or 'none'}"
     text = _read_changelog()
@@ -450,7 +461,7 @@ def verify_edit(version):
         return f"In-progress section for {version} is missing after edit"
     if not extract_toc_line(text, version):
         return f"Table-of-contents line for {version} is missing after edit"
-    old_text = Shell.get_output(f"git show HEAD:{CHANGELOG_FILE}", strict=True)
+    old_text = Shell.get_output(f"git show {base_sha}:{CHANGELOG_FILE}", strict=True)
     section = extract_in_progress_section(text, anchor)
     old_section = extract_in_progress_section(old_text, anchor) or ""
     if section is None:
@@ -476,13 +487,16 @@ def edit_raw_entries(version):
         name=OPENAI_KEY_SECRET, type=Secret.Type.AWS_SSM_PARAMETER
     ).get_value()
 
+    # The generate commit the edit must be based on; every verification and
+    # cleanup is pinned to this SHA, not to HEAD, which the agent can move.
+    base_sha = _sha("HEAD")
     last_error = None
     for attempt in range(1, MAX_EDIT_ATTEMPTS + 1):
         # Full reset to the generate commit: a failed attempt may have left
-        # changes beyond CHANGELOG.md (that is one of the verify_edit failure
-        # modes), and they must not leak into the next attempt or the next
-        # processed version.
-        _reset_worktree()
+        # changes beyond CHANGELOG.md or even commits (both are verify_edit
+        # failure modes), and they must not leak into the next attempt or the
+        # next processed version.
+        _reset_worktree(base_sha)
         # The GitHub App token expires after an hour and an editing attempt
         # can run long; refresh so the agent's `gh pr view` calls work.
         GHAuth.auth_from_settings()
@@ -512,7 +526,7 @@ def edit_raw_entries(version):
             last_error = f"{type(e).__name__}: {e}"
             traceback.print_exc()
         if not last_error:
-            last_error = verify_edit(version)
+            last_error = verify_edit(version, base_sha)
         if not last_error:
             break
         print(
@@ -522,7 +536,7 @@ def edit_raw_entries(version):
             time.sleep(min(2**attempt, 60))
 
     if last_error:
-        _reset_worktree()
+        _reset_worktree(base_sha)
         raise RuntimeError(
             f"Editing failed after {MAX_EDIT_ATTEMPTS} attempts: {last_error}. "
             f"The raw entries stay committed and will be edited by the next run."
@@ -591,6 +605,7 @@ This pull request stays a draft until the release. The release manager finalizes
     try:
         Shell.check(
             f"gh pr create --draft --base master --head {branch} "
+            f"--repo {shlex.quote(Info().repo_name)} "
             f'--title {shlex.quote(f"Prepare changelog for {version}")} '
             f'--label "do not test" --body-file {shlex.quote(body_file)}',
             verbose=True,
