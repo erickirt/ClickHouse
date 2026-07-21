@@ -42,6 +42,7 @@ import traceback
 
 from ci.praktika import Secret
 from ci.praktika.gh_auth import GHAuth
+from ci.praktika.info import Info
 from ci.praktika.result import Result
 from ci.praktika.utils import Shell
 
@@ -116,13 +117,40 @@ def get_cycle_end_ref(version, master_version):
 
 
 def get_last_generated_sha(branch):
-    """Read the state trailer from the branch-only commits, newest first."""
-    log = Shell.get_output(f"git log --format=%B origin/master..origin/{branch}")
+    """Read the state trailer from the branch-only commits, newest first.
+    Requires origin/{branch} to be fetched (checkout_branch does that)."""
+    log = Shell.get_output(
+        f"git log --format=%B origin/master..origin/{branch}", strict=True
+    )
     for line in log.splitlines():
         m = re.fullmatch(rf"{STATE_TRAILER}\s*([0-9a-f]{{40}})", line.strip())
         if m:
             return m.group(1)
     return None
+
+
+def determine_from_ref(version, branch, exists_on_remote):
+    """The point to continue the generation from: the last state trailer of
+    the branch, or the cycle start tag for a fresh branch. Must run after
+    checkout_branch. Refuses the tag fallback when the branch already carries
+    changelog content: regenerating from the cycle start would duplicate the
+    entries that were already integrated."""
+    if exists_on_remote:
+        from_ref = get_last_generated_sha(branch)
+        if from_ref:
+            return from_ref
+        text = _read_changelog()
+        if (
+            RAW_BEGIN_PREFIX in text
+            or extract_in_progress_section(text, _anchor_id(version)) is not None
+        ):
+            raise RuntimeError(
+                f"Branch {branch} contains changelog content for {version} but "
+                f"no '{STATE_TRAILER}' trailer in "
+                f"origin/master..origin/{branch}; refusing to regenerate from "
+                f"the cycle start, manual investigation required"
+            )
+    return _start_tag(version)
 
 
 def remote_branch_exists(branch):
@@ -242,6 +270,12 @@ def compose_on_master(master_text, version, toc_line, raw_blocks, section):
     return text
 
 
+def _reset_worktree():
+    """Restore all tracked files to HEAD (fail-closed cleanup after a bad
+    edit attempt)."""
+    Shell.check("git reset --hard HEAD", verbose=True, strict=True)
+
+
 def _read_changelog():
     with open(CHANGELOG_FILE, encoding="utf-8") as fd:
         return fd.read()
@@ -260,7 +294,14 @@ def _write_changelog(text):
 def prepare_repo():
     if Shell.get_output("git rev-parse --is-shallow-repository").strip() == "true":
         Shell.check("git fetch --unshallow origin", verbose=True, strict=True)
-    Shell.check("git fetch --tags origin master", verbose=True, strict=True)
+    # Explicit refspec: the CI checkout restricts remote.origin.fetch to the
+    # triggering ref, so a plain `git fetch origin master` would not be
+    # guaranteed to update the remote-tracking ref.
+    Shell.check(
+        "git fetch --tags origin '+refs/heads/master:refs/remotes/origin/master'",
+        verbose=True,
+        strict=True,
+    )
     Shell.check(
         'git config user.name "robot-clickhouse" && '
         'git config user.email "robot-clickhouse@users.noreply.github.com"',
@@ -272,7 +313,13 @@ def prepare_repo():
 
 def checkout_branch(branch, exists_on_remote):
     if exists_on_remote:
-        Shell.check(f"git fetch origin {branch}", verbose=True, strict=True)
+        # Explicit refspec, see prepare_repo.
+        Shell.check(
+            f"git fetch origin "
+            f"'+refs/heads/{branch}:refs/remotes/origin/{branch}'",
+            verbose=True,
+            strict=True,
+        )
         Shell.check(
             f"git checkout -B {branch} origin/{branch}", verbose=True, strict=True
         )
@@ -431,7 +478,11 @@ def edit_raw_entries(version):
 
     last_error = None
     for attempt in range(1, MAX_EDIT_ATTEMPTS + 1):
-        Shell.check(f"git checkout -- {CHANGELOG_FILE}", strict=True)
+        # Full reset to the generate commit: a failed attempt may have left
+        # changes beyond CHANGELOG.md (that is one of the verify_edit failure
+        # modes), and they must not leak into the next attempt or the next
+        # processed version.
+        _reset_worktree()
         # The GitHub App token expires after an hour and an editing attempt
         # can run long; refresh so the agent's `gh pr view` calls work.
         GHAuth.auth_from_settings()
@@ -471,7 +522,7 @@ def edit_raw_entries(version):
             time.sleep(min(2**attempt, 60))
 
     if last_error:
-        Shell.check(f"git checkout -- {CHANGELOG_FILE}", strict=True)
+        _reset_worktree()
         raise RuntimeError(
             f"Editing failed after {MAX_EDIT_ATTEMPTS} attempts: {last_error}. "
             f"The raw entries stay committed and will be edited by the next run."
@@ -490,7 +541,26 @@ def push_branch(branch, exists_on_remote):
     ahead_of = f"origin/{branch}" if exists_on_remote else "origin/master"
     if not Shell.get_output(f"git log --oneline {ahead_of}..HEAD").strip():
         return "Nothing to push"
-    Shell.check(f"git push origin {branch}", verbose=True, strict=True)
+    # Push with the App token rather than the GITHUB_TOKEN that the checkout
+    # action persists in the http extraheader: GITHUB_TOKEN pushes do not
+    # trigger workflow runs, so the PR would get no CI on refreshes. Same
+    # pattern as the workflow-regeneration push in praktika's native_jobs.
+    # The token expands at run time and is kept out of the logs
+    # (verbose=False); the inherited extraheader is cleared so the tokenized
+    # URL is the one that authenticates.
+    repo_url = (
+        "https://x-access-token:${token}@github.com/"
+        + shlex.quote(Info().repo_name)
+        + ".git"
+    )
+    refspec = shlex.quote(f"HEAD:refs/heads/{branch}")
+    if not Shell.check(
+        'token="$(gh auth token)" && '
+        "git -c http.https://github.com/.extraheader= push "
+        f"{repo_url} {refspec}",
+        verbose=False,
+    ):
+        raise RuntimeError(f"Failed to push {branch}")
     return f"Pushed {branch}"
 
 
@@ -573,11 +643,9 @@ def process_version(version, master_version, results):
     if states and not any(state == "OPEN" for _, state in states):
         return _skip(f"PR for {branch} was closed or merged ({states})")
 
-    from_ref = (get_last_generated_sha(branch) if exists else None) or _start_tag(
-        version
-    )
-
     checkout_branch(branch, exists)
+    from_ref = determine_from_ref(version, branch, exists)
+
     ok = True
     if exists and is_current:
         ok = _step(
