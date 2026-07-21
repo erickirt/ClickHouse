@@ -3527,12 +3527,15 @@ public:
                     auto arg_type = removeNullable(recursiveRemoveLowCardinality(left.type));
                     auto divisor_type = removeNullable(recursiveRemoveLowCardinality(right.type));
 
-                    // `intDiv` by a Decimal constant computes in the decimal's native signed width
-                    // (see `DecimalBinaryOperation`/`DivideIntegralImpl<NativeResultType, NativeResultType>`):
-                    // the dividend is cast into that width and pre-multiplied by the scale, so it wraps or
+                    // `intDiv` or `divide` by a Decimal constant computes in the decimal's native signed
+                    // width (`DecimalBinaryOperation` feeds both operands into
+                    // `DivideIntegralImpl<NativeResultType, NativeResultType>` for both functions): the
+                    // dividend is cast into that width and pre-multiplied by the scale, so it wraps or
                     // truncates at a boundary that depends on the decimal width and scale, not on the
                     // dividend width. That boundary is not cheaply modelled, so do not claim monotonicity.
-                    if (name_view == "intDiv" && isDecimal(divisor_type))
+                    // Only a Decimal divisor takes this integral path; a Float divisor computes through
+                    // floating point and stays monotonic.
+                    if ((name_view == "intDiv" || name_view == "divide") && isDecimal(divisor_type))
                         return {false, true, false, false};
 
                     // `intDiv(unsigned, signed-integer-const)` reinterprets the dividend through a signed
@@ -3689,12 +3692,15 @@ public:
                 auto arg_type = removeNullable(recursiveRemoveLowCardinality(left.type));
                 auto divisor_type = removeNullable(recursiveRemoveLowCardinality(right.type));
 
-                // `intDiv` by a Decimal constant computes in the decimal's native signed width
-                // (see `DecimalBinaryOperation`/`DivideIntegralImpl<NativeResultType, NativeResultType>`):
-                // the dividend is cast into that width and pre-multiplied by the scale, so it wraps or
+                // `intDiv` or `divide` by a Decimal constant computes in the decimal's native signed
+                // width (`DecimalBinaryOperation` feeds both operands into
+                // `DivideIntegralImpl<NativeResultType, NativeResultType>` for both functions): the
+                // dividend is cast into that width and pre-multiplied by the scale, so it wraps or
                 // truncates at a boundary that depends on the decimal width and scale, not on the
                 // dividend width. That boundary is not cheaply modelled, so do not claim monotonicity.
-                if (name_view == "intDiv" && isDecimal(divisor_type))
+                // Only a Decimal divisor takes this integral path; a Float divisor computes through
+                // floating point and stays monotonic.
+                if ((name_view == "intDiv" || name_view == "divide") && isDecimal(divisor_type))
                     return {false, true, false, false};
 
                 // `intDiv(unsigned, signed-integer-const)` is a step function (see
