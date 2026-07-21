@@ -279,23 +279,54 @@ STRICT_RETENTION_CATEGORIES = {
 }
 
 
+# A bullet that IS a revert: the entry text (the generator uses the PR title
+# for entries without a changelog description) starts with "Revert"/"Reverts"
+# — possibly wrapped in the NO CL ENTRY prefix — or quotes a git revert
+# commit message. A bullet merely mentioning reverts ("Improve revert
+# logic ...") earns no deletion credit.
+_REVERT_ENTRY_RE = re.compile(
+    r"""(?ix)^\*\s* (?:NO\ CL\ ENTRY:\s*'?\s*)? revert(s|ed)?\b"""
+)
+
+
 def raw_strict_prs_and_reverts(text):
     """From the raw marker blocks in `text`: the attribution PR numbers of
-    entries under the strict-retention categories, and the number of
-    revert-flavored entries (each licenses at most one entry deletion)."""
+    entries under the strict-retention categories, and the PR numbers of the
+    revert entries (each licenses the deletion of the entry it reverts)."""
     strict_prs = set()
-    reverts = 0
+    revert_prs = []
     for block in extract_raw_blocks(text):
         category = None
         for line in block.splitlines():
             if line.startswith("#### "):
                 category = line[5:].strip()
             elif line.startswith("* "):
-                if re.search(r"revert", line, re.IGNORECASE):
-                    reverts += 1
+                if _REVERT_ENTRY_RE.match(line) or "this reverts commit" in line.lower():
+                    revert_prs.extend(PR_ATTRIBUTION_RE.findall(line))
                 if category in STRICT_RETENTION_CATEGORIES:
                     strict_prs.update(PR_ATTRIBUTION_RE.findall(line))
-    return strict_prs, reverts
+    return strict_prs, revert_prs
+
+
+def resolve_reverted_originals(revert_prs):
+    """Map revert PRs to the PRs they revert, via the `Reverts owner/repo#N`
+    line GitHub puts into revert PR bodies. Returns (originals, unresolved):
+    a deletion is bound to a resolved original; each unresolved revert (a
+    manual revert without the marker, or a failed lookup) keeps licensing
+    one arbitrary deletion instead."""
+    originals = set()
+    unresolved = 0
+    for pr in revert_prs:
+        body = Shell.get_output(
+            f"gh pr view {pr} --repo {shlex.quote(Info().repo_name)} "
+            "--json body --jq .body"
+        )
+        found = re.findall(r"(?i)reverts\s+[\w.-]+/[\w.-]+#(\d+)", body)
+        if found:
+            originals.update(found)
+        else:
+            unresolved += 1
+    return originals, unresolved
 
 
 def compose_on_master(master_text, version, toc_line, raw_blocks, section):
@@ -552,19 +583,22 @@ def verify_edit(version, base_sha, pre_untracked=frozenset()):
     # checkable — instead each revert entry in the raw block justifies at
     # most one loss, and a raw block without reverts justifies none.
     removed = extract_pr_links(old_section) - extract_pr_links(section)
-    strict_prs, reverts = raw_strict_prs_and_reverts(old_text)
+    strict_prs, revert_prs = raw_strict_prs_and_reverts(old_text)
     # Membership is checked against the whole file: an entry may
     # legitimately already sit in a previously released section (a PR merged
     # into the last release branch after the cycle start appears in the
     # range but was already published).
     lost_new = {pr for pr in strict_prs if f"/pull/{pr})" not in text}
     disappeared = removed | lost_new
-    if len(disappeared) > reverts:
-        return (
-            f"{len(disappeared)} entries disappeared in the edit "
-            f"({sorted(disappeared)}) but the raw block contains only "
-            f"{reverts} revert entries"
-        )
+    if disappeared:
+        originals, unresolved = resolve_reverted_originals(revert_prs)
+        unmatched = disappeared - originals
+        if len(unmatched) > unresolved:
+            return (
+                f"Entries disappeared in the edit without a matching revert "
+                f"({sorted(unmatched)}); the raw block's reverts resolve to "
+                f"{sorted(originals) or 'nothing'} plus {unresolved} unresolved"
+            )
     _, old_tail = split_at_first_released_section(old_text, anchor)
     _, new_tail = split_at_first_released_section(text, anchor)
     if old_tail.rstrip() != new_tail.rstrip():

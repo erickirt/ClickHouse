@@ -461,20 +461,51 @@ def test_verify_edit_deletion_needs_revert(scratch_repo):
     with open(m.CHANGELOG_FILE, "w") as fd:
         fd.write(with_section)
     assert m.verify_edit("26.7", base_sha) is None
-    # Raw block with one revert: one deletion is allowed, two are not.
+    # Raw block with one revert resolving to #111112: deleting #111112 is
+    # allowed, deleting more (or other entries) is not. The resolver is
+    # stubbed: tests must not call gh.
     m._reset_worktree(base_sha)
     base_sha = make_base(REVERT_BLOCK)
-    with open(m.CHANGELOG_FILE, "w") as fd:
-        fd.write(dropped_bar)
-    assert m.verify_edit("26.7", base_sha) is None
-    dropped_both = dropped_bar.replace(
-        "* Added function `foo`. [#111111](https://github.com/ClickHouse/ClickHouse/pull/111111) ([A](https://github.com/a)).\n",
-        "",
+    import unittest.mock as mock
+
+    with mock.patch.object(
+        m, "resolve_reverted_originals", return_value=({"111112"}, 0)
+    ):
+        with open(m.CHANGELOG_FILE, "w") as fd:
+            fd.write(dropped_bar)
+        assert m.verify_edit("26.7", base_sha) is None
+        dropped_both = dropped_bar.replace(
+            "* Added function `foo`. [#111111](https://github.com/ClickHouse/ClickHouse/pull/111111) ([A](https://github.com/a)).\n",
+            "",
+        )
+        with open(m.CHANGELOG_FILE, "w") as fd:
+            fd.write(dropped_both)
+        error = m.verify_edit("26.7", base_sha)
+        assert "disappeared" in error and "111111" in error
+    # An unresolvable revert (no `Reverts owner/repo#N` marker) falls back to
+    # licensing one arbitrary deletion.
+    with mock.patch.object(
+        m, "resolve_reverted_originals", return_value=(set(), 1)
+    ):
+        with open(m.CHANGELOG_FILE, "w") as fd:
+            fd.write(dropped_bar)
+        assert m.verify_edit("26.7", base_sha) is None
+
+
+def test_revert_entry_detection():
+    """Only bullets that ARE reverts earn deletion credit."""
+    block = m.make_raw_block(
+        "### header\n"
+        "#### NO CL ENTRY\n"
+        "* NO CL ENTRY:  'Revert \"Add function `bar`\"'. [#1](https://github.com/ClickHouse/ClickHouse/pull/1) ([A](https://github.com/a)).\n"
+        "* Reverts ClickHouse/ClickHouse#2. [#3](https://github.com/ClickHouse/ClickHouse/pull/3) ([A](https://github.com/a)).\n"
+        "#### Improvement\n"
+        "* Improve revert logic in backup restore. [#4](https://github.com/ClickHouse/ClickHouse/pull/4) ([A](https://github.com/a)).\n"
+        "* This reverts commit abc123 which broke X. [#5](https://github.com/ClickHouse/ClickHouse/pull/5) ([A](https://github.com/a)).\n"
     )
-    with open(m.CHANGELOG_FILE, "w") as fd:
-        fd.write(dropped_both)
-    error = m.verify_edit("26.7", base_sha)
-    assert "disappeared" in error and "111111" in error
+    strict, reverts = m.raw_strict_prs_and_reverts(block)
+    assert set(reverts) == {"1", "3", "5"}
+    assert "4" in strict and "5" in strict
 
 
 def test_verify_edit_rejects_lost_new_entries(scratch_repo):
