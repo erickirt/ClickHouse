@@ -65,7 +65,8 @@ ${CLICKHOUSE_CURL} -sS \
     --data-binary "
         INSERT INTO values_fallback (id, target_tags, raw_json_as_string, raw_json_as_map, activity_type)
         VALUES (1 + 0, {'3f37a58df98ba6e2': ['aaaa']}, '{}', {}, 'ADMINISTRATION'),
-               (+2, {}, '{}', {}, 'OTHER')" > /dev/null
+               (+2, {}, '{}', {}, 'OTHER'),
+               ((SELECT 3), {}, '{}', {}, 'OTHER')" > /dev/null
 
 $CLICKHOUSE_CLIENT -q "SELECT id, target_ids, target_tags, raw_json_as_string, raw_json_as_map, activity_type FROM values_fallback ORDER BY id"
 

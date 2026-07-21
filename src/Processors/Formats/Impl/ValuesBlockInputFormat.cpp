@@ -266,7 +266,7 @@ bool ValuesBlockInputFormat::tryParseExpressionUsingTemplate(MutableColumnPtr & 
 
     /// Try to parse expression using template if one was successfully deduced while parsing the first row
     const auto & settings = context->getSettingsRef();
-    bool parsed;
+    bool parsed = false;
     try
     {
         Exception::SuppressErrorCodesScope suppress_error_codes;
@@ -543,6 +543,7 @@ bool ValuesBlockInputFormat::parseExpression(IColumn & column, size_t column_idx
         std::exception_ptr exception;
         try
         {
+            Exception::SuppressErrorCodesScope suppress_error_codes;
             bool found_in_cache = false;
             const auto & result_type = header.getByPosition(column_idx).type;
             const char * delimiter = (column_idx + 1 == num_columns) ? ")" : ",";
@@ -567,14 +568,11 @@ bool ValuesBlockInputFormat::parseExpression(IColumn & column, size_t column_idx
                 ++attempts_to_deduce_template[column_idx];
 
             buf->rollbackToCheckpoint();
+            if (templates[column_idx]->parseExpression(*buf, *ti_start, format_settings, settings))
             {
-                Exception::SuppressErrorCodesScope suppress_error_codes;
-                if (templates[column_idx]->parseExpression(*buf, *ti_start, format_settings, settings))
-                {
-                    ++rows_parsed_using_template[column_idx];
-                    parser_type_for_column[column_idx] = ParserType::BatchTemplate;
-                    return true;
-                }
+                ++rows_parsed_using_template[column_idx];
+                parser_type_for_column[column_idx] = ParserType::BatchTemplate;
+                return true;
             }
         }
         catch (...)
