@@ -4,25 +4,32 @@
 -- A bare non-UInt8 column in WHERE is an implicit-boolean filter (`a != 0`).
 -- The projection read path (optimize_use_projections = 1) and the parallel-replicas
 -- read path used to reject it with ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER (Code 59).
--- The result checks below verify all paths agree; the plan-shape checks verify the
--- projection and parallel-replicas paths are actually taken, so a silent fallback to
--- a plain local read cannot leave the regression uncovered.
 
 DROP TABLE IF EXISTS t_04371;
 
-CREATE TABLE t_04371 (a UInt32, b UInt32, PROJECTION p (SELECT a, count() GROUP BY a))
-ENGINE = MergeTree ORDER BY b;
+-- Table and projection match the issue: the projection groups by b, and the reproducer
+-- filters on a, so the implicit-boolean filter column is not the projection key/output.
+CREATE TABLE t_04371 (a UInt32, b UInt32, PROJECTION p (SELECT b, count() GROUP BY b))
+ENGINE = MergeTree ORDER BY a;
 INSERT INTO t_04371 SELECT number, number % 5 FROM numbers(100);
 
 SELECT '-- normal path';
-SELECT a, count() FROM t_04371 WHERE a GROUP BY a ORDER BY a LIMIT 5
-SETTINGS optimize_use_projections = 0, enable_parallel_replicas = 0;
+SELECT b, count() FROM t_04371 WHERE a GROUP BY b ORDER BY b
+SETTINGS optimize_use_projections = 0;
 
--- projection path: force_optimize_projection = 1 throws PROJECTION_NOT_USED if the
--- projection is not chosen, so this deterministically asserts the projection path is taken.
+-- Issue #110795 reproducer. WHERE a filters on a column not stored in the projection,
+-- so the projection is not chosen (force_optimize_projection would throw PROJECTION_NOT_USED
+-- here); enabling projections still triggered the Code 59 rejection during planning, so
+-- result-parity with the normal path is the regression lock for this exact shape.
+SELECT '-- issue #110795 reproducer';
+SELECT b, count() FROM t_04371 WHERE a GROUP BY b ORDER BY b
+SETTINGS optimize_use_projections = 1;
+
+-- When the implicit-boolean filter is on the projection key the projection is chosen,
+-- so force_optimize_projection = 1 deterministically asserts the projection path is taken.
 SELECT '-- projection path (projection actually used)';
-SELECT a, count() FROM t_04371 WHERE a GROUP BY a ORDER BY a LIMIT 5
-SETTINGS optimize_use_projections = 1, force_optimize_projection = 1, enable_parallel_replicas = 0;
+SELECT b, count() FROM t_04371 WHERE b GROUP BY b ORDER BY b
+SETTINGS optimize_use_projections = 1, force_optimize_projection = 1;
 
 SET automatic_parallel_replicas_mode = 0;
 SET enable_parallel_replicas = 1, max_parallel_replicas = 3,
