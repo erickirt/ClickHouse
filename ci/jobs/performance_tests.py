@@ -493,6 +493,82 @@ def get_perf_arch():
     Utils.raise_with_error("Unknown processor architecture")
 
 
+def get_physical_core_cpu_list():
+    """Return a taskset -c CPU list with one hyperthread per physical core.
+
+    On the x86_64 perf runner (m7i.4xlarge: 8 physical cores x 2 hyperthreads)
+    both measured servers are pinned to this list so that query threads never
+    end up sharing a hyperthread sibling with each other depending on scheduler
+    mood - a top suspect for the amd-vs-arm A/A noise gap (0.51% vs 0.42%).
+
+    Parses /sys/devices/system/cpu/cpu*/topology/thread_siblings_list and keeps
+    the first sibling of each unique pair; falls back to cpus 0..(nproc/2 - 1)
+    if the sysfs topology is unavailable. Only call at runtime on the Linux CI
+    host (there is no /sys on macOS) - never at import time.
+
+    Must stay in sync with cpu_pinning_prefix in ci/jobs/scripts/perf/compare.sh
+    (the server restart path used by the confirm-changes stage).
+    """
+    cpus = set()
+    try:
+        for path in Path("/sys/devices/system/cpu").glob(
+            "cpu[0-9]*/topology/thread_siblings_list"
+        ):
+            # Formats seen in the wild: "0,8", "0-1", "0" (no SMT).
+            first = re.split(r"[,-]", path.read_text().strip())[0]
+            cpus.add(int(first))
+    except (OSError, ValueError, IndexError):
+        cpus = set()
+    if not cpus:
+        print(
+            "WARNING: could not parse cpu topology from sysfs, "
+            "falling back to the first half of the cpus"
+        )
+        cpus = set(range(max((os.cpu_count() or 2) // 2, 1)))
+    return ",".join(str(cpu) for cpu in sorted(cpus))
+
+
+# users.d override applied only on x86_64, where both servers are pinned with
+# taskset to one hyperthread per physical core (see get_physical_core_cpu_list).
+# The static default (max_threads=12, tests/performance/scripts/config/users.d/
+# perf-comparison-tweaks-users.xml) is kept for arm (m8g.4xlarge: 16 real
+# cores). The zzz- prefix makes this file sort after (and thus override) the
+# static users.d files.
+MAX_THREADS_OVERRIDE_FILE = "zzz-cpu-pinning-max-threads.xml"
+MAX_THREADS_OVERRIDE_XML = """\
+<!--
+    Written by ci/jobs/performance_tests.py at job setup, x86_64 only (arm
+    keeps max_threads=12 from perf-comparison-tweaks-users.xml).
+
+    The x86_64 runner (m7i.4xlarge) has 8 physical cores x 2 hyperthreads and
+    both servers are pinned with taskset to one hyperthread per physical core.
+    max_threads=8 matches that CPU set: one query thread per physical core, so
+    whether two threads share a hyperthread sibling no longer depends on the
+    scheduler (measured A/A noise: amd 0.51% vs arm 0.42%).
+-->
+<clickhouse>
+    <profiles>
+        <default>
+            <max_threads>8</max_threads>
+        </default>
+    </profiles>
+</clickhouse>
+"""
+
+
+def write_max_threads_override():
+    """Write the x86_64 max_threads override into both servers' users.d."""
+    if not Utils.is_amd():
+        print("Not x86_64 - keeping the static max_threads")
+        return True
+    for config_dir in (perf_left_config, perf_right_config):
+        target = Path(config_dir) / "users.d" / MAX_THREADS_OVERRIDE_FILE
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(MAX_THREADS_OVERRIDE_XML)
+        print(f"Wrote max_threads override to [{target}]")
+    return True
+
+
 def build_perf_query_history_link(test_name, check_name):
     """Build a ClickHouse Play link showing performance history for a query on master."""
     table = Settings.CI_DB_TABLE_NAME or "checks"
@@ -775,11 +851,20 @@ class CHServer:
         self.server_path = serever_path
         self.name = "Reference" if is_left else "Patched"
 
+        # On x86_64 pin both servers to one hyperthread per physical core (the
+        # same list for both: they are measured alternately, not concurrently).
+        # Together with the max_threads=8 users.d override this keeps one query
+        # thread per physical core and removes scheduler-dependent hyperthread
+        # sibling sharing. arm (real cores only) is unchanged.
+        taskset_prefix = (
+            f"taskset -c {get_physical_core_cpu_list()} " if Utils.is_amd() else ""
+        )
+
         # The perf-comparison config removes <http_port>; re-enable it on the
         # command line (a documented config override, see Server.cpp) with a
         # distinct port per server, so that shell-script tests can talk to the
         # server over HTTP.
-        self.start_cmd = f"{serever_path}/clickhouse-server --config-file={serever_path}/config/config.xml \
+        self.start_cmd = f"{taskset_prefix}{serever_path}/clickhouse-server --config-file={serever_path}/config/config.xml \
             -- --path {serever_path}/db --user_files_path {serever_path}/db/user_files \
             --top_level_domains_path {serever_path}/top_level_domains --tcp_port {server_port} \
             --http_port {http_port} \
@@ -1291,6 +1376,9 @@ def main():
             f"mkdir -p {perf_left}/coordination {perf_right}/coordination",
             # Symlink user_files from the repository into both servers' user_files directories
             f'for f in ./tests/performance/user_files/*; do [ -e "$f" ] || continue; ln -sf "$(readlink -f "$f")" {perf_left}/db/user_files/; ln -sf "$(readlink -f "$f")" {perf_right}/db/user_files/; done',
+            # On x86_64, cap max_threads at the number of pinned physical
+            # cores (must run after the right->left config copy above).
+            write_max_threads_override,
         ]
         results.append(Result.from_commands_run(name="Configure", command=commands))
         res = results[-1].is_ok()

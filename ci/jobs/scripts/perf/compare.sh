@@ -175,12 +175,46 @@ function match_reference_debug_info
     fi
 }
 
+# On x86_64 the measured servers are pinned to one hyperthread per physical
+# core (m7i.4xlarge: 8 physical cores x 2 HT), so that whether two query
+# threads share a hyperthread sibling does not depend on the scheduler; the
+# matching max_threads=8 users.d override is written at job setup. Prints a
+# "taskset -c <list>" prefix on x86_64 and nothing on other architectures
+# (arm has real cores only and is unchanged). Must stay in sync with
+# get_physical_core_cpu_list in ci/jobs/performance_tests.py, which pins the
+# initial server starts the same way.
+function cpu_pinning_prefix
+{
+    if [ "$(uname -m)" != "x86_64" ]
+    then
+        return 0
+    fi
+    local cpus half
+    # thread_siblings_list formats: "0,8", "0-1", "0" (no SMT). Keep the
+    # first sibling of each unique pair.
+    cpus=$(sed 's/[,-].*//' /sys/devices/system/cpu/cpu*/topology/thread_siblings_list 2>/dev/null \
+        | sort -un | paste -sd, - ||:)
+    if [ -z "$cpus" ]
+    then
+        # Fallback: the first half of the cpus (siblings are enumerated after
+        # all physical cores on our runners).
+        half=$(( $(nproc) / 2 ))
+        if [ "$half" -lt 1 ]; then half=1; fi
+        cpus="0-$(( half - 1 ))"
+    fi
+    echo "taskset -c $cpus"
+}
+
 function restart
 {
     while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
     echo all killed
 
     match_reference_debug_info
+
+    # Intentionally unquoted below: expands to nothing on non-x86_64.
+    local pinning_prefix
+    pinning_prefix=$(cpu_pinning_prefix)
 
     set -m # Spawn servers in their own process groups
 
@@ -204,7 +238,7 @@ function restart
         --interserver_http_port $LEFT_SERVER_INTERSERVER_PORT
         --jemalloc_profiler_sampling_rate $JEMALLOC_PROFILER_SAMPLING_RATE
     )
-    left/clickhouse-server "${left_server_opts[@]}" &>> left-server-log.log &
+    $pinning_prefix left/clickhouse-server "${left_server_opts[@]}" &>> left-server-log.log &
     left_pid=$!
     kill -0 $left_pid
     disown $left_pid
@@ -226,7 +260,7 @@ function restart
         --interserver_http_port $RIGHT_SERVER_INTERSERVER_PORT
         --jemalloc_profiler_sampling_rate $JEMALLOC_PROFILER_SAMPLING_RATE
     )
-    right/clickhouse-server "${right_server_opts[@]}" &>> right-server-log.log &
+    $pinning_prefix right/clickhouse-server "${right_server_opts[@]}" &>> right-server-log.log &
     right_pid=$!
     kill -0 $right_pid
     disown $right_pid
