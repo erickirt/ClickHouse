@@ -946,10 +946,22 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
     }
     else if (disk->existsFile(getRelativeDataPath()))
     {
-        if (params.external_transaction)
+        /// Decide copy-vs-hardlink before transaction-vs-direct (mirrors the generic Backup path). A
+        /// detached clone of a zero-copy part sets copy_instead_of_hardlink so the detached part gets an
+        /// independent blob; the zero-copy bookkeeping then does not record hardlinks. Hardlinking
+        /// data.packed here (detached clones always arrive with an external transaction) would leave the
+        /// detached clone sharing an untracked blob that removing the source can delete. Honor the copy
+        /// request even inside an external transaction. anyArchivedFileRequestedForCopy covers a caller
+        /// that lists an archived file in files_to_copy_instead_of_hardlinks to get a fresh blob.
+        if (params.copy_instead_of_hardlink || anyArchivedFileRequestedForCopy(params.files_to_copy_instead_of_hardlinks))
+        {
+            if (params.external_transaction)
+                params.external_transaction->copyFile(getRelativeDataPath(), dest_storage->getRelativeDataPath(), read_settings, write_settings);
+            else
+                disk->copyFile(getRelativeDataPath(), *disk, dest_storage->getRelativeDataPath(), read_settings);
+        }
+        else if (params.external_transaction)
             params.external_transaction->createHardLink(getRelativeDataPath(), dest_storage->getRelativeDataPath());
-        else if (params.copy_instead_of_hardlink)
-            disk->copyFile(getRelativeDataPath(), *disk, dest_storage->getRelativeDataPath(), read_settings);
         else
             disk->createHardLink(getRelativeDataPath(), dest_storage->getRelativeDataPath());
     }
