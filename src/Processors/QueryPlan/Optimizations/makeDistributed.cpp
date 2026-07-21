@@ -75,6 +75,7 @@ void tryReplaceScatterGatherWithShuffle(QueryPlan::Node * node);
 void optimizeExchanges(QueryPlan::Node & root);
 void materializeConstantsForSetOperationBranches(QueryPlan::Node & root, QueryPlan::Nodes & nodes);
 bool planHasUnsupportedDistributedStep(const QueryPlan::Node & root);
+bool planContainsLogicalExchange(const QueryPlan::Node & root);
 void checkDistributedReadSupported(const QueryPlan::Node & root);
 void validateDistributedPlanBucketCounts(const QueryPlanOptimizationSettings & optimization_settings);
 Strings makeListOfShardsForReadStep(const IQueryPlanStep * read_step);
@@ -98,6 +99,23 @@ bool planHasUnsupportedDistributedStep(const QueryPlan::Node & root)
             || typeid_cast<const RollupStep *>(step)
             || typeid_cast<const CubeStep *>(step)
             || typeid_cast<const ExtremesStep *>(step))
+            return true;
+        for (const auto * child : node->children)
+            stack.push_back(child);
+    }
+    return false;
+}
+
+/// True if the plan already contains a logical exchange step, i.e. the tryMakeDistributed*
+/// transforms (the only source of exchanges) already ran on it.
+bool planContainsLogicalExchange(const QueryPlan::Node & root)
+{
+    std::vector<const QueryPlan::Node *> stack = {&root};
+    while (!stack.empty())
+    {
+        const auto * node = stack.back();
+        stack.pop_back();
+        if (dynamic_cast<const LogicalExchangeStep *>(node->step.get()))
             return true;
         for (const auto * child : node->children)
             stack.push_back(child);
