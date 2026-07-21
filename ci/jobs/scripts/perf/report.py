@@ -488,6 +488,45 @@ if args.report == "main":
 
     add_changes()
 
+    def add_unconfirmed_changes():
+        # Queries flagged as changed on the main run whose difference did not
+        # reproduce when rerun after a server restart (compare.sh's
+        # confirm_changes). They do not fail the check, but are kept visible
+        # with both the original and the rerun statistics.
+        #
+        # The confirmation step is optional and fail-open, so a missing file
+        # is normal and must not become a report error (which would fail the
+        # check) -- only read it if it exists.
+        if not os.path.exists("report/unconfirmed-changes.tsv"):
+            return
+        rows = tsvRows("report/unconfirmed-changes.tsv")
+        if not rows:
+            return
+
+        global tables
+        text = tableStart("Unconfirmed Changes")
+        columns = [
+            "Old,&nbsp;s",  # 0
+            "New,&nbsp;s",  # 1
+            "Relative difference (new&nbsp;&minus;&nbsp;old) / old",  # 2
+            "p&nbsp;<&nbsp;0.01 threshold",  # 3
+            "Rerun relative difference",  # 4
+            "Rerun threshold",  # 5
+            "Test",  # 6
+            "#",  # 7
+            "Query",  # 8
+        ]
+        text += tableHeader(columns)
+
+        for row in rows:
+            anchor = f"{currentTableAnchor()}.{row[6]}.{row[7]}"
+            text += tableRow(row, anchor=anchor)
+
+        text += tableEnd()
+        tables.append(text)
+
+    add_unconfirmed_changes()
+
     def add_unstable_queries():
         global unstable_queries, very_unstable_queries, tables
 

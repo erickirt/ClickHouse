@@ -699,6 +699,284 @@ create table query_metric_stats_denorm engine File(TSVWithNamesAndTypes,
 " $CHPC_REPORT_LOCAL_QUERY_SETTINGS -- $CHPC_REPORT_LOCAL_SERVER_SETTINGS 2> >(tee -a analyze/errors.log 1>&2)
 }
 
+# Confirm the queries flagged as changed by rerunning them on freshly restarted
+# servers. The changed_fail verdict from a single test pass is sensitive to
+# one-off environmental noise (page cache state, CPU frequency, noisy
+# neighbours), so before failing the check we rerun only the flagged queries
+# after a full server restart and demote the changes that do not reproduce.
+# Demoted queries stay visible in a separate 'Unconfirmed Changes' report table.
+#
+# This step is strictly advisory and FAIL-OPEN: on any error we log, leave
+# analyze-confirm/unconfirmed-queries.tsv absent or empty (which report() reads
+# as "demote nothing"), and return success, so a confirmation failure can never
+# change today's verdicts or fail the job. For the same reason nothing here
+# writes to analyze/errors.log or report/errors.log (a non-empty
+# report/errors.log fails the check) -- confirmation errors go to the job log
+# and analyze-confirm/errors.log only. The caller must invoke it as
+# `confirm_changes ||:` (this also disables errexit inside, so partial failures
+# fall through the explicit guards below instead of killing the script).
+function confirm_changes
+{
+rm -rf analyze-confirm ||:
+mkdir analyze-confirm analyze-confirm/tmp ||:
+
+# report() joins the per-query thresholds from historical-thresholds.tsv,
+# which may be absent in manual runs. Use a private empty copy then, instead
+# of creating the file at the path report() reads (fail-open: do not alter
+# the inputs of the main flow).
+if [ -e historical-thresholds.tsv ]
+then
+    cp historical-thresholds.tsv analyze-confirm/historical-thresholds.tsv
+else
+    touch analyze-confirm/historical-thresholds.tsv
+fi
+
+# 1. Collect the (test, query_index) pairs flagged as changed_fail, with the
+# same rule and thresholds as the 'queries' table in report(): client_time
+# metric, per-query threshold = ceil(greatest(0.15, historical, per-test), 2),
+# non-strict comparison with stat_threshold.
+if ! clickhouse-local --query "
+create view query_metric_stats as
+    select * from file('analyze/query-metric-stats-denorm.tsv',
+        TSVWithNamesAndTypes,
+        'test text, query_index int, metric_name text, left float, right float,
+            diff float, stat_threshold float')
+    ;
+
+create view query_display_names as select * from
+    file('analyze/query-display-names.tsv', TSV,
+        'test text, query_index int, query_display_name text')
+    ;
+
+create table flagged_queries engine File(TSV, 'analyze-confirm/flagged-queries.tsv')
+    as select
+        query_metric_stats.test test, query_metric_stats.query_index query_index,
+        diff, stat_threshold
+    from query_metric_stats
+    left join query_display_names
+        on query_metric_stats.test = query_display_names.test
+            and query_metric_stats.query_index = query_display_names.query_index
+    left join file('analyze-confirm/historical-thresholds.tsv', TSV,
+        'test text, query_index int, max_diff float, max_stat_threshold float,
+            query_display_name text') historical_thresholds
+        on query_metric_stats.test = historical_thresholds.test
+            and query_metric_stats.query_index = historical_thresholds.query_index
+            and query_display_names.query_display_name = historical_thresholds.query_display_name
+    left join file('analyze/report-thresholds.tsv', TSV,
+        'test text, report_threshold float') test_thresholds
+        on query_metric_stats.test = test_thresholds.test
+    where metric_name = 'client_time'
+        and abs(diff) > ceil(greatest(0.15, historical_thresholds.max_diff,
+            test_thresholds.report_threshold), 2)
+        and abs(diff) >= stat_threshold
+    order by test, query_index
+    ;
+" $CHPC_REPORT_LOCAL_QUERY_SETTINGS -- $CHPC_REPORT_LOCAL_SERVER_SETTINGS 2>> analyze-confirm/errors.log
+then
+    echo "confirm_changes: failed to compute the flagged query list, skipping confirmation"
+    return 0
+fi
+
+local flagged_count
+flagged_count=$(wc -l < analyze-confirm/flagged-queries.tsv)
+if [ "$flagged_count" -eq 0 ]
+then
+    echo "confirm_changes: no queries flagged as changed, nothing to confirm"
+    return 0
+fi
+# Cap the total confirmation cost: a PR that flags very many queries (e.g. a
+# global slowdown or a runaway environment) would double the test time, and
+# such wholesale changes do not need per-query confirmation anyway.
+if [ "$flagged_count" -gt 100 ]
+then
+    echo "confirm_changes: WARNING: $flagged_count flagged queries exceed the cap of 100, skipping confirmation"
+    return 0
+fi
+
+# 2. Restart both servers so that the reruns measure a fresh process state
+# (empty caches, unfragmented heap), reusing the main restart machinery.
+if ! restart
+then
+    echo "confirm_changes: server restart failed, skipping confirmation"
+    while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
+    echo all killed
+    return 0
+fi
+
+# 3. Rerun each affected test limited to its flagged query indexes, writing
+# raw results into analyze-confirm/ so the main *-raw.tsv files stay intact.
+# Mirror run_tests' test file resolution; fall back to the in-repo tests for
+# the CI flow where performance_tests.py runs the tests itself.
+local test_prefix
+if [ -v CHPC_TEST_PATH ]
+then
+    test_prefix="$CHPC_TEST_PATH"
+elif [ -d right/performance ]
+then
+    test_prefix=right/performance
+else
+    test_prefix="$script_dir/../../../../tests/performance"
+fi
+
+local perf_py="$script_dir/perf.py"
+if ! [ -e "$perf_py" ]
+then
+    perf_py="$script_dir/../../../../tests/performance/scripts/perf.py"
+fi
+
+# Also cap the confirmation wall-clock time. Tests not rerun keep their
+# original verdict (fail-open in the strict direction: no demotion).
+local confirm_deadline=$(( SECONDS + 1200 ))
+local confirm_test confirm_test_file confirm_indexes
+for confirm_test in $(cut -f1 analyze-confirm/flagged-queries.tsv | sort | uniq)
+do
+    if [ "$SECONDS" -ge "$confirm_deadline" ]
+    then
+        echo "confirm_changes: WARNING: time budget exhausted, queries of the remaining tests keep their original verdict"
+        break
+    fi
+
+    confirm_test_file="$test_prefix/$confirm_test.xml"
+    if ! [ -e "$confirm_test_file" ]
+    then
+        echo "confirm_changes: cannot find $confirm_test_file, its queries keep their original verdict"
+        continue
+    fi
+
+    confirm_indexes=$(awk -F'\t' -v t="$confirm_test" '$1 == t { print $2 }' \
+        analyze-confirm/flagged-queries.tsv | sort -n | uniq | tr '\n' ' ')
+
+    # The test file goes first: argparse would swallow it into the greedy
+    # nargs='*' --queries-to-run otherwise. No profiling on reruns.
+    # shellcheck disable=SC2086
+    if ! "$perf_py" "$confirm_test_file" \
+        --host localhost localhost \
+        --port "$LEFT_SERVER_PORT" "$RIGHT_SERVER_PORT" \
+        --binary left/clickhouse right/clickhouse \
+        --http-port "$LEFT_SERVER_HTTP_PORT" "$RIGHT_SERVER_HTTP_PORT" \
+        --runs "${CHPC_RUNS:-7}" --max-queries 0 --profile-seconds 0 \
+        --queries-to-run $confirm_indexes \
+        > "analyze-confirm/$confirm_test-raw.tsv" \
+        2> "analyze-confirm/$confirm_test-err.log"
+    then
+        echo "confirm_changes: rerun of $confirm_test failed, its queries keep their original verdict"
+    fi
+done
+
+# Stop the servers again: the subsequent report stages run memory-heavy
+# clickhouse-local queries and expect the servers to be down.
+while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
+echo all killed
+
+# 4. Recompute the eqmed.sql statistics on the rerun data, exactly like
+# analyze_queries does. The confirmation verdict is made on client_time (the
+# same metric as changed_fail), which comes from the perf.py-reported run
+# times, so the query logs are not needed and the metrics array has a single
+# element.
+touch analyze-confirm/query-runs.tsv
+local raw_file rerun_test_name
+for raw_file in analyze-confirm/*-raw.tsv
+do
+    [ -e "$raw_file" ] || continue
+    rerun_test_name=$(basename "$raw_file" "-raw.tsv")
+    sed -n "s/^query\t/$rerun_test_name\t/p" < "$raw_file" >> analyze-confirm/query-runs.tsv
+done
+
+if ! clickhouse-local --query "
+create view query_runs as select * from file('analyze-confirm/query-runs.tsv', TSV,
+    'test text, query_index int, query_id text, version UInt8, time float');
+
+-- Same even-run-count filter as analyze_queries: a server death mid-test
+-- leaves an odd number of runs, which would break the median split.
+create view broken_queries as
+    select test, query_index
+    from query_runs
+    group by test, query_index
+    having count(*) % 2 != 0
+    ;
+
+create table query_run_metrics_for_stats engine File(
+        TSV, 'analyze-confirm/query-run-metrics-for-stats.tsv')
+    as select test, query_index, 0 run, version, [toFloat64(time)] metrics
+    from query_runs
+    where (test, query_index) not in broken_queries
+    order by test, query_index, run, version
+    ;
+" $CHPC_REPORT_LOCAL_QUERY_SETTINGS -- $CHPC_REPORT_LOCAL_SERVER_SETTINGS 2>> analyze-confirm/errors.log
+then
+    echo "confirm_changes: failed to prepare the rerun measurements, skipping confirmation"
+    return 0
+fi
+
+# The same per-query eqmed.sql invocation path as in analyze_queries. A failed
+# invocation only loses that query's rerun stats, so it keeps its original
+# verdict.
+touch analyze-confirm/commands.txt analyze-confirm/query-metric-stats.tsv
+( set +x # do not bloat the log
+IFS=$'\n'
+for prefix in $(cut -f1,2 "analyze-confirm/query-run-metrics-for-stats.tsv" | sort | uniq)
+do
+    file="analyze-confirm/tmp/${prefix//	/_}.tsv"
+    rg "^$prefix	" "analyze-confirm/query-run-metrics-for-stats.tsv" > "$file" &
+    printf "%s\0\n" \
+        "clickhouse-local \
+            --file \"$file\" \
+            --structure 'test text, query text, run int, version UInt8, metrics Array(float)' \
+            --query \"$(cat "$script_dir/eqmed.sql")\" \
+            $CHPC_REPORT_LOCAL_QUERY_SETTINGS \
+            -- $CHPC_REPORT_LOCAL_SERVER_SETTINGS \
+            >> \"analyze-confirm/query-metric-stats.tsv\"" \
+            2>> analyze-confirm/errors.log \
+        >> analyze-confirm/commands.txt
+done
+wait
+unset IFS
+)
+
+# The rerun arrays are single-metric and tiny, no need for the memory-bounded
+# job count of the main analysis.
+parallel -v -j "$(nproc --all)" --joblog analyze-confirm/parallel-log.txt --null \
+    < analyze-confirm/commands.txt 2>> analyze-confirm/errors.log \
+    || echo "confirm_changes: some rerun stats failed to compute, those queries keep their original verdict"
+
+# 5. Demote the flagged queries whose rerun does not reproduce the change.
+# Confirmed = same-direction diff clearing the rerun noise threshold, in the
+# same shape as the production rule (0.15 floor, non-strict >=). The inner
+# join means only queries with rerun stats can be demoted: if the rerun failed
+# or produced no stats, the original verdict stands (fail-open).
+if ! clickhouse-local --query "
+create view flagged_queries as select * from file('analyze-confirm/flagged-queries.tsv',
+    TSV, 'test text, query_index int, diff float, stat_threshold float');
+
+create view rerun_stats as
+    select test, query_index,
+        diff[1] diff_rerun, stat_threshold[1] stat_threshold_rerun
+    from file('analyze-confirm/query-metric-stats.tsv', TSV,
+        'left Array(float), right Array(float), diff Array(float),
+            stat_threshold Array(float), test text, query_index int')
+    ;
+
+create table unconfirmed_queries engine File(TSV, 'analyze-confirm/unconfirmed-queries.tsv')
+    as select flagged_queries.test test, flagged_queries.query_index query_index,
+        diff_rerun, stat_threshold_rerun
+    from flagged_queries
+    join rerun_stats
+        on flagged_queries.test = rerun_stats.test
+            and flagged_queries.query_index = rerun_stats.query_index
+    where not (sign(diff_rerun) = sign(diff)
+        and abs(diff_rerun) >= greatest(0.15, stat_threshold_rerun))
+    order by test, query_index
+    ;
+" $CHPC_REPORT_LOCAL_QUERY_SETTINGS -- $CHPC_REPORT_LOCAL_SERVER_SETTINGS 2>> analyze-confirm/errors.log
+then
+    echo "confirm_changes: failed to compute the confirmation verdicts, skipping confirmation"
+    rm -f analyze-confirm/unconfirmed-queries.tsv ||:
+    return 0
+fi
+
+echo "confirm_changes: $(wc -l < analyze-confirm/unconfirmed-queries.tsv) of $flagged_count flagged queries did not reproduce after restart"
+}
+
 # Analyze results
 function report
 {
@@ -709,6 +987,12 @@ rm ./*.{rep,svg} test-times.tsv test-dump.tsv unstable.tsv unstable-query-ids.ts
 
 cat analyze/errors.log >> report/errors.log ||:
 cat profile-errors.log >> report/errors.log ||:
+
+# The confirmation step (confirm_changes) is optional and fail-open: when it
+# was skipped or failed, the demotion list is absent or empty, which must read
+# as "demote nothing".
+mkdir -p analyze-confirm ||:
+touch analyze-confirm/unconfirmed-queries.tsv ||:
 
 clickhouse-local --query "
 create view query_display_names as select * from
@@ -737,6 +1021,15 @@ create view query_metric_stats as
         TSVWithNamesAndTypes,
         'test text, query_index int, metric_name text, left float, right float,
             diff float, stat_threshold float')
+    ;
+
+-- Queries flagged as changed whose difference did not reproduce when rerun
+-- after a server restart (see confirm_changes). Empty unless the confirmation
+-- step completed. They are demoted from changed_fail below, but stay visible
+-- in the 'Unconfirmed Changes' table so that nothing silently disappears.
+create view unconfirmed_queries as
+    select * from file('analyze-confirm/unconfirmed-queries.tsv', TSV,
+        'test text, query_index int, diff_rerun float, stat_threshold_rerun float')
     ;
 
 create table report_thresholds engine File(TSVWithNamesAndTypes, 'report/thresholds.tsv')
@@ -781,7 +1074,12 @@ create table queries engine File(TSVWithNamesAndTypes, 'report/queries.tsv')
         -- uncaught regressions, because for the default 7 runs we do for PRs,
         -- the randomization distribution has only 16 values, so the max quantile
         -- is actually 0.9375.
-        abs(diff) > changed_threshold        and abs(diff) >= stat_threshold as changed_fail,
+        -- A change is demoted from changed_fail (but not from changed_show, so
+        -- it stays visible) when the confirmation rerun after a server restart
+        -- did not reproduce it.
+        abs(diff) > changed_threshold        and abs(diff) >= stat_threshold
+            and ((query_metric_stats.test, query_metric_stats.query_index) not in
+                (select test, query_index from unconfirmed_queries)) as changed_fail,
         abs(diff) > changed_threshold - 0.05 and abs(diff) >= stat_threshold as changed_show,
 
         not changed_fail and stat_threshold > unstable_threshold as unstable_fail,
@@ -820,6 +1118,21 @@ create table changed_perf_report engine File(TSV, 'report/changed-perf.tsv')
         round(diff, 3), round(stat_threshold, 3),
         changed_fail, test, query_index, query_display_name
     from queries where changed_show order by abs(diff) desc;
+
+-- Flagged changes that did not reproduce on the confirmation rerun. They no
+-- longer fail the check (changed_fail was demoted above), but are reported
+-- with both the original and the rerun statistics so demotions are auditable.
+create table unconfirmed_changes_report engine File(TSV, 'report/unconfirmed-changes.tsv')
+    as select
+        round(left, 3), round(right, 3),
+        round(diff, 3), round(stat_threshold, 3),
+        round(diff_rerun, 3), round(stat_threshold_rerun, 3),
+        queries.test test, queries.query_index query_index, query_display_name
+    from queries
+    join unconfirmed_queries
+        on queries.test = unconfirmed_queries.test
+            and queries.query_index = unconfirmed_queries.query_index
+    order by abs(diff) desc;
 
 create table unstable_queries_report engine File(TSV, 'report/unstable-queries.tsv')
     as select
@@ -1458,6 +1771,13 @@ case "$stage" in
     ;&
 "analyze_queries")
     time analyze_queries ||:
+    ;&
+"confirm_changes")
+    # Rerun the changed queries on freshly restarted servers and demote the
+    # changes that do not reproduce. Advisory and fail-open: `||:` both keeps
+    # a confirmation failure from failing the job and disables errexit inside,
+    # so the function's explicit guards decide what to skip.
+    time confirm_changes ||:
     ;&
 "report")
     time report ||:
