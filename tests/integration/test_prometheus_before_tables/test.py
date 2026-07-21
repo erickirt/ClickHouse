@@ -8,6 +8,10 @@ from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
 node = cluster.add_instance("node", main_configs=["configs/prom_conf.xml"])
+# A configuration with custom `prometheus.handlers` must keep the regular server lifecycle.
+node_handlers = cluster.add_instance("node_handlers", main_configs=["configs/prom_conf_handlers.xml"])
+# A separate metrics-only instance for the destructive startup-failure test.
+node_fail = cluster.add_instance("node_fail", main_configs=["configs/prom_conf.xml"], stay_alive=True)
 
 LOG_FILE = "/var/log/clickhouse-server/clickhouse-server.log"
 
@@ -21,11 +25,9 @@ def start_cluster():
         cluster.shutdown()
 
 
-def first_log_line_number(pattern):
+def first_log_line_number(pattern, instance=None):
     # `grep -n` prints "<line>:<text>"; `-m1` stops at the first match.
-    output = node.exec_in_container(
-        ["bash", "-c", f"grep -n -m1 '{pattern}' {LOG_FILE}"]
-    )
+    output = (instance or node).exec_in_container(["bash", "-c", f"grep -n -m1 '{pattern}' {LOG_FILE}"])
     assert output, f"log line not found: {pattern}"
     return int(output.split(":", 1)[0])
 
@@ -96,3 +98,52 @@ def test_system_stop_start_listen(start_cluster):
     node.query("SYSTEM START LISTEN PROMETHEUS")
     metrics = get_metrics()
     assert metrics["ClickHouseProfileEvents_Query"] >= 0
+
+
+def test_prometheus_with_handlers_starts_after_tables_are_loaded(start_cluster):
+    # Custom `prometheus.handlers` may serve queries (`remote_write`, `remote_read`, `query`,
+    # `api_v1`), so such configurations must keep the regular server lifecycle: the endpoint must
+    # not accept requests before metadata and access control are ready, i.e. the early-start path
+    # must be skipped.
+    prometheus_listen_line = first_log_line_number("Application: Listening for Prometheus", node_handlers)
+    loaded_metadata_line = first_log_line_number("Application: Loaded metadata", node_handlers)
+    assert loaded_metadata_line < prometheus_listen_line
+
+    # The handler-based endpoint still works after startup.
+    response = requests.get(
+        "http://{host}:{port}/metrics".format(host=node_handlers.ip_address, port=8001),
+        allow_redirects=False,
+        timeout=5,
+    )
+    response.raise_for_status()
+    assert "ClickHouseProfileEvents_Query" in response.text
+
+
+def test_startup_failure_after_early_prometheus_bind(start_cluster):
+    # If startup fails after the early Prometheus bind (e.g. while loading metadata), the cleanup
+    # path must stop the already-listening server; otherwise `server_pool.joinAll` would wait for
+    # its listener thread forever and the process would hang instead of exiting.
+    node_fail.stop_clickhouse()
+    log_lines_before = int(node_fail.exec_in_container(["bash", "-c", f"wc -l < {LOG_FILE}"]).strip())
+    node_fail.exec_in_container(
+        [
+            "bash",
+            "-c",
+            "echo 'NOT A VALID ATTACH QUERY' > /var/lib/clickhouse/metadata/broken_db.sql",
+        ]
+    )
+    try:
+        # `expected_to_fail` raises if the process is still alive after the timeout, so a hang in
+        # the cleanup path fails the test.
+        node_fail.start_clickhouse(start_wait_sec=120, expected_to_fail=True)
+        assert node_fail.get_process_pid("clickhouse") is None
+
+        failed_startup_log = node_fail.exec_in_container(["bash", "-c", f"tail -n +{log_lines_before + 1} {LOG_FILE}"])
+        # The failed startup got far enough to bind the early Prometheus listener...
+        assert "Listening for Prometheus" in failed_startup_log
+        # ...and exited because of the metadata loading error rather than anything else.
+        assert "broken_db" in failed_startup_log
+    finally:
+        # Restore the instance so the module teardown is healthy.
+        node_fail.exec_in_container(["bash", "-c", "rm -f /var/lib/clickhouse/metadata/broken_db.sql"])
+        node_fail.start_clickhouse()
