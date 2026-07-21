@@ -1353,14 +1353,15 @@ void IMergeTreeDataPart::loadColumnsChecksumsIndexes(bool require_columns_checks
             loadExistingRowsCount(); /// Must be called after loadRowsCount() as it uses the value of `rows_count`.
             loadPartitionAndMinMaxIndex();
 
-            if (!parent_part)
-            {
-                if (!isStoredOnReadonlyDisk())
-                    loadTTLInfos();
-
-                loadProjections(require_columns_checksums, check_consistency, has_broken_projections, false /* if_not_loaded */);
-            }
+            if (!parent_part && !isStoredOnReadonlyDisk())
+                loadTTLInfos();
         }
+
+        /// Projections are full sub-parts; loading each one runs its own `loadColumnsChecksumsIndexes`,
+        /// so keep it outside the arena scope above (each child re-enters the arena for its own
+        /// persistent metadata, and its transient load scratch stays on the default per-CPU arenas).
+        if (!parent_part)
+            loadProjections(require_columns_checksums, check_consistency, has_broken_projections, false /* if_not_loaded */);
 
         /// Kept out of the dedicated arena scope above on purpose: the size computation is heavy
         /// short-lived churn (a sample column per column/substream). The finished, part-lifetime maps
@@ -1429,7 +1430,7 @@ void IMergeTreeDataPart::addProjectionPart(
 
     /// The parent keeps this map node (and the copied projection name key) for its whole lifetime,
     /// so build it in the dedicated arena. Scoping here covers every caller (insert, merge,
-    /// projection merge, load); the `loadProjections` scope nests harmlessly.
+    /// projection merge, load).
     ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     projection_parts[projection_name] = std::move(projection_part);
 }
@@ -1437,14 +1438,10 @@ void IMergeTreeDataPart::addProjectionPart(
 void IMergeTreeDataPart::loadProjections(
     bool require_columns_checksums, bool check_consistency, bool & has_broken_projection, bool if_not_loaded, bool only_metadata)
 {
-    /// Each loaded projection becomes its own `IMergeTreeDataPart` (via `getProjectionPartBuilder().build()`)
-    /// and is stored in the parent's `projection_parts` map. Both the map node insertion in
-    /// `addProjectionPart` and any allocation paths reached during build/load that aren't already
-    /// scoped by their own helpers belong in the parts arena. This is also the entry point used
-    /// directly by `MutateTask`, where the surrounding `loadColumnsChecksumsIndexes` scope is not
-    /// in effect; without this guard those calls would land in the default arena.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
+    /// Each loaded projection becomes its own `IMergeTreeDataPart` whose part-lifetime allocations are
+    /// already routed into the arena by their own helpers (`build()`, `addProjectionPart`, and the
+    /// child's own `loadColumnsChecksumsIndexes`). The projection load's transient scratch is
+    /// deliberately left on the default per-CPU arenas, so no arena scope is taken here.
     auto metadata_snapshot = storage.getInMemoryMetadataPtr(storage.getContext(), false);
     for (const auto & projection : metadata_snapshot->projections)
     {
@@ -1464,7 +1461,12 @@ void IMergeTreeDataPart::loadProjections(
                 try
                 {
                     if (only_metadata)
+                    {
+                        /// The metadata-only path does not go through `loadColumnsChecksumsIndexes`, so
+                        /// route the projection's part-lifetime checksums into the arena here.
+                        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
                         part->loadChecksums(require_columns_checksums);
+                    }
                     else
                         part->loadColumnsChecksumsIndexes(require_columns_checksums, check_consistency);
                 }

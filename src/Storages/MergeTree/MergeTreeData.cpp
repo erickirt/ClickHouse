@@ -2425,15 +2425,21 @@ MergeTreeData::LoadPartResult MergeTreeData::loadDataPart(
     auto component_guard = Coordination::setCurrentComponent("MergeTreeData::loadDataPart");
     LOG_TRACE(log, "Loading {} part {} from disk {}", magic_enum::enum_name(to_state), part_name, part_disk_ptr->getName());
 
-    /// Route the per-part `SingleDiskVolume` and `DataPartStorageOnDiskFull` clones below into
-    /// the MergeTree arena — both are stored on the resulting `IMergeTreeDataPart` and share its
-    /// lifetime. Without this scope they would land in the default arena, slipping past the
-    /// per-part guards in `MergeTreeDataPartBuilder::build` / `loadColumnsChecksumsIndexes`.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
     LoadPartResult res;
-    auto single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + part_name, part_disk_ptr, 0);
-    auto data_part_storage = std::make_shared<DataPartStorageOnDiskFull>(single_disk_volume, relative_data_path, part_name);
+
+    /// The per-part `SingleDiskVolume` is stored on the resulting part and shares its lifetime, so
+    /// create it (and the storage clone below) in the dedicated MergeTree arena. `build()` and
+    /// `loadColumnsChecksumsIndexes` below run OUTSIDE this scope on purpose: `build()` re-enters the
+    /// arena itself for the part object, while the metadata load's transient parse / consistency
+    /// scratch belongs in the default per-CPU arenas (it re-enters the arena only for the persistent
+    /// metadata it caches).
+    VolumePtr single_disk_volume;
+    MutableDataPartStoragePtr data_part_storage;
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + part_name, part_disk_ptr, 0);
+        data_part_storage = std::make_shared<DataPartStorageOnDiskFull>(single_disk_volume, relative_data_path, part_name);
+    }
 
     String part_path = fs::path(relative_data_path) / part_name;
 
@@ -8186,12 +8192,16 @@ void MergeTreeData::restorePartFromBackup(std::shared_ptr<RestoredPartsHolder> r
 
 MergeTreeData::MutableDataPartPtr MergeTreeData::loadPartRestoredFromBackup(const String & part_name, const DiskPtr & disk, const String & temp_part_dir, bool detach_if_broken) const
 {
-    /// Same rationale as `loadDataPart`: the `SingleDiskVolume` below lives for the part's lifetime.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
     MutableDataPartPtr part;
 
-    auto single_disk_volume = std::make_shared<SingleDiskVolume>(disk->getName(), disk, 0);
+    /// Same rationale as `loadDataPart`: the `SingleDiskVolume` lives for the part's lifetime, so
+    /// create it in the dedicated arena; `build()` and the metadata load below run outside it (the
+    /// load's transient scratch stays on the default per-CPU arenas).
+    VolumePtr single_disk_volume;
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        single_disk_volume = std::make_shared<SingleDiskVolume>(disk->getName(), disk, 0);
+    }
     fs::path full_part_dir{temp_part_dir};
     String parent_part_dir = full_part_dir.parent_path();
     String part_dir_name = full_part_dir.filename();
@@ -9114,9 +9124,6 @@ MergeTreeData::MutableDataPartsVector MergeTreeData::tryLoadPartsToAttach(const 
     MutableDataPartsVector loaded_parts;
     loaded_parts.reserve(renamed_parts.old_and_new_names.size());
 
-    /// Same rationale as `loadDataPart`: the per-part `SingleDiskVolume` below lives for the part's lifetime.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
     for (const auto & [part_name, old_dir, new_dir, disk] : renamed_parts.old_and_new_names)
     {
         LOG_DEBUG(log, "Checking part {}", new_dir);
@@ -9128,7 +9135,14 @@ MergeTreeData::MutableDataPartsVector MergeTreeData::tryLoadPartsToAttach(const 
         disk->removeFileIfExists(fs::path(relative_data_path) / source_dir / new_dir / VersionMetadata::TMP_TXN_VERSION_METADATA_FILE_NAME);
         disk->removeFileIfExists(fs::path(relative_data_path) / source_dir / new_dir / VersionMetadata::TXN_VERSION_METADATA_FILE_NAME);
 
-        auto single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + part_name, disk);
+        /// The per-part `SingleDiskVolume` lives for the part's lifetime, so create it in the dedicated
+        /// arena; `build()` and `loadPartAndFixMetadataImpl` below run outside it (the metadata load's
+        /// transient scratch stays on the default per-CPU arenas).
+        VolumePtr single_disk_volume;
+        {
+            ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+            single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + part_name, disk);
+        }
         auto part = getDataPartBuilder(part_name, single_disk_volume, source_dir / new_dir, getReadSettings())
             .withPartFormatFromDisk()
             .build();
