@@ -456,3 +456,35 @@ def test_packed_io_rejects_output_inside_input(started_cluster):
         nothrow=True,
     )
     assert "nested under the input" in output, f"expected rejection, got: {output}"
+
+
+def test_packed_io_rejects_output_inside_input_cross_disk(started_cluster):
+    # The same filesystem tree is addressable under two disk names: `local` is rooted at `/` and
+    # `default` is rooted at the server data path. Feeding the input via `local` (absolute path) and the
+    # nested output via `default` (relative path) makes the two disk names differ even though the output
+    # is physically nested under the input. The guard must reject this too, so it cannot rely on disk
+    # names being equal.
+    node.query(
+        "CREATE OR REPLACE TABLE t_packed_selfrec_xdisk (id UInt64, s String) ENGINE = MergeTree ORDER BY id SETTINGS min_bytes_for_full_part_storage = '10M'"
+    )
+    node.query(
+        "INSERT INTO t_packed_selfrec_xdisk SELECT number, toString(number) FROM numbers(10)"
+    )
+
+    # `local` addresses the part by its absolute filesystem path; `default` by the same tree relative to
+    # the server data path.
+    abs_part_path = get_part_path("t_packed_selfrec_xdisk", "all_1_1_0")
+    default_rel_part_path = get_relative_part_path("t_packed_selfrec_xdisk", "all_1_1_0")
+    nested_output = os.path.join(default_rel_part_path, "self_output")
+
+    output = node.exec_in_container(
+        [
+            "bash",
+            "-c",
+            f'clickhouse disks --config /etc/clickhouse-server/config.xml --disk local --query "packed-io --recursive create --disk-from local {abs_part_path} --disk-to default {nested_output}" 2>&1',
+        ],
+        privileged=True,
+        user="root",
+        nothrow=True,
+    )
+    assert "nested under the input" in output, f"expected rejection, got: {output}"

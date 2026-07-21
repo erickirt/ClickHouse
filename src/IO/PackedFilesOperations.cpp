@@ -25,26 +25,47 @@ static std::string_view normalizePath(std::string_view path)
 }
 
 /// Reject a recursive operation whose output directory is the same as, or nested under, the input
-/// directory on the same disk. Otherwise the directory walk would descend into the files it just
-/// generated, copying output into itself indefinitely.
+/// directory on the same backing store. Otherwise the directory walk would descend into the files it
+/// just generated, copying output into itself indefinitely.
 static void assertOutputNotInsideInput(
     const DiskPtr & disk_in, std::string_view input_dir, const DiskPtr & disk_out, std::string_view output_dir)
 {
-    if (disk_in->getName() != disk_out->getName())
-        return;
+    /// The recursive walk descends into whatever the write step produces, so the hazard exists whenever
+    /// the output directory is the same as, or nested under, the input directory on the same backing
+    /// store. A disk name is not a reliable identity for "same backing store": clickhouse-disks always
+    /// exposes both `default` (rooted at the server path) and `local` (rooted at `/`), so the same
+    /// filesystem tree is addressable under two different disk names.
+    ///
+    /// For local disks getPath() is the absolute filesystem root, so rooting each disk-relative operand
+    /// there makes the two names resolve to the same absolute path and lets a plain containment check
+    /// catch the overlap (including two local disks whose roots nest, e.g. `/` and `/var/lib/...`).
+    /// Remote disks have no comparable filesystem root, so restrict them to same-disk-object identity.
+    fs::path in;
+    fs::path out;
+    if (!disk_in->isRemote() && !disk_out->isRemote())
+    {
+        in = (fs::path(disk_in->getPath()) / normalizePath(input_dir)).lexically_normal();
+        out = (fs::path(disk_out->getPath()) / normalizePath(output_dir)).lexically_normal();
+    }
+    else
+    {
+        if (disk_in != disk_out)
+            return;
 
-    /// Root both paths before comparing so a disk-relative "." (the disk root / current directory) is
-    /// treated as the root it names. Comparing raw normalized strings would reduce "." vs "./out" to
-    /// "." vs "out" and miss that the output is nested under the input.
-    auto in = (fs::path("/") / normalizePath(input_dir)).lexically_normal();
-    auto out = (fs::path("/") / normalizePath(output_dir)).lexically_normal();
+        /// Root both paths before comparing so a disk-relative "." (the disk root / current directory)
+        /// is treated as the root it names. Comparing raw normalized strings would reduce "." vs "./out"
+        /// to "." vs "out" and miss that the output is nested under the input.
+        in = (fs::path("/") / normalizePath(input_dir)).lexically_normal();
+        out = (fs::path("/") / normalizePath(output_dir)).lexically_normal();
+    }
+
     /// The output is the same as, or nested under, the input iff the path from input to output does not
     /// step outside it (i.e. does not start with "..").
     auto relative = out.lexically_relative(in);
     if (!relative.empty() && *relative.begin() != "..")
         throw Exception(
             ErrorCodes::INCORRECT_DATA,
-            "Output path {} is the same as or nested under the input path {} on the same disk; "
+            "Output path {} is the same as or nested under the input path {} on the same backing store; "
             "the recursive operation would descend into its own generated output",
             output_dir, input_dir);
 }
