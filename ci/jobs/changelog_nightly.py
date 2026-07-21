@@ -258,6 +258,46 @@ def extract_pr_links(text):
     )
 
 
+# The attribution form the generator emits at the end of every entry:
+# `[#N](.../pull/N) ([Author](...))`. Inline mentions of other PRs inside the
+# entry text lack the author parenthesis.
+PR_ATTRIBUTION_RE = re.compile(
+    r"\[#(\d+)\]\(https://github\.com/[^/)]+/[^/)]+/pull/\d+\) \(\["
+)
+
+# Categories whose raw entries the editing agent must carry into the edited
+# section (possibly rewritten, merged, or under another category — the PR
+# link must survive). The skill legitimately prunes the other sections
+# (NOT FOR CHANGELOG, NO CL ENTRY, Build/Testing/Packaging).
+STRICT_RETENTION_CATEGORIES = {
+    "Backward Incompatible Change",
+    "New Feature",
+    "Experimental Feature",
+    "Performance Improvement",
+    "Improvement",
+    "Bug Fix (user-visible misbehavior in an official stable release)",
+}
+
+
+def raw_strict_prs_and_reverts(text):
+    """From the raw marker blocks in `text`: the attribution PR numbers of
+    entries under the strict-retention categories, and the number of
+    revert-flavored entries (each licenses at most one entry deletion)."""
+    strict_prs = set()
+    reverts = 0
+    for block in extract_raw_blocks(text):
+        category = None
+        for line in block.splitlines():
+            if line.startswith("#### "):
+                category = line[5:].strip()
+            elif line.startswith("* "):
+                if re.search(r"revert", line, re.IGNORECASE):
+                    reverts += 1
+                if category in STRICT_RETENTION_CATEGORIES:
+                    strict_prs.update(PR_ATTRIBUTION_RE.findall(line))
+    return strict_prs, reverts
+
+
 def compose_on_master(master_text, version, toc_line, raw_blocks, section):
     """Rebuild our additions on top of master's CHANGELOG.md. Used to resolve
     the merge conflict that appears when master's CHANGELOG.md changed (e.g.
@@ -286,12 +326,12 @@ def compose_on_master(master_text, version, toc_line, raw_blocks, section):
 
 def _untracked_files():
     """Untracked, not-ignored files (the gitignored ci/tmp scratch space is
-    excluded, so the job's own temporary files never show up here)."""
-    return set(
-        Shell.get_output(
-            "git ls-files --others --exclude-standard", strict=True
-        ).split()
+    excluded, so the job's own temporary files never show up here).
+    NUL-delimited so file names with spaces survive."""
+    out = Shell.get_output(
+        "git ls-files -z --others --exclude-standard", strict=True
     )
+    return {path for path in out.split("\0") if path}
 
 
 def _reset_worktree(base_sha, pre_untracked=None):
@@ -379,16 +419,24 @@ def reconcile_with_master(version):
             f"Merge of origin/master conflicts outside {CHANGELOG_FILE}: "
             f"{conflicts}; manual reconciliation required"
         )
-    rebuilt = compose_on_master(
-        Shell.get_output(f"git show origin/master:{CHANGELOG_FILE}", strict=True),
-        version,
-        extract_toc_line(ours, version),
-        extract_raw_blocks(ours),
-        extract_in_progress_section(ours, _anchor_id(version)),
-    )
-    _write_changelog(rebuilt)
-    Shell.check(f"git add {CHANGELOG_FILE}", strict=True)
-    Shell.check("git commit --no-edit", verbose=True, strict=True)
+    try:
+        rebuilt = compose_on_master(
+            Shell.get_output(
+                f"git show origin/master:{CHANGELOG_FILE}", strict=True
+            ),
+            version,
+            extract_toc_line(ours, version),
+            extract_raw_blocks(ours),
+            extract_in_progress_section(ours, _anchor_id(version)),
+        )
+        _write_changelog(rebuilt)
+        Shell.check(f"git add {CHANGELOG_FILE}", strict=True)
+        Shell.check("git commit --no-edit", verbose=True, strict=True)
+    except BaseException:
+        # Never leave the repository mid-merge: it would break the checkout
+        # of the next processed cycle in the same run.
+        Shell.check("git merge --abort", verbose=True)
+        raise
     return "Merged origin/master, re-inserted the in-progress section on top"
 
 
@@ -493,24 +541,29 @@ def verify_edit(version, base_sha, pre_untracked=frozenset()):
     old_section = extract_in_progress_section(old_text, anchor) or ""
     if section is None:
         return "In-progress section disappeared after edit"
-    # Previously accumulated entries must survive the edit: the skill only
-    # ever deletes an already-integrated entry when a newly arrived revert
-    # cancels it (its section 2); follow-up merges (section 7) keep all PR
-    # links. A revert usually names the original PR only in its title, so
-    # per-entry attribution is not checkable — instead each revert entry in
-    # the raw block justifies at most one deletion, and a raw block without
-    # reverts justifies none.
+    # Entries must survive the edit: previously accumulated entries (the
+    # skill only deletes one when a newly arrived revert cancels it, section
+    # 2; merges keep all PR links, section 7), and today's raw entries from
+    # the strict-retention categories (the skill prunes only the junk
+    # sections; real entries are edited, merged, or moved — their PR links
+    # stay, otherwise the entry is silently lost forever because the state
+    # trailer has already advanced past it). A revert usually names the
+    # original PR only in its title, so per-entry attribution is not
+    # checkable — instead each revert entry in the raw block justifies at
+    # most one loss, and a raw block without reverts justifies none.
     removed = extract_pr_links(old_section) - extract_pr_links(section)
-    revert_entries = [
-        line
-        for line in "\n".join(extract_raw_blocks(old_text)).splitlines()
-        if line.startswith("* ") and re.search(r"revert", line, re.IGNORECASE)
-    ]
-    if len(removed) > len(revert_entries):
+    strict_prs, reverts = raw_strict_prs_and_reverts(old_text)
+    # Membership is checked against the whole file: an entry may
+    # legitimately already sit in a previously released section (a PR merged
+    # into the last release branch after the cycle start appears in the
+    # range but was already published).
+    lost_new = {pr for pr in strict_prs if f"/pull/{pr})" not in text}
+    disappeared = removed | lost_new
+    if len(disappeared) > reverts:
         return (
-            f"{len(removed)} previously edited entries disappeared "
-            f"({sorted(removed)}) but the raw block contains only "
-            f"{len(revert_entries)} revert entries"
+            f"{len(disappeared)} entries disappeared in the edit "
+            f"({sorted(disappeared)}) but the raw block contains only "
+            f"{reverts} revert entries"
         )
     _, old_tail = split_at_first_released_section(old_text, anchor)
     _, new_tail = split_at_first_released_section(text, anchor)

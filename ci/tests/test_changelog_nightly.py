@@ -422,7 +422,7 @@ REVERT_BLOCK = """### ClickHouse release master (abc) FIXME as compared to (def)
 
 NO_REVERT_BLOCK = """### ClickHouse release master (abc) FIXME as compared to (def)
 
-#### Improvement
+#### NOT FOR CHANGELOG / INSIGNIFICANT
 * Something unrelated. [#111131](https://github.com/ClickHouse/ClickHouse/pull/111131) ([B](https://github.com/b)).
 """
 
@@ -475,6 +475,71 @@ def test_verify_edit_deletion_needs_revert(scratch_repo):
         fd.write(dropped_both)
     error = m.verify_edit("26.7", base_sha)
     assert "disappeared" in error and "111111" in error
+
+
+def test_verify_edit_rejects_lost_new_entries(scratch_repo):
+    """A strict-category raw entry that vanishes in the edit fails
+    verification (the state trailer has already advanced past it); junk
+    sections are still freely prunable."""
+    m.checkout_branch(m._branch("26.7"), False)
+    _make_generate_commit()
+    base_sha = m._sha("HEAD")
+    # mini_edited keeps New Feature #111111 and drops NOT-FOR #111113: OK.
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(mini_edited())
+    assert m.verify_edit("26.7", base_sha) is None
+    # Dropping the New Feature entry too is a silent loss: rejected.
+    lost = mini_edited().replace(
+        "* Added function `foo`. [#111111](https://github.com/ClickHouse/ClickHouse/pull/111111) ([A](https://github.com/a)).\n",
+        "",
+    )
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(lost)
+    error = m.verify_edit("26.7", base_sha)
+    assert "disappeared" in error and "111111" in error
+
+
+def test_untracked_files_with_spaces(scratch_repo):
+    m.checkout_branch(m._branch("26.7"), False)
+    _make_generate_commit()
+    base_sha = m._sha("HEAD")
+    pre = m._untracked_files()
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(mini_edited())
+    with open("agent scratch notes.md", "w") as fd:
+        fd.write("x")
+    assert m._untracked_files() - pre == {"agent scratch notes.md"}
+    error = m.verify_edit("26.7", base_sha, pre)
+    assert "created files" in error and "agent scratch notes.md" in error
+    m._reset_worktree(base_sha, pre)
+    assert not os.path.exists("agent scratch notes.md")
+
+
+def test_reconcile_aborts_merge_on_failed_resolution(scratch_repo):
+    """A structural-resolution failure must not leave the repository
+    mid-merge (it would break the next cycle's checkout in the same run)."""
+    branch = m._branch("26.7")
+    m.checkout_branch(branch, False)
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(m.insert_before_first_release(MINI, EDITED_SECTION))
+    _commit_all("our section")
+    # Master gains a conflicting 26.7 section of its own: the merge
+    # conflicts and compose_on_master refuses (duplicate section).
+    _run("git", "checkout", "-q", "master")
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(m.insert_before_first_release(MINI, EDITED_SECTION.replace("function `foo`", "function `other`")))
+    _commit_all("master got its own 26.7 section")
+    _run("git", "push", "-q", "origin", "master")
+    _run("git", "checkout", "-q", branch)
+    _run("git", "fetch", "-q", "origin", "+refs/heads/master:refs/remotes/origin/master")
+    with pytest.raises(ValueError, match="already contains a section"):
+        m.reconcile_with_master("26.7")
+    git_dir = subprocess.run(
+        ["git", "rev-parse", "--git-dir"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert not os.path.exists(os.path.join(git_dir, "MERGE_HEAD"))
+    # The repository is usable for the next cycle.
+    m.checkout_branch(m._branch("26.8"), False)
 
 
 def test_reconcile_with_master(scratch_repo):
