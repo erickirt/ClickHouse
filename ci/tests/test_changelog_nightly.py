@@ -354,6 +354,94 @@ def test_verify_edit_rejects_agent_commit_and_reset_recovers(scratch_repo):
     assert m.RAW_BEGIN_PREFIX in open(m.CHANGELOG_FILE).read()
 
 
+def test_cycle_skip_reason():
+    open_pr = [("1", "OPEN")]
+    closed = [("1", "CLOSED")]
+    # First run of the current cycle: no branch, no PR history -> proceed.
+    assert m.cycle_skip_reason("b", True, False, []) is None
+    # Normal daily run -> proceed.
+    assert m.cycle_skip_reason("b", True, True, open_pr) is None
+    # Finished cycle without a branch -> skip.
+    assert "finished cycle" in m.cycle_skip_reason("b", False, False, [])
+    # A human closed/merged every PR -> leave the cycle alone.
+    assert "closed or merged" in m.cycle_skip_reason("b", True, True, closed)
+    assert "closed or merged" in m.cycle_skip_reason("b", False, True, closed)
+    # The branch was deleted while PR history exists (deleting a branch
+    # auto-closes its PR, but keep the guard independent of PR state) ->
+    # never silently recreate the branch from the cycle start.
+    assert "refusing to recreate" in m.cycle_skip_reason("b", True, False, open_pr)
+
+
+TWO_ENTRIES = """### <a id="267"></a> ClickHouse release 26.7, FIXME (in progress)
+
+#### New Feature
+* Added function `foo`. [#111111](https://github.com/ClickHouse/ClickHouse/pull/111111) ([A](https://github.com/a)).
+* Added function `bar`. [#111112](https://github.com/ClickHouse/ClickHouse/pull/111112) ([A](https://github.com/a)).
+"""
+
+REVERT_BLOCK = """### ClickHouse release master (abc) FIXME as compared to (def)
+
+#### NO CL ENTRY
+* NO CL ENTRY:  'Revert "Add function `bar`"'. [#111130](https://github.com/ClickHouse/ClickHouse/pull/111130) ([B](https://github.com/b)).
+"""
+
+NO_REVERT_BLOCK = """### ClickHouse release master (abc) FIXME as compared to (def)
+
+#### Improvement
+* Something unrelated. [#111131](https://github.com/ClickHouse/ClickHouse/pull/111131) ([B](https://github.com/b)).
+"""
+
+
+def test_verify_edit_deletion_needs_revert(scratch_repo):
+    """Old entries may disappear only when the raw block carries reverts, at
+    most one deletion per revert entry."""
+    m.checkout_branch(m._branch("26.7"), False)
+    base = MINI.replace(
+        "**[ClickHouse release v26.6",
+        f"{TOC_LINE}\n**[ClickHouse release v26.6",
+    )
+    with_section = m.insert_before_first_release(base, TWO_ENTRIES)
+
+    def make_base(raw_block_body):
+        with open(m.CHANGELOG_FILE, "w") as fd:
+            fd.write(
+                m.insert_before_first_release(
+                    with_section, m.make_raw_block(raw_block_body)
+                )
+            )
+        _commit_all("generate")
+        return m._sha("HEAD")
+
+    dropped_bar = with_section.replace(
+        "* Added function `bar`. [#111112](https://github.com/ClickHouse/ClickHouse/pull/111112) ([A](https://github.com/a)).\n",
+        "",
+    )
+    # Raw block without a revert: the deletion must be rejected.
+    base_sha = make_base(NO_REVERT_BLOCK)
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(dropped_bar)
+    error = m.verify_edit("26.7", base_sha)
+    assert "disappeared" in error and "111112" in error
+    # Keeping every old entry passes.
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(with_section)
+    assert m.verify_edit("26.7", base_sha) is None
+    # Raw block with one revert: one deletion is allowed, two are not.
+    m._reset_worktree(base_sha)
+    base_sha = make_base(REVERT_BLOCK)
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(dropped_bar)
+    assert m.verify_edit("26.7", base_sha) is None
+    dropped_both = dropped_bar.replace(
+        "* Added function `foo`. [#111111](https://github.com/ClickHouse/ClickHouse/pull/111111) ([A](https://github.com/a)).\n",
+        "",
+    )
+    with open(m.CHANGELOG_FILE, "w") as fd:
+        fd.write(dropped_both)
+    error = m.verify_edit("26.7", base_sha)
+    assert "disappeared" in error and "111111" in error
+
+
 def test_reconcile_with_master(scratch_repo):
     branch = m._branch("26.7")
     m.checkout_branch(branch, False)

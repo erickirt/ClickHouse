@@ -249,6 +249,15 @@ def extract_toc_line(text, version):
     return None
 
 
+def extract_pr_links(text):
+    """PR numbers referenced as changelog entry links in `text`."""
+    return set(
+        re.findall(
+            r"\[#(\d+)\]\(https://github\.com/[^/)]+/[^/)]+/pull/\d+\)", text
+        )
+    )
+
+
 def compose_on_master(master_text, version, toc_line, raw_blocks, section):
     """Rebuild our additions on top of master's CHANGELOG.md. Used to resolve
     the merge conflict that appears when master's CHANGELOG.md changed (e.g.
@@ -466,12 +475,25 @@ def verify_edit(version, base_sha):
     old_section = extract_in_progress_section(old_text, anchor) or ""
     if section is None:
         return "In-progress section disappeared after edit"
-    # A wipe of a section that had accumulated entries is never a legitimate
-    # edit (deleting one entry reverted the same day is). A section that is
-    # still empty on creation is fine: the first days of a cycle may bring
-    # only insignificant entries.
-    if count_entries(old_section) >= 2 and count_entries(section) == 0:
-        return "All previously edited entries disappeared after edit"
+    # Previously accumulated entries must survive the edit: the skill only
+    # ever deletes an already-integrated entry when a newly arrived revert
+    # cancels it (its section 2); follow-up merges (section 7) keep all PR
+    # links. A revert usually names the original PR only in its title, so
+    # per-entry attribution is not checkable — instead each revert entry in
+    # the raw block justifies at most one deletion, and a raw block without
+    # reverts justifies none.
+    removed = extract_pr_links(old_section) - extract_pr_links(section)
+    revert_entries = [
+        line
+        for line in "\n".join(extract_raw_blocks(old_text)).splitlines()
+        if line.startswith("* ") and re.search(r"revert", line, re.IGNORECASE)
+    ]
+    if len(removed) > len(revert_entries):
+        return (
+            f"{len(removed)} previously edited entries disappeared "
+            f"({sorted(removed)}) but the raw block contains only "
+            f"{len(revert_entries)} revert entries"
+        )
     _, old_tail = split_at_first_released_section(old_text, anchor)
     _, new_tail = split_at_first_released_section(text, anchor)
     if old_tail.rstrip() != new_tail.rstrip():
@@ -616,6 +638,24 @@ This pull request stays a draft until the release. The release manager finalizes
     return "Created a draft PR"
 
 
+def cycle_skip_reason(branch, is_current, branch_exists, pr_states):
+    """Decide whether a release cycle must not be processed: a finished cycle
+    without a branch, a cycle whose PRs were all closed or merged by a human,
+    or a branch that was deleted while its PRs exist (deleting the branch
+    auto-closes the PR; silently recreating the branch from the cycle start
+    would override that deliberate action)."""
+    if not branch_exists and not is_current:
+        return f"No branch {branch} for a finished cycle"
+    if pr_states and not any(state == "OPEN" for _, state in pr_states):
+        return f"PR for {branch} was closed or merged ({pr_states})"
+    if not branch_exists and pr_states:
+        return (
+            f"Branch {branch} does not exist but its PRs do ({pr_states}); "
+            f"refusing to recreate the branch, manual investigation required"
+        )
+    return None
+
+
 def _step(results, name, fn):
     """Run `fn` as a praktika sub-result: `fn` returns an info string on
     success and raises on failure (stdout/traceback become the info then)."""
@@ -652,11 +692,11 @@ def process_version(version, master_version, results):
     to_sha = _sha(end_ref)
 
     exists = remote_branch_exists(branch)
-    if not exists and not is_current:
-        return _skip(f"No branch {branch} for a finished cycle")
-    states = get_pr_states(branch) if exists else []
-    if states and not any(state == "OPEN" for _, state in states):
-        return _skip(f"PR for {branch} was closed or merged ({states})")
+    skip_reason = cycle_skip_reason(
+        branch, is_current, exists, get_pr_states(branch)
+    )
+    if skip_reason:
+        return _skip(skip_reason)
 
     checkout_branch(branch, exists)
     from_ref = determine_from_ref(version, branch, exists)
