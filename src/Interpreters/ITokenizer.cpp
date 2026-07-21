@@ -482,8 +482,7 @@ ColumnPtr tokenizeToArray(const ITokenizer & tokenizer, const IColumn & input, s
     if (const auto * col_string = typeid_cast<const ColumnString *>(&input))
     {
         const auto & str_offsets = col_string->getOffsets();
-        const size_t begin_offset = from == 0 ? 0 : str_offsets[from - 1];
-        tokens_data->getChars().reserve(str_offsets[from + rows - 1] - begin_offset);
+        tokens_data->getChars().reserve(str_offsets[from + rows - 1] - str_offsets[from - 1]);
     }
 
     auto tokenize = [&](std::string_view doc)
