@@ -322,12 +322,16 @@ DeduplicationInfo::FilterResult DeduplicationInfo::filterImpl(const std::set<siz
 }
 
 
-UInt128 DeduplicationInfo::calculateDataHashColumnWise(size_t offset, const Columns & cols) const
+UInt128 DeduplicationInfo::calculateDataHashColumnWise(size_t offset, const Block & block) const
 {
     chassert(offset < offsets.size());
 
     if (tokens[offset].data_hash_batch.has_value())
         return tokens[offset].data_hash_batch.value();
+
+    chassert(block.rows() == getRows());
+
+    auto cols = block.getColumns();
 
     SipHash hash;
     size_t begin = getTokenBegin(offset);
@@ -340,7 +344,7 @@ UInt128 DeduplicationInfo::calculateDataHashColumnWise(size_t offset, const Colu
 }
 
 
-DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const std::string & partition_id, const Columns & cols) const
+DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const std::string & partition_id) const
 {
     // when there is no user token, compute the full column-wise hash of the data
     // this hash is used for deduplication of sync and async inserts in a unified manner
@@ -354,7 +358,7 @@ DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const st
     }
     else
     {
-        auto data_hash = calculateDataHashColumnWise(offset, cols);
+        auto data_hash = calculateDataHashColumnWise(offset, *original_block);
         extension = fmt::format("{}_{}", data_hash.items[0], data_hash.items[1]);
     }
 
@@ -382,17 +386,13 @@ DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const st
 
 std::vector<std::pair<UInt128, std::vector<size_t>>> DeduplicationInfo::buildOffsetsMapImpl(const std::string & partition_id) const
 {
-    /// Fetch the block columns once here instead of on every getBlockUnifiedHash ->
-    /// calculateDataHashColumnWise call (each Block::getColumns() ref-counts all columns).
     /// Group token offsets by their unified UInt128 hash, preserving first-seen order.
-    const Columns cols = original_block ? original_block->getColumns() : Columns{};
-
     std::vector<std::pair<UInt128, std::vector<size_t>>> result;
     std::unordered_map<UInt128, size_t, UInt128Hash> hash_to_pos;
 
     for (size_t offset = 0; offset < offsets.size(); ++offset)
     {
-        const UInt128 hash = getBlockUnifiedHash(offset, partition_id, cols).hash;
+        const UInt128 hash = getBlockUnifiedHash(offset, partition_id).hash;
         auto [it, inserted] = hash_to_pos.try_emplace(hash, result.size());
         if (inserted)
             result.emplace_back(hash, std::vector<size_t>{});
@@ -425,10 +425,8 @@ std::vector<DeduplicationHash> DeduplicationInfo::getDeduplicationHashes(const s
     std::vector<DeduplicationHash> result;
     result.reserve(offsets.size());
 
-    const Columns cols = original_block ? original_block->getColumns() : Columns{};
-
     for (size_t offset = 0; offset < offsets.size(); ++offset)
-        result.push_back(getBlockUnifiedHash(offset, partition_id, cols));
+        result.push_back(getBlockUnifiedHash(offset, partition_id));
 
     /// Release block columns now that all hashes are cached.
     /// The block data is no longer needed — hashes are stored in tokens.
@@ -445,14 +443,11 @@ void DeduplicationInfo::prewarmDataHashes() const
     if (!original_block || !original_block->rows())
         return;
 
-    /// Fetch the block columns once for the whole warm-up pass.
-    const Columns cols = original_block->getColumns();
-
     for (size_t i = 0; i < tokens.size(); ++i)
     {
         if (!tokens[i].by_user.empty())
             continue;
-        calculateDataHashColumnWise(i, cols);
+        calculateDataHashColumnWise(i, *original_block);
     }
 }
 

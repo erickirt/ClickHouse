@@ -120,8 +120,8 @@ private:
     explicit DeduplicationInfo(bool async_insert_);
 
     /// Column-major hash: for each column, hash the row range. Used by the unified path.
-    UInt128 calculateDataHashColumnWise(size_t offset, const Columns & cols) const;
-    DeduplicationHash getBlockUnifiedHash(size_t offset, const std::string & partition_, const Columns & cols) const;
+    UInt128 calculateDataHashColumnWise(size_t offset, const Block & block) const;
+    DeduplicationHash getBlockUnifiedHash(size_t offset, const std::string & partition_) const;
 
 
     Ptr cloneSelfFilterImpl() const;
