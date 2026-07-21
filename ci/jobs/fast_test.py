@@ -384,11 +384,12 @@ def main():
             attach_debug = True
         job_info = results[-1].info
 
-    if clickhouse_se_path.is_file():
+    clickhouse_upload_path = (
+        clickhouse_se_path if (attach_debug or not res) else clickhouse_se_stripped_path
+    )
+    if clickhouse_upload_path.is_file():
         # do not reupload clickhouse binary for non-building jobs (e.g. darwin tests)
-        attach_files.append(
-            clickhouse_se_path if attach_debug else clickhouse_se_stripped_path
-        )
+        attach_files.append(clickhouse_upload_path)
     if attach_debug:
         attach_files.extend(CH.prepare_logs(info=info, all=True))
 
