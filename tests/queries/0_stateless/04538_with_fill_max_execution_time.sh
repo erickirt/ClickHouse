@@ -19,7 +19,7 @@ ${CLICKHOUSE_CLIENT} --query "
     FROM (SELECT toDateTime('2050-06-15 12:00:00') AS ts)
     ORDER BY ts WITH FILL FROM toDateTime('2000-01-01 00:00:00') TO toDateTime('2100-01-01 00:00:00') STEP 1
     SETTINGS max_execution_time = 1, timeout_overflow_mode = 'throw'
-    FORMAT Null" 2>&1 | grep -o -m1 -E 'TIMEOUT_EXCEEDED|QUERY_WAS_CANCELLED' | sed 's/QUERY_WAS_CANCELLED/TIMEOUT_EXCEEDED/'
+    FORMAT Null" 2>&1 | grep -ow -m1 -E 'TIMEOUT_EXCEEDED|QUERY_WAS_CANCELLED' | sed 's/QUERY_WAS_CANCELLED/TIMEOUT_EXCEEDED/'
 
 # `timeout_overflow_mode = 'break'`: the soft timeout does not throw, and during a single long
 # transform() call nothing enforces it inside the transform: the executor and the client polling loop
