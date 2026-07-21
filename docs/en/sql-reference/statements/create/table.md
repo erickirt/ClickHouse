@@ -504,7 +504,7 @@ SET allow_experimental_codecs = 1;
 CREATE TABLE vectors
 (
     id UInt32,
-    vec Array(Float32) CODEC(Quantized('rabitq', 1536))
+    vec Array(BFloat16) CODEC(Quantized('rabitq', 1536))
 )
 ENGINE = MergeTree ORDER BY id;
 ```
