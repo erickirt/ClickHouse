@@ -901,6 +901,7 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
         }
 
         auto files = reader->getFileNames();
+        bool metadata_version_emitted = false;
         for (const auto & file : files)
         {
             if (file == IMergeTreeDataPart::METADATA_VERSION_FILE_NAME)
@@ -914,6 +915,7 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
                     auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
                     writeIntText(*params.metadata_version_to_write, *write_buf);
                     write_buf->finalize();
+                    metadata_version_emitted = true;
                     continue;
                 }
 
@@ -926,6 +928,19 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freeze(
             auto read_buf = reader->readFile(volume->getDisk(), getRelativeDataPath(), file, read_settings, {});
             auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
             copyData(*read_buf, *write_buf);
+            write_buf->finalize();
+        }
+
+        /// A caller that relies on freeze to persist the destination metadata version passes
+        /// metadata_version_to_write with keep_metadata_version = false. An old source part may have no
+        /// metadata_version.txt in its archive at all (loadPartAndFixMetadataImpl treats that as the
+        /// "very old part" case), so the loop above never reached the override branch. Create the file
+        /// here so the requested version is persisted regardless of whether the source archive had one.
+        if (params.metadata_version_to_write.has_value() && !metadata_version_emitted)
+        {
+            auto write_buf = dest_storage->writeFile(
+                IMergeTreeDataPart::METADATA_VERSION_FILE_NAME, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
+            writeIntText(*params.metadata_version_to_write, *write_buf);
             write_buf->finalize();
         }
     }
@@ -1005,6 +1020,7 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freezeRemote(
         auto files = reader->getFileNames();
         std::vector<std::string> all_files;
         src_disk->listFiles(getRelativePath(), all_files);
+        bool metadata_version_emitted = false;
         for (const auto & file : files)
         {
             if (file == IMergeTreeDataPart::METADATA_VERSION_FILE_NAME)
@@ -1018,6 +1034,7 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freezeRemote(
                     auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
                     writeIntText(*params.metadata_version_to_write, *write_buf);
                     write_buf->finalize();
+                    metadata_version_emitted = true;
                     continue;
                 }
 
@@ -1030,6 +1047,19 @@ MutableDataPartStoragePtr DataPartStorageOnDiskPacked::freezeRemote(
             auto read_buf = reader->readFile(volume->getDisk(), getRelativeDataPath(), file, read_settings, {});
             auto write_buf = dest_storage->writeFile(file, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
             copyData(*read_buf, *write_buf);
+            write_buf->finalize();
+        }
+
+        /// A caller that relies on freeze to persist the destination metadata version passes
+        /// metadata_version_to_write with keep_metadata_version = false. An old source part may have no
+        /// metadata_version.txt in its archive at all (loadPartAndFixMetadataImpl treats that as the
+        /// "very old part" case), so the loop above never reached the override branch. Create the file
+        /// here so the requested version is persisted regardless of whether the source archive had one.
+        if (params.metadata_version_to_write.has_value() && !metadata_version_emitted)
+        {
+            auto write_buf = dest_storage->writeFile(
+                IMergeTreeDataPart::METADATA_VERSION_FILE_NAME, DBMS_DEFAULT_BUFFER_SIZE, WriteMode::Rewrite, write_settings);
+            writeIntText(*params.metadata_version_to_write, *write_buf);
             write_buf->finalize();
         }
     }
