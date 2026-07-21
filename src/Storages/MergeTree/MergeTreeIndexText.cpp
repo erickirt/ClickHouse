@@ -1638,7 +1638,7 @@ void MergeTreeIndexTextGranuleBuilder::addToken(std::string_view token, UInt32 t
 {
     /// Drop before inserting so dropped tokens allocate nothing (bounds `NOT IN` memory); still counted
     /// toward the segment-flush threshold.
-    if (token_drop_filter && token_drop_filter->shouldDrop(token))
+    if (postprocessor_drop_filter && postprocessor_drop_filter->shouldDrop(token))
     {
         ++num_processed_tokens;
         return;
@@ -1741,8 +1741,8 @@ MergeTreeIndexAggregatorText::MergeTreeIndexAggregatorText(
     {
         if (const auto * inline_filter = postprocessor->getInlineFilter())
         {
-            granule_builder.token_drop_filter = inline_filter;
-            use_hybrid_filter = true;
+            granule_builder.postprocessor_drop_filter = inline_filter;
+            use_postprocessor_drop_fast_path = true;
         }
     }
 }
@@ -1777,7 +1777,7 @@ void MergeTreeIndexAggregatorText::update(const Block & block, size_t * pos, siz
     const auto & index_column = block.getByName(index_column_name);
     auto [preprocessed_column, offset] = preprocessor->processColumn(index_column, *pos, rows_read);
 
-    if (postprocessor->hasActions() && !use_hybrid_filter)
+    if (postprocessor->hasActions() && !use_postprocessor_drop_fast_path)
     {
         ColumnPtr tokenized = tokenizeToArray(*tokenizer, *preprocessed_column, offset, rows_read);
         ColumnPtr postprocessed = postprocessor->processTokensArrayBatch(assert_cast<const ColumnArray *>(tokenized.get()));

@@ -1,11 +1,9 @@
--- Tests the filter-only postprocessor hybrid fast path for stop-word filters spelled as
+-- Tests the filter-only postprocessor fast path for stop-word filters spelled as
 -- if(token IN (...), '', token), NOT IN, an array right-hand side, and the equivalent
 -- multiIf / CASE form. All spellings must drop the same tokens during index build. Also
 -- covers non-plain-String index columns: a FixedString column and a MATERIALIZED String column.
 
-SET enable_full_text_index = 1;
-
-SELECT '1. if(token IN (tuple)): listed stop words dropped';
+SELECT 'if(token IN (tuple)): listed stop words dropped';
 
 CREATE TABLE tab_in (
   id UInt32,
@@ -21,7 +19,7 @@ SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIn
 SELECT count() FROM tab_in WHERE hasToken(s, 'fox');
 SELECT count() FROM tab_in WHERE hasToken(s, 'end');
 
-SELECT '2. if(token NOT IN (keep-set)): only the keep-set survives';
+SELECT 'if(token NOT IN (keep-set)): only the keep-set survives';
 CREATE TABLE tab_notin (
   id UInt32,
   s String,
@@ -34,7 +32,7 @@ INSERT INTO tab_notin VALUES (1, 'the quick brown fox'), (2, 'a fox is here'), (
 
 SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_notin, idx);
 
-SELECT '3. if(token IN (array)): array right-hand side, same as tuple';
+SELECT 'if(token IN (array)): array right-hand side, same as tuple';
 CREATE TABLE tab_array (
   id UInt32,
   s String,
@@ -47,7 +45,7 @@ INSERT INTO tab_array VALUES (1, 'the quick brown fox'), (2, 'a fox is here'), (
 
 SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_array, idx);
 
-SELECT '4. multiIf(token IN (tuple)): CASE spelling drops the same tokens';
+SELECT 'multiIf(token IN (tuple)): CASE spelling drops the same tokens';
 CREATE TABLE tab_multiif (
   id UInt32,
   s String,
@@ -60,7 +58,7 @@ INSERT INTO tab_multiif VALUES (1, 'the quick brown fox'), (2, 'a fox is here'),
 
 SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_multiif, idx);
 
-SELECT '5. FixedString index column: IN-filter drops the same stop words';
+SELECT 'FixedString index column: IN-filter drops the same stop words';
 CREATE TABLE tab_fixed (
   id UInt32,
   s FixedString(20),
@@ -74,7 +72,7 @@ INSERT INTO tab_fixed VALUES (1, 'the quick brown fox'), (2, 'a fox is here'), (
 -- hasToken rejects a FixedString haystack, so verify the drop via the index dictionary.
 SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_fixed, idx);
 
-SELECT '6. MATERIALIZED String index column: value computed, then IN-filter drops stop words';
+SELECT 'MATERIALIZED String index column: value computed, then IN-filter drops stop words';
 CREATE TABLE tab_materialized (
   id UInt32,
   raw String,

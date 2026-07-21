@@ -18,8 +18,8 @@ namespace DB
 struct IndexDescription;
 
 /// Drop set extracted from a filter-only `if(token IN/NOT IN (<string literals>), '', token)` postprocessor.
-/// Lets the granule builder decide, once per distinct token, whether it is dropped - used by the hybrid
-/// fast path so dropped tokens never build posting lists while each occurrence is still hashed only once.
+/// Lets the granule builder decide, once per distinct token, whether it is dropped - so dropped tokens never
+/// build posting lists while each occurrence is still hashed only once.
 struct MergeTreeIndexTextInlineFilter
 {
     struct Hash { using is_transparent = void; size_t operator()(std::string_view s) const { return std::hash<std::string_view>{}(s); } };

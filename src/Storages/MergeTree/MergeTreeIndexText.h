@@ -492,7 +492,7 @@ struct MergeTreeIndexTextGranuleBuilder
     std::unique_ptr<TokenToPositionListMap> position_map;
     /// Fast path for IN/NOT IN filter-only postprocessors: when set, addToken drops a token before inserting it,
     /// so dropped tokens allocate no map entry and build no postings. Non-owning.
-    const MergeTreeIndexTextInlineFilter * token_drop_filter = nullptr;
+    const MergeTreeIndexTextInlineFilter * postprocessor_drop_filter = nullptr;
 };
 
 class MergeTreeIndexTextPreprocessor;
@@ -531,7 +531,7 @@ private:
     MergeTreeIndexTextPreprocessorPtr preprocessor;
     MergeTreeIndexTextPostprocessorPtr postprocessor;
     /// True when the postprocessor is an IN/NOT IN filter handled by the per-distinct-token drop fast path.
-    bool use_hybrid_filter = false;
+    bool use_postprocessor_drop_fast_path = false;
 };
 
 class MergeTreeIndexText final : public IMergeTreeIndex
