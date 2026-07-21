@@ -51,7 +51,6 @@ public:
     bool isReadOnly() const override { return false; }
     bool areBlobPathsRandom() const override { return false; }
     bool isPlain() const override { return true; }
-    bool isReconstructableFromObjectStorage() const override { return true; }
     bool isWriteOnce() const override { return false; }
 
     MetadataTransactionPtr createTransaction() override;

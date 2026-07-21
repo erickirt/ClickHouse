@@ -179,11 +179,6 @@ bool MetadataStorageFromCacheObjectStorage::isPlain() const
     return underlying->isPlain();
 }
 
-bool MetadataStorageFromCacheObjectStorage::isReconstructableFromObjectStorage() const
-{
-    return underlying->isReconstructableFromObjectStorage();
-}
-
 bool MetadataStorageFromCacheObjectStorage::isWriteOnce() const
 {
     return underlying->isWriteOnce();

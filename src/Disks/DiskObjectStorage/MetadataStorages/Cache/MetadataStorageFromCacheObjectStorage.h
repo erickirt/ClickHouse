@@ -65,7 +65,6 @@ public:
     bool isReadOnly() const override;
     bool isTransactional() const override;
     bool isPlain() const override;
-    bool isReconstructableFromObjectStorage() const override;
     bool isWriteOnce() const override;
     bool supportWritingWithAppend() const override;
 

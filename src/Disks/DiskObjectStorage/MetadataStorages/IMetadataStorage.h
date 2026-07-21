@@ -284,12 +284,6 @@ public:
         return false;
     }
 
-    /// True when the metadata is reconstructable from the object storage alone (no per-server local state).
-    virtual bool isReconstructableFromObjectStorage() const
-    {
-        return false;
-    }
-
     virtual bool isWriteOnce() const
     {
         return false;

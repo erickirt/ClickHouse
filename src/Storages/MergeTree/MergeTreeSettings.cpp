@@ -2339,10 +2339,10 @@ static void validateTableDisk(const DiskPtr & disk)
     if (description.type != DataSourceType::ObjectStorage)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "MergeTree settings `table_disk` is not supported for non-ObjectStorage disks");
 
-    /// With table_disk the table lives at the disk root and is loaded directly from the disk (no database/UUID path),
-    /// so its metadata must be reconstructable from the object storage (per-server Local/Keeper metadata isn't).
+    /// table_disk loads the table straight from the disk root (no database/UUID path), so its metadata must be
+    /// reconstructable from the object storage alone; random blob keys (Local, Keeper) keep the map elsewhere.
     const auto metadata_storage = disk->getMetadataStorage();
-    if (!metadata_storage->isReconstructableFromObjectStorage())
+    if (metadata_storage->areBlobPathsRandom())
         throw Exception(
             ErrorCodes::BAD_ARGUMENTS,
             "MergeTree settings `table_disk` is not supported for {}: it requires metadata stored on the object storage.",
