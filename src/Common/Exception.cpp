@@ -98,7 +98,7 @@ false
 
 /// - Aborts the process if error code is LOGICAL_ERROR.
 /// - Increments error codes statistics.
-static size_t handle_error_code(
+size_t Exception::handleErrorCode(
     const std::string & msg, std::string_view format_string, int code, bool remote, const Exception::Trace & trace)
 {
     // In debug builds and builds with sanitizers, treat LOGICAL_ERROR as an assertion failure.
@@ -117,7 +117,7 @@ static size_t handle_error_code(
     }
 
     if (suppress_error_codes)
-        return static_cast<size_t>(-1);
+        return static_cast<size_t>(Exception::ErrorIndexState::Suppressed);
 
     return ErrorCodes::increment(code, remote, msg, std::string(format_string), trace);
 }
@@ -151,7 +151,7 @@ Exception::Exception(const MessageMasked & msg_masked, int code, bool remote_)
         std::_Exit(terminate_status_code);
     capture_thread_frame_pointers = getThreadFramePointers();
     message_format_string = msg_masked.format_string;
-    error_index = handle_error_code(msg_masked.msg, message_format_string, code, remote, getStackFramePointers());
+    error_index = handleErrorCode(msg_masked.msg, message_format_string, code, remote, getStackFramePointers());
 }
 
 Exception::Exception(MessageMasked && msg_masked, int code, bool remote_)
@@ -162,12 +162,12 @@ Exception::Exception(MessageMasked && msg_masked, int code, bool remote_)
         std::_Exit(terminate_status_code);
     capture_thread_frame_pointers = getThreadFramePointers();
     message_format_string = msg_masked.format_string;
-    error_index = handle_error_code(message(), message_format_string, code, remote, getStackFramePointers());
+    error_index = handleErrorCode(message(), message_format_string, code, remote, getStackFramePointers());
 }
 
 void Exception::recordToSystemErrors()
 {
-    if (error_index == static_cast<size_t>(-1))
+    if (error_index == static_cast<size_t>(ErrorIndexState::Suppressed))
         error_index = ErrorCodes::increment(code(), remote, message(), std::string(message_format_string), getStackFramePointers());
 }
 
@@ -207,7 +207,8 @@ Exception::Exception(CreateFromSTDTag, const std::exception & exc)
 void Exception::addMessage(const MessageMasked & msg_masked)
 {
     extendedMessage(msg_masked.msg);
-    if (error_index != static_cast<size_t>(-1))
+    if (error_index != static_cast<size_t>(ErrorIndexState::NotRecorded)
+        && error_index != static_cast<size_t>(ErrorIndexState::Suppressed))
         ErrorCodes::extendedMessage(code(), remote, error_index, message());
 }
 

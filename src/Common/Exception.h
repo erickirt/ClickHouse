@@ -256,11 +256,20 @@ public:
     bool isErrorCodeImportant() const;
 
 private:
+    enum class ErrorIndexState : size_t
+    {
+        NotRecorded = static_cast<size_t>(-1),
+        Suppressed = static_cast<size_t>(-2),
+    };
+
+    static size_t handleErrorCode(
+        const std::string & msg, std::string_view format_string, int code, bool remote, const Trace & trace);
+
     bool remote = false;
     std::atomic<bool> logged = false;
 
-    /// Number of this error among other errors with the same code and the same `remote` flag since the program startup.
-    size_t error_index = static_cast<size_t>(-1);
+    /// Number of this error among errors with the same code and `remote` flag, or why it has no index.
+    size_t error_index = static_cast<size_t>(ErrorIndexState::NotRecorded);
 
     const char * className() const noexcept override { return "DB::Exception"; }
 
