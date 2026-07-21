@@ -1093,13 +1093,13 @@ try
 
     auto add_entry_to_asynchronous_insert_log = [&, query_by_format = NameToNameMap{}](
         const InsertData::EntryPtr & entry,
-        const String & parsing_exception,
+        const String & exception,
         size_t num_rows,
         size_t num_bytes,
         bool is_flush_error = false) mutable
     {
         /// Track per-entry stats for reporting back to clients on success.
-        if (parsing_exception.empty())
+        if (exception.empty())
             per_entry_progress_results[entry.get()] = ResultProgress{num_rows, num_bytes};
 
         if (!async_insert_log)
@@ -1114,7 +1114,7 @@ try
         elem.query_id = entry->query_id;
         elem.bytes = num_bytes;
         elem.rows = num_rows;
-        elem.exception = parsing_exception;
+        elem.exception = exception;
         elem.data_kind = entry->chunk.getDataKind();
         elem.timeout_milliseconds = data->timeout_ms.count();
         elem.flush_query_id = insert_query_id;
@@ -1136,13 +1136,10 @@ try
         else
             elem.query_for_logging = get_query_by_format(entry->format);
 
-        /// If there was a parsing error,
-        /// the entry won't be flushed anyway,
-        /// so add the log element immediately.
         if (is_flush_error)
         {
             /// Per-entry conversion failure at flush: log immediately as `FlushError` with a real `flush_time`.
-            appendElementsToLogSafe(*async_insert_log, {std::move(elem)}, std::chrono::system_clock::now(), parsing_exception);
+            appendElementsToLogSafe(*async_insert_log, {std::move(elem)}, std::chrono::system_clock::now(), exception);
         }
         else if (!elem.exception.empty())
         {
@@ -1196,7 +1193,7 @@ try
         if (async_insert_log)
         {
             for (const auto & entry : data->entries)
-                add_entry_to_asynchronous_insert_log(entry, /*parsing_exception=*/ "", /*num_rows=*/ 0, entry->chunk.byteSize());
+                add_entry_to_asynchronous_insert_log(entry, /*exception=*/ "", /*num_rows=*/ 0, entry->chunk.byteSize());
 
             auto exception = getCurrentExceptionMessage(false);
             auto flush_time = std::chrono::system_clock::now();
@@ -1394,7 +1391,7 @@ Chunk AsynchronousInsertQueue::processPreprocessedEntries(
         Block block_to_insert = *block;
         if (block_to_insert.rows() == 0)
         {
-            add_to_async_insert_log(entry, /*parsing_exception=*/ "", block_to_insert.rows(), block_to_insert.bytes());
+            add_to_async_insert_log(entry, /*exception=*/ "", block_to_insert.rows(), block_to_insert.bytes());
             entry->resetChunk();
             continue;
         }
@@ -1424,7 +1421,7 @@ Chunk AsynchronousInsertQueue::processPreprocessedEntries(
 
         deduplication_info->setUserToken(entry->async_dedup_token, block_to_insert.rows());
 
-        add_to_async_insert_log(entry, /*parsing_exception=*/ "", block_to_insert.rows(), block_to_insert.bytes());
+        add_to_async_insert_log(entry, /*exception=*/ "", block_to_insert.rows(), block_to_insert.bytes());
         entry->resetChunk();
     }
 
