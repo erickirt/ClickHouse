@@ -92,13 +92,6 @@ public:
     FilterResult deduplicateSelf(bool deduplication_enabled, const std::string & partition_id, ContextPtr context) const;
     FilterResult deduplicateBlock(const std::vector<std::string> & existing_block_ids, const std::string & partition_id, ContextPtr context) const;
 
-    /// Restrict this info to a single partition of a coalesced (async) insert.
-    /// row_to_partition maps each source row to its partition index (as produced by
-    /// MergeTreeDataWriter::splitBlockIntoParts, i.e. IColumn::Selector); partition_index
-    /// selects the partition. Tokens that contributed no row to partition_index are dropped,
-    /// so a token only registers in the partition its own rows landed in. An empty
-    /// row_to_partition means the block was not split (a single partition) and every token
-    /// is kept as-is.
     Ptr filterToPartition(const PaddedPODArray<UInt64> & row_to_partition, size_t partition_index) const;
 
     std::vector<DeduplicationHash> getDeduplicationHashes(const std::string & partition_id, bool deduplication_enabled) const;
