@@ -2087,6 +2087,21 @@ class QueryResultElement extends HTMLElement
                     overflow: hidden;
                 }
 
+                /* A single-value result (one row, one column, e.g. SHOW CREATE TABLE) is shown
+                   with its full height, so the whole value is visible without selecting the cell.
+                   The rule is scoped to unselected cells: once the cell is selected it falls back
+                   to the .td-selected behavior below, which keeps it bounded to 50vh and scrolling
+                   internally instead of expanding into an unbounded absolutely-positioned overlay.
+                   Only the vertical clamp is dropped (max-height: none): the base "overflow: hidden"
+                   is kept so that with "white-space: pre" a long single line (e.g. SELECT repeat('x', 100000))
+                   is still clipped horizontally at the 40vw cell cap instead of painting across the page.
+                   With no max-height the box grows to the full content height, so nothing is clipped vertically.
+                   No backticks in this comment: this style block lives inside a JS template literal. */
+                #data-table.single-value td:not(.td-selected) .cell-content
+                {
+                    max-height: none;
+                }
+
                 td u
                 {
                     text-decoration-color: var(--misc-text-color);
@@ -2617,6 +2632,7 @@ class QueryResultElement extends HTMLElement
         this._clearImage();
 
         this._dataTable.classList.remove('fixed');
+        this._dataTable.classList.remove('single-value');
         this._dataDiv.classList.remove('fixed');
         /// Drop the stale single-row marker: it is recomputed in `applyColumnColors` once the new
         /// result finishes rendering. Clearing it here means that while rows are still streaming in,
@@ -3750,6 +3766,18 @@ class QueryResultElement extends HTMLElement
         table.appendChild(new_tbody);
     }
 
+    /// A result that is exactly one row and one column (for example, `SHOW CREATE TABLE`) is shown
+    /// with its full height instead of the default 3-line clamp, so the whole value is visible
+    /// without having to select the cell.
+    expandSingleValueIfNeeded()
+    {
+        const table = this._dataTable;
+        const is_single_value = !this._totals
+            && Array.isArray(this._header) && this._header.length == 1
+            && table.rows.length == 1;
+        table.classList.toggle('single-value', is_single_value);
+    }
+
     /// Run the measurement-based layout passes that were deferred because this element's tab was
     /// hidden when its query finished (see `_pendingTranspose`/`_pendingChangeLayout`). Called on
     /// activation, once the panel is visible so `offsetWidth`/`offsetHeight` are meaningful.
@@ -3778,12 +3806,23 @@ class QueryResultElement extends HTMLElement
         });
 
         /* Freeze row heights so that absolutely-positioned cell content
-           does not cause reflow. Read all heights first, then write,
-           to avoid layout thrashing. */
+           does not cause reflow of the following rows. Read all heights first,
+           then write, to avoid layout thrashing.
+           A single-value result is deliberately shown unclamped at its full height
+           (see `expandSingleValueIfNeeded`) and has a single row with nothing below it
+           to reflow. Freezing that full height would keep the row full-height even after
+           the cell is selected and its content collapses to a bounded 50vh overlay,
+           leaving a large blank row; so skip the freeze for single-value tables and let
+           the row follow its content (it then shrinks to the row-number cell's height
+           when the value cell is selected). */
+        const freeze_row_heights = !table.classList.contains('single-value');
         let rowHeights = [];
-        for (let row of table.rows)
+        if (freeze_row_heights)
         {
-            rowHeights.push(row.offsetHeight);
+            for (let row of table.rows)
+            {
+                rowHeights.push(row.offsetHeight);
+            }
         }
 
         table.classList.add('fixed');
@@ -3793,10 +3832,13 @@ class QueryResultElement extends HTMLElement
             header.style.width = `${columnWidths[index]}px`;
         });
 
-        let i = 0;
-        for (let row of table.rows)
+        if (freeze_row_heights)
         {
-            row.style.height = `${rowHeights[i++]}px`;
+            let i = 0;
+            for (let row of table.rows)
+            {
+                row.style.height = `${rowHeights[i++]}px`;
+            }
         }
 
         /// Recompute the pinned-column offsets against the now-frozen column widths, so they match
@@ -6444,6 +6486,9 @@ async function postImpl(tab, posted_request_num, query, targetResultEl, abortCon
             if (is_table) {
                 if (tab.id === activeTabId) targetResultEl.transposeIfNeeded();
                 else targetResultEl._pendingTranspose = true;
+                /// Content-only (toggles a class based on row/column counts, no measurement),
+                /// so it runs even for a hidden tab, like the totals/coloring passes above.
+                targetResultEl.expandSingleValueIfNeeded();
             }
         }
 
@@ -7131,6 +7176,7 @@ async function renderSnapshotIntoElement(el, snap, tab, matToken) {
         if (is_table) el.renderTotals();
         el.applyColumnColors();
         if (is_table) el.transposeIfNeeded();
+        if (is_table) el.expandSingleValueIfNeeded();
     }
     return true;
 }
@@ -7447,6 +7493,7 @@ async function materializeResult(tab) {
         if (is_table) el.renderTotals();
         el.applyColumnColors();
         if (is_table) el.transposeIfNeeded();
+        if (is_table) el.expandSingleValueIfNeeded();
         if (is_table) el._changeTableLayout();
     }
 
