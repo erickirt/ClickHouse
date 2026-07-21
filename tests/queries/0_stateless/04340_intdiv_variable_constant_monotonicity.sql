@@ -120,3 +120,37 @@ SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toUInt32(3000000000)) 
      = (SELECT countIf(intDiv(a, toUInt32(3000000000)) IN (0)) FROM t_intdiv_mono);
 
 DROP TABLE t_intdiv_mono;
+
+-- Decimal divisor: intDiv computes in the decimal's native signed width (DecimalBinaryOperation feeds both
+-- operands into DivideIntegralImpl<NativeResultType, NativeResultType>), casting the dividend into that
+-- width, so a UInt64 dividend >= 2^63 reinterprets as negative just like the signed-integer-divisor case,
+-- but the wrap boundary depends on the decimal width and scale rather than the dividend width. intDiv must
+-- therefore not be reported monotonic for a Decimal divisor, otherwise key analysis builds a reversed Range
+-- and aborts with Invalid binary search result in MergeTreeSetIndex (or silently over-prunes in release).
+CREATE TABLE t_intdiv_mono (a UInt64) ENGINE = MergeTree ORDER BY a SETTINGS index_granularity = 1;
+INSERT INTO t_intdiv_mono VALUES (9223372036854775806), (9223372036854775807), (9223372036854775808), (9223372036854775809), (18446744073709551615);
+SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toDecimal64(1000000000000000000, 0)) IN (9))
+     = (SELECT countIf(intDiv(a, toDecimal64(1000000000000000000, 0)) IN (9)) FROM t_intdiv_mono);
+SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toDecimal64(1000000000000000000, 0)) NOT IN (0, 1))
+     = (SELECT countIf(intDiv(a, toDecimal64(1000000000000000000, 0)) NOT IN (0, 1)) FROM t_intdiv_mono);
+
+DROP TABLE t_intdiv_mono;
+
+-- Sibling of the above with a signed dividend and a narrower Decimal divisor: the compute width is the
+-- decimal's native width (Int32 for Decimal32), so an Int64 value >= 2^31 truncates/wraps there even though
+-- the dividend is signed. Same guard (no monotonicity for a Decimal divisor) keeps this correct.
+CREATE TABLE t_intdiv_mono (a Int64) ENGINE = MergeTree ORDER BY a SETTINGS index_granularity = 1;
+INSERT INTO t_intdiv_mono VALUES (2147483646), (2147483647), (2147483648), (2147483649), (4294967296);
+SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toDecimal32(1000000, 0)) IN (2147))
+     = (SELECT countIf(intDiv(a, toDecimal32(1000000, 0)) IN (2147)) FROM t_intdiv_mono);
+
+DROP TABLE t_intdiv_mono;
+
+-- A Decimal dividend with an integer divisor still prunes: the result stays in the standard signed path and
+-- the guard only rejects a Decimal divisor, so this monotonic case keeps its pruning.
+CREATE TABLE t_intdiv_mono (a Decimal64(0)) ENGINE = MergeTree ORDER BY a SETTINGS index_granularity = 1;
+INSERT INTO t_intdiv_mono VALUES (10), (20), (30), (40), (50);
+SELECT (SELECT count() FROM t_intdiv_mono WHERE intDiv(a, toInt64(10)) IN (2))
+     = (SELECT countIf(intDiv(a, toInt64(10)) IN (2)) FROM t_intdiv_mono);
+
+DROP TABLE t_intdiv_mono;
