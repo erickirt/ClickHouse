@@ -94,6 +94,8 @@ function configure
     rm left/config/config.d/backups.xml ||:
     cp -rv right/config left ||:
 
+    write_max_threads_override
+
     # Start a temporary server to rename the tables
     while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
     echo all killed
@@ -203,6 +205,39 @@ function cpu_pinning_prefix
         cpus="0-$(( half - 1 ))"
     fi
     echo "taskset -c $cpus"
+}
+
+function write_max_threads_override
+{
+    # Pinning and max_threads must travel together: with taskset limiting both
+    # servers to one hyperthread per physical core (8 CPUs on m7i.4xlarge),
+    # the static default max_threads=12 would oversubscribe the pinned set and
+    # reintroduce the scheduler noise the pinning removes. The CI flow writes
+    # this override from performance_tests.py (MAX_THREADS_OVERRIDE_XML, keep
+    # in sync); the standalone entrypoints (stage=run_tests, the manual README
+    # flow, compare-releases.sh) prepare their configs here, so emit the same
+    # x86_64-only override for them. The zzz- prefix sorts the file after the
+    # static users.d files, overriding them.
+    if [ "$(uname -m)" != "x86_64" ]
+    then
+        return 0
+    fi
+    local dir
+    for dir in left right
+    do
+        if [ -d "$dir/config/users.d" ]
+        then
+            cat > "$dir/config/users.d/zzz-cpu-pinning-max-threads.xml" <<EOF
+<clickhouse>
+    <profiles>
+        <default>
+            <max_threads>8</max_threads>
+        </default>
+    </profiles>
+</clickhouse>
+EOF
+        fi
+    done
 }
 
 function restart
@@ -370,10 +405,11 @@ function run_tests
     #    CHPC_MAX_QUERIES=${CHPC_MAX_QUERIES:-0}
     #fi
 
-    CHPC_RUNS=${CHPC_RUNS:-7}
+    # CHPC_RUNS has no default any more: it is forwarded to perf.py --runs
+    # ("at least N runs per query") only when the caller set it; otherwise the
+    # adaptive run policy decides the counts.
     CHPC_MAX_QUERIES=${CHPC_MAX_QUERIES:-10}
 
-    export CHPC_RUNS
     export CHPC_MAX_QUERIES
 
     # Determine which concurrent benchmarks to run. For now, the only test
@@ -434,7 +470,9 @@ function run_tests
                 # reads. They are parallel to --host/--port (left, then right).
                 --binary left/clickhouse right/clickhouse
                 --http-port "$LEFT_SERVER_HTTP_PORT" "$RIGHT_SERVER_HTTP_PORT"
-                --runs "$CHPC_RUNS"
+                # Only when the caller explicitly set CHPC_RUNS ("at least N
+                # runs"); otherwise the adaptive run policy decides.
+                ${CHPC_RUNS:+--runs "$CHPC_RUNS"}
                 --max-queries "$max_queries"
                 --profile-seconds "$profile_seconds"
 
@@ -907,7 +945,7 @@ do
         --port "$LEFT_SERVER_PORT" "$RIGHT_SERVER_PORT" \
         --binary left/clickhouse right/clickhouse \
         --http-port "$LEFT_SERVER_HTTP_PORT" "$RIGHT_SERVER_HTTP_PORT" \
-        --runs "${CHPC_RUNS:-7}" --max-queries 0 --profile-seconds 0 \
+        ${CHPC_RUNS:+--runs "$CHPC_RUNS"} --max-queries 0 --profile-seconds 0 \
         --queries-to-run $confirm_indexes \
         > "analyze-confirm/$confirm_test-raw.tsv" \
         2> "analyze-confirm/$confirm_test-err.log"

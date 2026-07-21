@@ -172,10 +172,12 @@ parser.add_argument(
 parser.add_argument(
     "--runs",
     type=int,
-    default=1,
-    help="Deprecated and ignored, kept so that existing invocations do not "
-    "break. The number of measured runs is now decided adaptively per query, "
-    "see --tau, --min-runs, --cap, --cap-fast.",
+    default=None,
+    help="Run every query at least this many times per server (the historical "
+    "CHPC_RUNS knob). Only widens the adaptive policy: raises the minimum and "
+    "the caps to fit, never lowers them; the --tau precision stop cannot end "
+    "a query before the resulting minimum. Ignored when --min-runs is given. "
+    "Unset by default: the adaptive policy decides.",
 )
 parser.add_argument(
     "--tau",
@@ -188,8 +190,9 @@ parser.add_argument(
 parser.add_argument(
     "--min-runs",
     type=int,
-    default=5,
-    help="Never do fewer than this many measured runs of a query per server.",
+    default=None,
+    help="Never do fewer than this many measured runs of a query per server "
+    "(default 5). When given explicitly, the legacy --runs is ignored.",
 )
 parser.add_argument(
     "--cap",
@@ -273,6 +276,26 @@ parser.add_argument(
     "purges to do asymmetric work during measured queries.",
 )
 args = parser.parse_args()
+
+if args.min_runs is not None:
+    # An explicit --min-runs means the caller speaks the adaptive-policy
+    # language: the legacy --runs is ignored to keep the precedence obvious.
+    args.runs = None
+else:
+    args.min_runs = 5
+if args.runs is not None:
+    # Backward compatibility: --runs (CHPC_RUNS) keeps its historical meaning
+    # of "at least this many measured runs" (on master it was the hard
+    # minimum before the cumulative-time stop). It only ever widens the
+    # policy (never lowers the default minimum), and the tau precision stop
+    # does not end a query before the resulting minimum. CI does not pass it
+    # (the adaptive defaults apply); manual and release-to-release
+    # investigations use e.g. CHPC_RUNS=13 to force a tighter comparison.
+    args.min_runs = max(args.min_runs, args.runs)
+# A minimum above a cap is contradictory; the minimum wins and the caps grow
+# to fit, whichever way it was requested.
+args.cap = max(args.cap, args.min_runs)
+args.cap_fast = max(args.cap_fast, args.cap)
 
 reportStageEnd("start")
 

@@ -533,7 +533,8 @@ def get_physical_core_cpu_list():
 # The static default (max_threads=12, tests/performance/scripts/config/users.d/
 # perf-comparison-tweaks-users.xml) is kept for arm (m8g.4xlarge: 16 real
 # cores). The zzz- prefix makes this file sort after (and thus override) the
-# static users.d files.
+# static users.d files. Standalone compare.sh entrypoints write the same
+# override in write_max_threads_override (keep the two in sync).
 MAX_THREADS_OVERRIDE_FILE = "zzz-cpu-pinning-max-threads.xml"
 MAX_THREADS_OVERRIDE_XML = """\
 <!--
@@ -927,16 +928,19 @@ class CHServer:
 
     @classmethod
     def run_test(
-        cls, test_file, runs=7, max_queries=0, results_path=f"{temp_dir}/perf_wd/"
+        cls, test_file, runs=None, max_queries=0, results_path=f"{temp_dir}/perf_wd/"
     ):
         test_name = test_file.split("/")[-1].removesuffix(".xml")
         sw = Utils.Stopwatch()
+        # --runs ("at least N runs per query") is passed only when explicitly
+        # requested; by default the adaptive run policy decides the counts.
+        runs_arg = f"--runs {runs}" if runs is not None else ""
         res, out, err = Shell.get_res_stdout_stderr(
             f"./tests/performance/scripts/perf.py --host localhost localhost \
                 --port {cls.LEFT_SERVER_PORT} {cls.RIGHT_SERVER_PORT} \
                 --binary {perf_left}/clickhouse {perf_right}/clickhouse \
                 --http-port {cls.LEFT_SERVER_HTTP_PORT} {cls.RIGHT_SERVER_HTTP_PORT} \
-                --runs {runs} --max-queries {max_queries} \
+                {runs_arg} --max-queries {max_queries} \
                 --profile-seconds 10 \
                 {test_file}",
             verbose=True,
@@ -1459,7 +1463,6 @@ def main():
                 max_queries = 0 if test in benchmarks else 10
                 CHServer.run_test(
                     "./tests/performance/" + test,
-                    runs=7,
                     max_queries=max_queries,
                     results_path=perf_wd,
                 )
