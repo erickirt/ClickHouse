@@ -640,7 +640,7 @@ Further example datasets that use approximate vector search:
 
 ### Vector search with quantized codecs {#vector-search-with-quantized-codecs}
 
-import ExperimentalBadge from '@theme/badges/ExperimentalBadge';
+<ExperimentalBadge/>
 
 To enable the `Quantized` codec, enable `SET allow_experimental_codecs = 1` first.
 In case you run into problems, kindly open an issue in the [ClickHouse repository](https://github.com/clickhouse/clickhouse/issues).
