@@ -55,6 +55,11 @@ struct ASTWindowListElement : public IAST
 
     String getID(char delimiter) const override;
 
+    void forEachPointerToChild(std::function<void(IAST **, boost::intrusive_ptr<IAST> *)> f) override
+    {
+        f(nullptr, &definition);
+    }
+
 protected:
     void formatImpl(WriteBuffer & ostr, const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override;
 };

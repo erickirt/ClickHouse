@@ -1,11 +1,17 @@
 #include <Parsers/ASTWindowDefinition.h>
 
+#include <Common/Exception.h>
 #include <Common/quoteString.h>
 #include <IO/Operators.h>
 
 
 namespace DB
 {
+
+namespace ErrorCodes
+{
+    extern const int UNEXPECTED_AST_STRUCTURE;
+}
 
 ASTPtr ASTWindowDefinition::clone() const
 {
@@ -152,6 +158,10 @@ ASTPtr ASTWindowListElement::clone() const
     auto result = make_intrusive<ASTWindowListElement>();
 
     result->name = name;
+    /// `definition` is a required child; throw instead of dereferencing null if it is missing.
+    if (!definition)
+        throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "ASTWindowListElement '{}' has no window definition", name);
+
     result->definition = definition->clone();
     result->children.push_back(result->definition);
 
@@ -168,6 +178,8 @@ void ASTWindowListElement::formatImpl(WriteBuffer & ostr, const FormatSettings &
 {
     ostr << backQuoteIfNeed(name);
     ostr << " AS (";
+    if (!definition)
+        throw Exception(ErrorCodes::UNEXPECTED_AST_STRUCTURE, "ASTWindowListElement '{}' has no window definition", name);
     definition->format(ostr, settings, state, frame);
     ostr << ")";
 }
