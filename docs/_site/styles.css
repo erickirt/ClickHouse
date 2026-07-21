@@ -2513,6 +2513,10 @@ html:not(.dark) .ch-logo-invert {
         padding-left: max(calc(19rem + 2rem), calc((100vw - 1504px) / 2 + 2rem)) !important;
         padding-right: min(calc(100vw - 19rem - 1504px + 2rem), calc((100vw - 1504px) / 2 + 2rem)) !important;
     }
+
+    html:not([data-page-mode="custom"]) #ch-custom-footer [data-inner] {
+        max-width: 1440px !important;
+    }
 }
 
 /* Reduce inner flex gap and left padding */
