@@ -852,6 +852,8 @@ void DiskObjectStorage::prepareRead(
     /// Memory cache (page cache).
     /// We explicitly disable page cache for disks with deterministic blob ids - the problem is that
     /// during rewrite of a file blob id will be reused but previously cached segments will not be invalidated.
+    /// NOTE: It is not possible to implement invalidate method for page cache like fs cache implements, because
+    ///       page cache stores data in internal hash map keyed by offset and lengh of blob segment that are a query level settings.
     const bool use_page_cache =
         read_settings.page_cache_settings.cache
         && (metadata_storage->areBlobPathsRandom() || metadata_storage->isReadOnly())
