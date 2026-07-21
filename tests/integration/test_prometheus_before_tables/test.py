@@ -11,7 +11,14 @@ node = cluster.add_instance("node", main_configs=["configs/prom_conf.xml"])
 # A configuration with custom `prometheus.handlers` must keep the regular server lifecycle.
 node_handlers = cluster.add_instance("node_handlers", main_configs=["configs/prom_conf_handlers.xml"])
 # A separate metrics-only instance for the destructive startup-failure test.
-node_fail = cluster.add_instance("node_fail", main_configs=["configs/prom_conf.xml"], stay_alive=True)
+# Disable `with_remote_database_disk`: the test injects a broken metadata file into the local
+# metadata directory, which the server would not read if database metadata lived on a remote disk.
+node_fail = cluster.add_instance(
+    "node_fail",
+    main_configs=["configs/prom_conf.xml"],
+    stay_alive=True,
+    with_remote_database_disk=False,
+)
 
 LOG_FILE = "/var/log/clickhouse-server/clickhouse-server.log"
 
