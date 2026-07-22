@@ -209,12 +209,6 @@ To use an existing service instead, find its ID with `clickhousectl cloud servic
 
 ### Replicate the tables to ClickHouse {#replicate-to-clickhouse}
 
-Replication uses Postgres logical replication, which reads changes from a publication. Create one covering the two tables:
-
-```bash
-psql "$PG_URL" -c "CREATE PUBLICATION quickstart_pub FOR TABLE events, users;"
-```
-
 Create a Postgres CDC ClickPipe on the ClickHouse service, pointing at the Managed Postgres hostname. The pipe copies the existing rows, then keeps ClickHouse in sync with ongoing changes:
 
 ```bash
@@ -227,7 +221,6 @@ clickhousectl cloud clickpipe create postgres "$CH_ID" \
   --pg-database postgres \
   --username postgres \
   --password "$PG_PASSWORD" \
-  --publication-name quickstart_pub \
   --table-mapping public.events:public_events \
   --table-mapping public.users:public_users \
   --json > pipe.json
@@ -238,7 +231,7 @@ PIPE_ID=$(jq -r .id pipe.json)
 Notes:
 
 - The replicated tables land in the `default` database on the ClickHouse service, named by the `--table-mapping` targets
-- The replication slot is managed automatically in the default `cdc` mode
+- The publication and replication slot are created automatically, with the publication scoped to the mapped tables — pass `--publication-name` to use one you manage yourself
 - Use the direct Postgres hostname — replication isn't supported via PgBouncer
 
 ### Wait for the pipe to reach Running {#wait-for-pipe}
@@ -597,13 +590,7 @@ To use an existing service instead, find its ID with `clickhousectl cloud servic
 
 ### Replicate the tables to ClickHouse {#replicate-to-clickhouse-cli}
 
-Replication uses Postgres logical replication, which reads changes from a publication. Create one covering the two tables:
-
-```bash
-psql "$PG_URL" -c "CREATE PUBLICATION quickstart_pub FOR TABLE events, users;"
-```
-
-Now create a Postgres CDC ClickPipe on the ClickHouse service, pointing at your Managed Postgres hostname. The pipe copies the existing rows, then keeps ClickHouse in sync with ongoing changes:
+Create a Postgres CDC ClickPipe on the ClickHouse service, pointing at your Managed Postgres hostname. The pipe copies the existing rows, then keeps ClickHouse in sync with ongoing changes:
 
 ```bash
 PG_HOST=$(jq -r .hostname pg.json)
@@ -615,7 +602,6 @@ clickhousectl cloud clickpipe create postgres "$CH_ID" \
   --pg-database postgres \
   --username postgres \
   --password "$PG_PASSWORD" \
-  --publication-name quickstart_pub \
   --table-mapping public.events:public_events \
   --table-mapping public.users:public_users \
   --json > pipe.json
@@ -626,7 +612,7 @@ PIPE_ID=$(jq -r .id pipe.json)
 A few things to know:
 
 - The replicated tables land in the `default` database on the ClickHouse service, named by the `--table-mapping` targets
-- The replication slot is managed automatically in the default `cdc` mode
+- The Postgres publication and replication slot are created automatically, with the publication scoped to the mapped tables — pass `--publication-name` to use one you manage yourself
 - Use the direct Postgres hostname — [replication isn't supported via PgBouncer](/products/managed-postgres/connection#pgbouncer)
 
 ### Wait for the initial snapshot {#wait-for-snapshot-cli}
