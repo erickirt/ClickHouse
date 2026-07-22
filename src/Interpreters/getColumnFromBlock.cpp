@@ -29,7 +29,7 @@ ColumnPtr tryGetColumnFromBlock(const Block & block, const NameAndTypePair & req
     if (requested_column.isSubcolumn())
     {
         auto subcolumn_name = requested_column.getSubcolumnName();
-        elem_column = tryGetSubcolumnUnwrappingConst(*elem_type, subcolumn_name, elem_column);
+        elem_column = elem_type->tryGetSubcolumn(subcolumn_name, elem_column);
         elem_type = elem_type->tryGetSubcolumnType(subcolumn_name);
 
         if (!elem_type || !elem_column)
@@ -51,7 +51,7 @@ ColumnPtr tryGetSubcolumnFromBlock(const Block & block, const DataTypePtr & requ
     if ((elem->type->hasDynamicStructure() || requested_column_type->hasDynamicStructure()) && !elem->type->equals(*requested_column_type))
     {
         auto cast_column = castColumn({elem->column->decompress(), elem->type, ""}, requested_column_type);
-        auto elem_column = tryGetSubcolumnUnwrappingConst(*requested_column_type, subcolumn_name, cast_column);
+        auto elem_column = requested_column_type->tryGetSubcolumn(subcolumn_name, cast_column);
         auto elem_type = requested_column_type->tryGetSubcolumnType(subcolumn_name);
 
         if (!elem_type || !elem_column)
@@ -60,7 +60,7 @@ ColumnPtr tryGetSubcolumnFromBlock(const Block & block, const DataTypePtr & requ
         return elem_column;
     }
 
-    auto elem_column = tryGetSubcolumnUnwrappingConst(*elem->type, subcolumn_name, elem->column->decompress());
+    auto elem_column = elem->type->tryGetSubcolumn(subcolumn_name, elem->column->decompress());
     auto elem_type = elem->type->tryGetSubcolumnType(subcolumn_name);
 
     if (!elem_type || !elem_column)
