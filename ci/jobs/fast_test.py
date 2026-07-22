@@ -363,11 +363,10 @@ def main():
         step_name = "Tests"
         print(step_name)
 
-        # Point the test-side file paths at the relocated server. shell_config.sh defaults these to
-        # /var/lib/clickhouse/*, but the server (and its rewritten config, see update_path_ch_config)
-        # lives under temp_dir, so tests using user_files or custom local disks would otherwise read
-        # from / write to a directory the server does not use.
-        os.environ["CLICKHOUSE_USER_FILES"] = f"{temp_dir}/var/lib/clickhouse/user_files"
+        # Point the custom local disk base dir at the relocated server. shell_config.sh defaults
+        # CLICKHOUSE_DISKS_FILES to /var/lib/clickhouse/disks, which matches the (rewritten) config
+        # but does not exist on the macOS runner. (CLICKHOUSE_USER_FILES is already set by
+        # ClickHouseProc to the server's --user_files_path, so it must not be overridden here.)
         os.environ["CLICKHOUSE_DISKS_FILES"] = f"{temp_dir}/var/lib/clickhouse/disks"
         os.makedirs(os.environ["CLICKHOUSE_DISKS_FILES"], exist_ok=True)
 
