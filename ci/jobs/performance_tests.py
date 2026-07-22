@@ -493,6 +493,13 @@ def get_perf_arch():
     Utils.raise_with_error("Unknown processor architecture")
 
 
+def cpu_pinning_enabled():
+    """Pinning requires Linux (taskset, sysfs topology, sched_getaffinity),
+    not just the CPU family: a local x86_64 macOS run must not get a taskset
+    prefix it cannot execute."""
+    return Utils.is_amd() and os.uname().sysname == "Linux"
+
+
 def get_physical_core_cpu_list():
     """Return a taskset -c CPU list with one hyperthread per physical core.
 
@@ -592,8 +599,8 @@ def write_max_threads_override():
     pinned-CPU invariant holds on any runner shape (smaller/larger/non-SMT
     x86 hosts), not just the current m7i.4xlarge.
     """
-    if not Utils.is_amd():
-        print("Not x86_64 - keeping the static max_threads")
+    if not cpu_pinning_enabled():
+        print("CPU pinning disabled (needs Linux x86_64) - keeping the static max_threads")
         # Reused workspaces (mkdir -p / cp -r) may carry an override from an
         # earlier x86_64 run; remove it so the static value actually applies.
         for config_dir in (perf_left_config, perf_right_config):
@@ -899,7 +906,9 @@ class CHServer:
         # thread per physical core and removes scheduler-dependent hyperthread
         # sibling sharing. arm (real cores only) is unchanged.
         taskset_prefix = (
-            f"taskset -c {get_physical_core_cpu_list()} " if Utils.is_amd() else ""
+            f"taskset -c {get_physical_core_cpu_list()} "
+            if cpu_pinning_enabled()
+            else ""
         )
 
         # The perf-comparison config removes <http_port>; re-enable it on the

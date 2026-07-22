@@ -186,12 +186,14 @@ function match_reference_debug_info
 function pinned_cpu_list
 {
     # One ALLOWED hyperthread per physical core, as a comma-separated list;
-    # empty on non-x86_64. Sysfs exposes the host topology, so on a
-    # cpuset-limited run the sibling list is intersected with the process
-    # affinity mask - a disallowed CPU in taskset would fail to start the
-    # servers. Must stay in sync with get_physical_core_cpu_list in
-    # ci/jobs/performance_tests.py.
-    if [ "$(uname -m)" != "x86_64" ]
+    # empty when pinning is disabled. Pinning requires Linux x86_64 (taskset,
+    # sysfs topology, sched_getaffinity are Linux-only - a local Intel Mac
+    # must not get a taskset prefix it cannot execute). Sysfs exposes the
+    # host topology, so on a cpuset-limited run the sibling list is
+    # intersected with the process affinity mask - a disallowed CPU in
+    # taskset would fail to start the servers. Must stay in sync with
+    # get_physical_core_cpu_list in ci/jobs/performance_tests.py.
+    if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]
     then
         return 0
     fi
