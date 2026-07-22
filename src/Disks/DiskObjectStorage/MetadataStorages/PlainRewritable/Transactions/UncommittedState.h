@@ -20,7 +20,7 @@ public:
     void removeDirectory(const std::string & path);
     void moveDirectory(const std::string & path_from, const std::string & path_to);
 
-    std::pair<bool, std::optional<DirectoryRemoteInfo>> lookupDirectory(const std::string & path) const;
+    std::optional<DirectoryRemoteInfo> getDirectoryRemoteInfo(const std::string & path) const;
     std::shared_ptr<Preconditions> getTxPreconditions() const;
 
 private:

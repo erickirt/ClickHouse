@@ -130,7 +130,7 @@ void UncommittedState::createDirectory(const std::string & path)
 
 void UncommittedState::removeDirectory(const std::string & path)
 {
-    if (!tx_snapshot->existsDirectory(path).first)
+    if (!tx_snapshot->existsDirectory(path))
         return;
 
     path_resolver->recordRemove(normalizePath(path));
@@ -139,19 +139,19 @@ void UncommittedState::removeDirectory(const std::string & path)
 
 void UncommittedState::moveDirectory(const std::string & path_from, const std::string & path_to)
 {
-    if (!tx_snapshot->existsDirectory(path_from).first)
+    if (!tx_snapshot->existsDirectory(path_from))
         return;
 
-    if (tx_snapshot->existsDirectory(path_to).first || tx_snapshot->existsFile(path_to))
+    if (tx_snapshot->existsDirectory(path_to) || tx_snapshot->existsFile(path_to))
         return;
 
     path_resolver->recordMove(normalizePath(path_from), normalizePath(path_to));
     tx_snapshot->moveDirectory(path_from, path_to);
 }
 
-std::pair<bool, std::optional<DirectoryRemoteInfo>> UncommittedState::lookupDirectory(const std::string & path) const
+std::optional<DirectoryRemoteInfo> UncommittedState::getDirectoryRemoteInfo(const std::string & path) const
 {
-    return tx_snapshot->existsDirectory(path);
+    return tx_snapshot->getDirectoryRemoteInfo(path);
 }
 
 std::shared_ptr<Preconditions> UncommittedState::getTxPreconditions() const
