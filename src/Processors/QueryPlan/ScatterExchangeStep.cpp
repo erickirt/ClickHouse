@@ -5,12 +5,18 @@
 namespace DB
 {
 
-/// Scatter is a special case of Shuffle where the number of source buckets is 1, so it reuses the
-/// ShuffleSend and ShuffleReceive steps. They handle any source bucket count, so a multi-bucket
-/// source is repartitioned like a plain shuffle. This is correct only when the source buckets are
-/// a partition of the data; broadcast copies are rejected in makeDistributedPlan.
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
+
+/// Scatter is a special case of Shuffle where the number of source buckets is 1.
+/// So we can use ShuffleSend and ShuffleReceive steps as sink and source respectively.
 std::pair<QueryPlanStepPtr, QueryPlanStepPtr> ScatterExchangeStep::createSinkAndSourcePair(const String & exchange_id, const Strings & source_shards) const
 {
+    if (source_shards.size() != 1)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "ScatterExchangeStep should have one source shard, got {}", source_shards.size());
+
     size_t num_buckets = getResultBucketCount();
     auto sink = std::make_unique<ShuffleSendStep>(input_headers.front(), exchange_id, key_names, num_buckets, hash_cast_types);
 
