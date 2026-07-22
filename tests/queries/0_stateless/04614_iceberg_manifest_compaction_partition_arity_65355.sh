@@ -3,17 +3,6 @@
 # - no-fasttest: requires `IcebergLocal` (USE_AVRO build option)
 # - no-parallel: uses DETACH/ATTACH which serializes per database
 
-# Regression test for the Iceberg manifest-compaction out-of-bounds read reported in
-# ClickHouse/clickhouse-private#65355. `writeConsolidatedManifestFile` sized the loop from the resolved
-# partition spec's column count but read the value tuple deserialized from the manifest, whose arity was
-# never reconciled. A manifest whose partition tuple is shorter than the current spec (partition evolution
-# or crafted metadata) made `generateManifestFile` index past the end of the `std::vector<Field>` during
-# `OPTIMIZE TABLE ... MANIFEST`, aborting the server under libc++ FAST hardening.
-#
-# After the fix the arity mismatch is rejected with a catchable `ICEBERG_SPECIFICATION_VIOLATION` and the
-# server keeps running. We reproduce the shorter-than-spec tuple by appending a second field to the
-# on-disk partition spec after the (single-column-partition) data was written.
-
 CUR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../shell_config.sh
 . "$CUR_DIR"/../shell_config.sh
