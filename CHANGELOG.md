@@ -20,6 +20,39 @@
 
 # 2026 Changelog
 
+<!-- CHANGELOG-RAW-BEGIN: auto-generated entries below are edited and removed by the NightlyChangelog CI job; do not edit them manually -->
+### ClickHouse release a5d2f664014de19b835785c4855c6865bfe27198 (a5d2f664014) FIXME as compared to feaa46568da37868728e59aa27c9b8fa696db4d7 (feaa46568da)
+
+#### Performance Improvement
+* Optimized aggregate functions `uniqHLL12` and `uniqCombined`. [#109831](https://github.com/ClickHouse/ClickHouse/pull/109831) ([Anton Popov](https://github.com/CurtizJ)).
+* Reduced peak memory usage of `BACKUP` by no longer copying the internal list of file infos when writing backup entries (significant for backups containing millions of files). [#111162](https://github.com/ClickHouse/ClickHouse/pull/111162) ([Julia Kartseva](https://github.com/jkartseva)).
+
+#### Improvement
+* Support the query profiler, memory/trace profilers, and trace_log symbolization on macOS. [#109825](https://github.com/ClickHouse/ClickHouse/pull/109825) ([Raúl Marín](https://github.com/Algunenano)).
+* Chdig [v26.7.1](https://github.com/azat/chdig/releases/tag/v26.7.1): compress stacktraces for sharing, query patterns, separate arenas memory support, perfetto improvements, compatibility. [#110938](https://github.com/ClickHouse/ClickHouse/pull/110938) ([Azat Khuzhin](https://github.com/azat)).
+* This patch fixes snapshot isolation guarantees for `plain-rewritable` disk metadata transactions. [#110948](https://github.com/ClickHouse/ClickHouse/pull/110948) ([Mikhail Artemenko](https://github.com/Michicosun)).
+
+#### Bug Fix (user-visible misbehavior in an official stable release)
+* Fix a `LOGICAL_ERROR` `Invalid binary search result in MergeTreeSetIndex` (and missed index pruning in release builds) when an `IN`/`NOT IN` condition on the primary key wraps the key in `intDiv` by a constant and the key is an unsigned integer whose values cross the signed boundary of the `intDiv` result type (for example `intDiv(uint64_column, -9223372036854775807)`). [#107586](https://github.com/ClickHouse/ClickHouse/pull/107586) ([Groene AI](https://github.com/groeneai)).
+* Fix an abort (`front() called on an empty vector`) in `clickhouse-client --login` when the host was not passed as an explicit `--host` argument, for example when it came from `--connection`, the configuration file, or the `CLICKHOUSE_HOST` environment variable. Closes [#103603](https://github.com/ClickHouse/ClickHouse/issues/103603). [#110279](https://github.com/ClickHouse/ClickHouse/pull/110279) ([Christoph Wurm](https://github.com/cwurm)).
+* Fix a LOGICAL_ERROR ("No set is registered for key") in ALTER TABLE ... DROP COLUMN, ALTER TABLE ... DELETE/UPDATE mutations, and lightweight DELETE, on tables that have an ALIAS column whose expression uses an IN operator (including through another ALIAS column). [#111039](https://github.com/ClickHouse/ClickHouse/pull/111039) ([Pedro Ferreira](https://github.com/PedroTadim)).
+* Fixed silent data loss with async inserts and deduplication (`async_insert=1`, `async_insert_deduplicate=1`). When several async-insert entries with distinct `insert_deduplication_token` values were coalesced into one flush that wrote to disjoint partitions, each token was registered in the deduplication log of every partition the flush touched, not only the partition its own rows landed in. A later insert reusing one of those tokens in a partition it never wrote to was then silently deduplicated away. Tokens are now registered only against the partition their rows actually landed in. [#111049](https://github.com/ClickHouse/ClickHouse/pull/111049) ([Groene AI](https://github.com/groeneai)).
+
+#### Build/Testing/Packaging Improvement
+* Update `abseil-cpp` to LTS `20260526.0`. [#108991](https://github.com/ClickHouse/ClickHouse/pull/108991) ([Konstantin Bogdanov](https://github.com/thevar1able)).
+
+#### NOT FOR CHANGELOG / INSIGNIFICANT
+
+* Add missing `<atomic>` include in `DeserializationPrefixesCache`. [#108678](https://github.com/ClickHouse/ClickHouse/pull/108678) ([coderashed](https://github.com/coderashed)).
+* Fix a logical error (`!part.empty()`) when a lambda argument is a backquoted identifier whose name contains a dot (for example a lambda argument named `__table1.`). Such a query previously produced a handled exception in release builds and aborted the server in debug and sanitizer builds while formatting an error message. [#108735](https://github.com/ClickHouse/ClickHouse/pull/108735) ([Groene AI](https://github.com/groeneai)).
+* Add regression test for implicit-boolean WHERE filter on projection and parallel-replicas read paths. [#110797](https://github.com/ClickHouse/ClickHouse/pull/110797) ([Groene AI](https://github.com/groeneai)).
+* ReaderExecutor: coordinate cleanup, run-anchored reach, serve-to-bound long connections. [#111088](https://github.com/ClickHouse/ClickHouse/pull/111088) ([Sema Checherinda](https://github.com/CheSema)).
+* Fix flaky 03630_benchmark_accept_invalid_certificate (SOCKET_TIMEOUT). [#111168](https://github.com/ClickHouse/ClickHouse/pull/111168) ([Groene AI](https://github.com/groeneai)).
+* Sync Private. [#111187](https://github.com/ClickHouse/ClickHouse/pull/111187) ([Mikhail Artemenko](https://github.com/Michicosun)).
+* Docs: regenerate reference documentation from source. [#111190](https://github.com/ClickHouse/ClickHouse/pull/111190) ([clickhouse-gh[bot]](https://github.com/apps/clickhouse-gh)).
+* Add a nightly CI job preparing the changelog for the upcoming release. [#111255](https://github.com/ClickHouse/ClickHouse/pull/111255) ([Alexey Milovidov](https://github.com/alexey-milovidov)).
+<!-- CHANGELOG-RAW-END -->
+
 ### <a id="267"></a> ClickHouse release 26.7, FIXME (in progress)
 
 #### Backward Incompatible Change
