@@ -945,10 +945,10 @@
       "expanded": false,
       "group": "Settings",
       "pages": [
-        "reference/settings/server-settings/settings",
-        "reference/settings/session-settings",
-        "reference/settings/merge-tree-settings",
-        "reference/settings/formats",
+        { "$ref": "./settings/server-settings/settings/navigation.json" },
+        { "$ref": "./settings/session-settings/navigation.json" },
+        { "$ref": "./settings/merge-tree-settings/navigation.json" },
+        { "$ref": "./settings/formats/navigation.json" },
         "reference/settings/beta-and-experimental-features"
       ],
       "root": "reference/settings/index"
