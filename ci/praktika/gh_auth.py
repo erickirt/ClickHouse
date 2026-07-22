@@ -200,6 +200,7 @@ class GHAuth:
                 return True
         except Exception as e:
             print(f"WARNING: GH auth failed: {e}")
+            cls._authenticated = False
             return False
 
         cls._authenticated = True
