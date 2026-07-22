@@ -41,3 +41,30 @@ TEST(ASTWindowListElement, CloneWithDefinitionRoundTrips)
     elem->format(buf, IAST::FormatSettings(/*one_line=*/true));
     EXPECT_EQ(buf.str(), "w AS ()");
 }
+
+/// `definition` is registered as a child (since #110506). When a visitor rewrites that child via
+/// `updatePointerToChild`, the `forEachPointerToChild` override must keep the `definition` member in
+/// sync with `children[0]`. Consumers read `elem.definition` directly (e.g. QueryTreeBuilder::buildWindow),
+/// so a desync would leave them looking at stale state while the null-guard tests above stay green.
+TEST(ASTWindowListElement, UpdatePointerToChildKeepsDefinitionInSync)
+{
+    auto old_def = make_intrusive<ASTWindowDefinition>();
+    auto elem = make_intrusive<ASTWindowListElement>();
+    elem->name = "w";
+    elem->definition = old_def;
+    elem->children.push_back(elem->definition);
+
+    ASSERT_EQ(elem->children.size(), 1u);
+    ASSERT_EQ(elem->definition.get(), old_def.get());
+
+    /// Mimic a visitor: swap the children[] entry, then sync member pointers via updatePointerToChild.
+    /// `old_def` stays alive for the whole test, so old_ptr is never a recycled address.
+    auto new_def = make_intrusive<ASTWindowDefinition>();
+    const IAST * old_ptr = elem->children[0].get();
+    elem->children[0] = new_def;
+    elem->updatePointerToChild(old_ptr, new_def);
+
+    EXPECT_EQ(elem->definition.get(), new_def.get());
+    EXPECT_EQ(elem->children[0].get(), new_def.get());
+    EXPECT_NE(elem->definition.get(), old_def.get());
+}
