@@ -1,12 +1,7 @@
 # Tests skipped on the macOS (Darwin) fast-test run.
 # Lines starting with '#' are comments; blank lines are ignored (see ci/jobs/fast_test.py).
-# Grouped by known reason. Sections below the "NOT a macOS platform gap" marker are env/harness/
-# portability issues that likely pass on the CI runner or are fixable - they are skip candidates to
-# re-verify or fix, not permanent platform gaps.
-
-# ─────────────────────────── macOS platform gaps (keep skipped) ───────────────────────────
-
-# ─────── NOT a macOS platform gap: env/harness/portability - verify on CI or fix ───────
+# These are env/harness/portability issues that likely pass on the CI runner or are fixable,
+# not permanent platform gaps - each is a candidate to re-verify or fix, not to keep forever.
 
 # Local fast-test server lacks these cluster/keeper definitions (CLUSTER_DOESNT_EXIST / NO_ZOOKEEPER);
 # the CI runner config has them, so these likely pass on CI. Re-verify before unskipping.
