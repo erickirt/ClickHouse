@@ -12,7 +12,7 @@ import { Image } from "/snippets/components/Image.jsx";
 
 <Visibility for="agents">
 
-This page covers provisioning ClickHouse Managed Postgres, loading data, replicating it to ClickHouse, and querying it — entirely from the command line with `clickhousectl` and `psql`. Every command is non-interactive and emits JSON with `--json`.
+This page covers provisioning ClickHouse Managed Postgres, loading data, replicating it to ClickHouse, and querying it, all from the command line with `clickhousectl` and `psql`. Commands are non-interactive; `clickhousectl` emits JSON with `--json`.
 
 ## Prerequisites {#prerequisites}
 
@@ -22,21 +22,21 @@ Install the ClickHouse CLI:
 curl https://clickhouse.com/cli | sh
 ```
 
-You also need `psql` (PostgreSQL client tools — on macOS, `brew install libpq`) and `jq`.
+You also need `psql` (PostgreSQL client tools; on macOS, `brew install libpq`) and `jq`.
 
-Write operations (create, delete) require [API key authentication](/products/cloud/features/admin-features/api/openapi) — OAuth login is read-only:
+Write operations (create, delete) require [API key authentication](/products/cloud/features/admin-features/api/openapi); OAuth login is read-only:
 
 ```bash
 clickhousectl cloud auth login --api-key <YOUR_KEY> --api-secret <YOUR_SECRET>
 ```
 
-Alternatively, set the `CLICKHOUSE_CLOUD_API_KEY` and `CLICKHOUSE_CLOUD_API_SECRET` environment variables. Verify with `clickhousectl cloud auth status` — expect an entry with scope `read/write`.
+Alternatively, set the `CLICKHOUSE_CLOUD_API_KEY` and `CLICKHOUSE_CLOUD_API_SECRET` environment variables. Verify with `clickhousectl cloud auth status`; expect an entry with scope `read/write`.
 
 ## Part 1: Create Postgres and load data {#part-1-create-and-load}
 
 ### Create a Postgres service {#create-postgres-service}
 
-Create the service and save the response — it contains the credentials, and the password is shown only once:
+Create the service and save the response; the password is shown only once:
 
 ```bash
 clickhousectl cloud postgres create \
@@ -175,7 +175,7 @@ INSERT 0 1000
 Time: 84.807 ms
 ```
 
-The 1M-row insert completes in about 7 seconds on `c6gd.large` (the smallest size) thanks to NVMe storage. Verify with a query — row counts vary between runs because the data is generated with `random()`:
+The 1M-row insert completes in about 7 seconds on `c6gd.large` (the smallest size) thanks to NVMe storage. Verify with a query; row counts vary between runs because the data is generated with `random()`:
 
 ```bash
 psql "$PG_URL" -c "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY 2 DESC;"
@@ -185,7 +185,7 @@ psql "$PG_URL" -c "SELECT event_type, COUNT(*) FROM events GROUP BY event_type O
 
 ### Create a ClickHouse service {#create-clickhouse-service}
 
-Create a service in the same region and save the response — the password appears only in the create response:
+Create a service in the same region and save the response; the password appears only in the create response:
 
 ```bash
 clickhousectl cloud service create \
@@ -197,7 +197,7 @@ CH_ID=$(jq -r .service.id ch.json)
 CH_PASSWORD=$(jq -r .password ch.json)
 ```
 
-Wait until it's running — the ClickPipe requires a running destination:
+Wait until it's running; the ClickPipe requires a running destination:
 
 ```bash
 while [ "$(clickhousectl cloud service get "$CH_ID" --json | jq -r .state)" != "running" ]; do
@@ -205,7 +205,7 @@ while [ "$(clickhousectl cloud service get "$CH_ID" --json | jq -r .state)" != "
 done
 ```
 
-To use an existing service instead, find its ID with `clickhousectl cloud service list`.
+To use an existing service instead, set `CH_ID` from `clickhousectl cloud service list` and `CH_PASSWORD` to its `default` user password, which the `pg_clickhouse` step needs.
 
 ### Replicate the tables to ClickHouse {#replicate-to-clickhouse}
 
@@ -231,15 +231,20 @@ PIPE_ID=$(jq -r .id pipe.json)
 Notes:
 
 - The replicated tables land in the `default` database on the ClickHouse service, named by the `--table-mapping` targets
-- The publication and replication slot are created automatically, with the publication scoped to the mapped tables — pass `--publication-name` to use one you manage yourself
-- Use the direct Postgres hostname — replication isn't supported via PgBouncer
+- The publication and replication slot are created automatically, with the publication scoped to the mapped tables; pass `--publication-name` to use one you manage yourself
+- Use the direct Postgres hostname; replication isn't supported via PgBouncer
 
 ### Wait for the pipe to reach Running {#wait-for-pipe}
 
-The pipe moves through `Provisioning` and `Setup` — plus `Snapshot` for larger tables — before reaching `Running`, which takes about 4 minutes for the first pipe on a service. `Failed` and `InternalError` are terminal:
+The pipe moves through `Provisioning`, `Setup`, and (for larger tables) `Snapshot` before reaching `Running`, which takes about 4 minutes for the first pipe on a service. `Failed` and `InternalError` are terminal:
 
 ```bash
-while [ "$(clickhousectl cloud clickpipe get "$CH_ID" "$PIPE_ID" --json | jq -r .state)" != "Running" ]; do
+while :; do
+  STATE=$(clickhousectl cloud clickpipe get "$CH_ID" "$PIPE_ID" --json | jq -r .state)
+  case "$STATE" in
+    Running) break ;;
+    Failed|InternalError) echo "ClickPipe entered terminal state: $STATE" >&2; exit 1 ;;
+  esac
   sleep 15
 done
 ```
@@ -258,18 +263,15 @@ Provisioning Query API endpoint + key for service 'quickstart-ch'...
 1000000
 ```
 
-New writes to Postgres replicate continuously — insert a row and watch it arrive (takes up to a minute):
+New writes to Postgres replicate continuously. Insert a row and poll until the count reaches 1,000,001 (typically under a minute):
 
 ```bash
 psql "$PG_URL" -c "INSERT INTO events (event_name, event_type, user_id, user_ip) VALUES ('cdc-test', 'click', 42, '10.0.0.1');"
 
-sleep 60
-clickhousectl cloud service query --id "$CH_ID" \
-  --query "SELECT count() FROM public_events"
-```
-
-```text
-1000001
+while [ "$(clickhousectl cloud service query --id "$CH_ID" \
+  --query "SELECT count() FROM public_events")" != "1000001" ]; do
+  sleep 10
+done
 ```
 
 ### Query ClickHouse from Postgres {#query-clickhouse-from-postgres}
@@ -304,7 +306,7 @@ clickhousectl cloud clickpipe delete "$CH_ID" "$PIPE_ID"
 clickhousectl cloud postgres delete "$PG_ID"
 ```
 
-A running ClickHouse service can't be deleted directly — stop it, wait for `stopped`, then delete:
+A running ClickHouse service can't be deleted directly. Stop it, wait for `stopped`, then delete:
 
 ```bash
 clickhousectl cloud service stop "$CH_ID"
@@ -323,7 +325,7 @@ clickhousectl cloud service delete "$CH_ID"
 
 <BetaBadge link="https://clickhouse.com/cloud/postgres" galaxyTrack={true} galaxyEvent="docs.managed-postgres.quick-start-cli-beta" />
 
-This path runs the quickstart entirely from the command line using the [ClickHouse CLI](/products/cloud/features/cli) (`clickhousectl`) and `psql` — no console required — so you can follow it yourself, script it, or hand it to an AI agent. Switch to the **Cloud UI** view for the console version.
+This path runs the quickstart entirely from the command line with the [ClickHouse CLI](/products/cloud/features/cli) (`clickhousectl`) and `psql`, so you can follow it yourself, script it, or hand it to an AI agent. Switch to the **Cloud UI** view for the console version.
 
 **In this quickstart, you will:**
 - Create a Managed Postgres service from the command line
@@ -340,9 +342,9 @@ Install the ClickHouse CLI:
 curl https://clickhouse.com/cli | sh
 ```
 
-You'll also need `psql` (ships with the standard PostgreSQL client tools — on macOS, `brew install libpq`) and `jq`.
+You'll also need `psql` (part of the PostgreSQL client tools; on macOS, `brew install libpq`) and `jq`.
 
-Creating and deleting services are write operations, which require [API key authentication](/products/cloud/features/admin-features/api/openapi) — OAuth login is read-only. Log in with your key:
+Creating and deleting services are write operations, which require [API key authentication](/products/cloud/features/admin-features/api/openapi); OAuth login is read-only. Log in with your key:
 
 ```bash
 clickhousectl cloud auth login --api-key <YOUR_KEY> --api-secret <YOUR_SECRET>
@@ -354,7 +356,7 @@ Alternatively, set the `CLICKHOUSE_CLOUD_API_KEY` and `CLICKHOUSE_CLOUD_API_SECR
 
 ### Create a Postgres service {#create-postgres-service-cli}
 
-Create the service and save the response — it contains the credentials, and the password is shown only once:
+Create the service and save the response; the password is shown only once:
 
 ```bash
 clickhousectl cloud postgres create \
@@ -557,7 +559,7 @@ Time: 546.574 ms
 
 Row counts vary between runs because the sample data is generated with `random()`. Query times include the network round trip from your machine.
 
-You now have a fully functional, high-performance Postgres database ready for transactional workloads. Part 2 adds real-time analytics on top of it.
+You now have a working Postgres database for transactional workloads. Part 2 adds real-time analytics on top of it.
 
 ## Part 2: Add real-time analytics with ClickHouse {#part-2-cli}
 
@@ -565,7 +567,7 @@ While Postgres excels at transactional workloads (OLTP), ClickHouse is purpose-b
 
 ### Create a ClickHouse service {#create-clickhouse-service-cli}
 
-Create a service in the same region and save the response — as with Postgres, the password appears only in the create response:
+Create a service in the same region and save the response; as with Postgres, the password appears only in the create response:
 
 ```bash
 clickhousectl cloud service create \
@@ -577,7 +579,7 @@ CH_ID=$(jq -r .service.id ch.json)
 CH_PASSWORD=$(jq -r .password ch.json)
 ```
 
-Wait until it's running — the ClickPipe requires a running destination:
+Wait until it's running; the ClickPipe requires a running destination:
 
 ```bash
 while [ "$(clickhousectl cloud service get "$CH_ID" --json | jq -r .state)" != "running" ]; do
@@ -586,7 +588,7 @@ while [ "$(clickhousectl cloud service get "$CH_ID" --json | jq -r .state)" != "
 done
 ```
 
-To use an existing service instead, find its ID with `clickhousectl cloud service list`.
+To use an existing service instead, set `CH_ID` from `clickhousectl cloud service list` and `CH_PASSWORD` to its `default` user password, which the `pg_clickhouse` step needs.
 
 ### Replicate the tables to ClickHouse {#replicate-to-clickhouse-cli}
 
@@ -609,28 +611,31 @@ clickhousectl cloud clickpipe create postgres "$CH_ID" \
 PIPE_ID=$(jq -r .id pipe.json)
 ```
 
-A few things to know:
+Notes:
 
 - The replicated tables land in the `default` database on the ClickHouse service, named by the `--table-mapping` targets
-- The Postgres publication and replication slot are created automatically, with the publication scoped to the mapped tables — pass `--publication-name` to use one you manage yourself
-- Use the direct Postgres hostname — [replication isn't supported via PgBouncer](/products/managed-postgres/connection#pgbouncer)
+- The Postgres publication and replication slot are created automatically, with the publication scoped to the mapped tables; pass `--publication-name` to use one you manage yourself
+- Use the direct Postgres hostname; [replication isn't supported via PgBouncer](/products/managed-postgres/connection#pgbouncer)
 
 ### Wait for the initial snapshot {#wait-for-snapshot-cli}
 
-The pipe moves through `Provisioning` and `Setup` — plus `Snapshot` for larger tables — before reaching `Running`, which takes about 4 minutes for the first pipe on a service:
+The pipe moves through the [`Provisioning`, `Setup`, and (for larger tables) `Snapshot` states](/integrations/clickpipes/postgres/lifecycle) before reaching `Running`, which takes about 4 minutes for the first pipe on a service:
 
 ```bash
-while [ "$(clickhousectl cloud clickpipe get "$CH_ID" "$PIPE_ID" --json | jq -r .state)" != "Running" ]; do
+while :; do
+  STATE=$(clickhousectl cloud clickpipe get "$CH_ID" "$PIPE_ID" --json | jq -r .state)
+  case "$STATE" in
+    Running) break ;;
+    Failed|InternalError) echo "ClickPipe entered terminal state: $STATE" >&2; exit 1 ;;
+  esac
   echo "waiting for clickpipe..."
   sleep 15
 done
 ```
 
-See [Lifecycle of a Postgres ClickPipe](/integrations/clickpipes/postgres/lifecycle) for what each state means.
-
 ### Query the replicated data in ClickHouse {#query-clickhouse-cli}
 
-Run SQL against the ClickHouse service directly from the CLI — no client setup needed. The first call provisions a Query API endpoint and a service-scoped API key automatically:
+Run SQL against the ClickHouse service directly from the CLI. The first call provisions a Query API endpoint and a service-scoped API key automatically:
 
 ```bash
 clickhousectl cloud service query --id "$CH_ID" \
@@ -642,18 +647,15 @@ Provisioning Query API endpoint + key for service 'quickstart-ch'...
 1000000
 ```
 
-All 1 million events are in ClickHouse. New writes to Postgres replicate continuously — insert a row and watch it arrive:
+All 1 million events are in ClickHouse. New writes to Postgres replicate continuously. Insert a row and poll until the count reaches 1,000,001 (typically under a minute):
 
 ```bash
 psql "$PG_URL" -c "INSERT INTO events (event_name, event_type, user_id, user_ip) VALUES ('cdc-test', 'click', 42, '10.0.0.1');"
 
-sleep 60
-clickhousectl cloud service query --id "$CH_ID" \
-  --query "SELECT count() FROM public_events"
-```
-
-```text
-1000001
+while [ "$(clickhousectl cloud service query --id "$CH_ID" \
+  --query "SELECT count() FROM public_events")" != "1000001" ]; do
+  sleep 10
+done
 ```
 
 ### Query ClickHouse from Postgres {#pg-clickhouse-extension-cli}
@@ -750,7 +752,7 @@ Then run both queries against the local tables (swap `organization.public_events
 <Tip>
 **When to use ClickHouse**
 
-Even on this 1M row dataset, ClickHouse delivers 6-9x faster performance on complex analytical queries with JOINs and multiple aggregations. The difference becomes even more dramatic at larger scales (100M+ rows), where ClickHouse's columnar storage and vectorized execution can deliver 10-100x speedups.
+The gap widens at larger scales (100M+ rows), where ClickHouse's columnar storage and vectorized execution can deliver 10-100x speedups.
 
 Query times vary based on instance size, network latency between services, data characteristics, and current load.
 </Tip>
@@ -764,7 +766,7 @@ clickhousectl cloud clickpipe delete "$CH_ID" "$PIPE_ID"
 clickhousectl cloud postgres delete "$PG_ID"
 ```
 
-If you created the ClickHouse service just for this quickstart, delete it too. A running service can't be deleted directly — stop it first and wait for the `stopped` state:
+If you created the ClickHouse service just for this quickstart, delete it too. A running service can't be deleted directly; stop it first and wait for the `stopped` state:
 
 ```bash
 clickhousectl cloud service stop "$CH_ID"
@@ -791,7 +793,7 @@ ClickHouse Managed Postgres is enterprise-grade Postgres backed by NVMe storage,
 - **Part 1:** Get started with NVMe Postgres and experience its performance
 - **Part 2:** Unlock real-time analytics by integrating with ClickHouse
 
-Managed Postgres is currently available on AWS in several regions and is free during private preview.
+Managed Postgres is currently available on AWS in several regions and is in public beta.
 
 **In this quickstart, you will:**
 - Create a Managed Postgres instance with NVMe-powered performance
