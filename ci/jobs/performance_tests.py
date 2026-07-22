@@ -541,16 +541,16 @@ MAX_THREADS_OVERRIDE_XML = """\
     Written by ci/jobs/performance_tests.py at job setup, x86_64 only (arm
     keeps max_threads=12 from perf-comparison-tweaks-users.xml).
 
-    The x86_64 runner (m7i.4xlarge) has 8 physical cores x 2 hyperthreads and
-    both servers are pinned with taskset to one hyperthread per physical core.
-    max_threads=8 matches that CPU set: one query thread per physical core, so
-    whether two threads share a hyperthread sibling no longer depends on the
-    scheduler (measured A/A noise: amd 0.51% vs arm 0.42%).
+    Both servers are pinned with taskset to one hyperthread per physical core
+    and max_threads is set to the size of that CPU set (e.g. 8 on
+    m7i.4xlarge: 8 physical cores x 2 hyperthreads), one query thread per
+    pinned CPU, so whether two threads share a hyperthread sibling no longer
+    depends on the scheduler (measured A/A noise: amd 0.51% vs arm 0.42%).
 -->
 <clickhouse>
     <profiles>
         <default>
-            <max_threads>8</max_threads>
+            <max_threads>{max_threads}</max_threads>
         </default>
     </profiles>
 </clickhouse>
@@ -558,15 +558,21 @@ MAX_THREADS_OVERRIDE_XML = """\
 
 
 def write_max_threads_override():
-    """Write the x86_64 max_threads override into both servers' users.d."""
+    """Write the x86_64 max_threads override into both servers' users.d.
+
+    max_threads is derived from the pinned CPU list, so the one-thread-per-
+    pinned-CPU invariant holds on any runner shape (smaller/larger/non-SMT
+    x86 hosts), not just the current m7i.4xlarge.
+    """
     if not Utils.is_amd():
         print("Not x86_64 - keeping the static max_threads")
         return True
+    max_threads = len(get_physical_core_cpu_list().split(","))
     for config_dir in (perf_left_config, perf_right_config):
         target = Path(config_dir) / "users.d" / MAX_THREADS_OVERRIDE_FILE
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(MAX_THREADS_OVERRIDE_XML)
-        print(f"Wrote max_threads override to [{target}]")
+        target.write_text(MAX_THREADS_OVERRIDE_XML.format(max_threads=max_threads))
+        print(f"Wrote max_threads={max_threads} override to [{target}]")
     return True
 
 

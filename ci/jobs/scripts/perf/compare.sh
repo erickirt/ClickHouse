@@ -185,8 +185,11 @@ function match_reference_debug_info
 # (arm has real cores only and is unchanged). Must stay in sync with
 # get_physical_core_cpu_list in ci/jobs/performance_tests.py, which pins the
 # initial server starts the same way.
-function cpu_pinning_prefix
+function pinned_cpu_list
 {
+    # One hyperthread per physical core, as a comma-separated list; empty on
+    # non-x86_64. Must stay in sync with get_physical_core_cpu_list in
+    # ci/jobs/performance_tests.py.
     if [ "$(uname -m)" != "x86_64" ]
     then
         return 0
@@ -202,27 +205,41 @@ function cpu_pinning_prefix
         # all physical cores on our runners).
         half=$(( $(nproc) / 2 ))
         if [ "$half" -lt 1 ]; then half=1; fi
-        cpus="0-$(( half - 1 ))"
+        cpus=$(seq -s, 0 $(( half - 1 )))
     fi
-    echo "taskset -c $cpus"
+    echo "$cpus"
+}
+
+function cpu_pinning_prefix
+{
+    local cpus
+    cpus=$(pinned_cpu_list)
+    if [ -n "$cpus" ]
+    then
+        echo "taskset -c $cpus"
+    fi
 }
 
 function write_max_threads_override
 {
     # Pinning and max_threads must travel together: with taskset limiting both
-    # servers to one hyperthread per physical core (8 CPUs on m7i.4xlarge),
-    # the static default max_threads=12 would oversubscribe the pinned set and
-    # reintroduce the scheduler noise the pinning removes. The CI flow writes
-    # this override from performance_tests.py (MAX_THREADS_OVERRIDE_XML, keep
-    # in sync); the standalone entrypoints (stage=run_tests, the manual README
-    # flow, compare-releases.sh) prepare their configs here, so emit the same
-    # x86_64-only override for them. The zzz- prefix sorts the file after the
-    # static users.d files, overriding them.
-    if [ "$(uname -m)" != "x86_64" ]
+    # servers to one hyperthread per physical core, the static default
+    # max_threads=12 would oversubscribe the pinned set and reintroduce the
+    # scheduler noise the pinning removes. max_threads is derived from the
+    # pinned CPU list (one query thread per pinned CPU, e.g. 8 on
+    # m7i.4xlarge) so the invariant holds on any x86_64 shape. The CI flow
+    # writes the same override from performance_tests.py
+    # (MAX_THREADS_OVERRIDE_XML, keep in sync); the standalone entrypoints
+    # (stage=run_tests, the manual README flow, compare-releases.sh) prepare
+    # their configs here. The zzz- prefix sorts the file after the static
+    # users.d files, overriding them.
+    local cpus max_threads dir
+    cpus=$(pinned_cpu_list)
+    if [ -z "$cpus" ]
     then
         return 0
     fi
-    local dir
+    max_threads=$(( $(echo "$cpus" | tr -cd , | wc -c) + 1 ))
     for dir in left right
     do
         if [ -d "$dir/config/users.d" ]
@@ -231,7 +248,7 @@ function write_max_threads_override
 <clickhouse>
     <profiles>
         <default>
-            <max_threads>8</max_threads>
+            <max_threads>$max_threads</max_threads>
         </default>
     </profiles>
 </clickhouse>
