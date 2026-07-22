@@ -418,19 +418,20 @@ DeduplicationHash DeduplicationInfo::getBlockUnifiedHash(size_t offset, const st
 
 std::vector<std::pair<UInt128, std::vector<size_t>>> DeduplicationInfo::buildOffsetsMapImpl(const std::string & partition_id) const
 {
-    /// Group token offsets by their unified UInt128 hash, preserving first-seen order.
-    std::vector<std::pair<UInt128, std::vector<size_t>>> result;
-    std::unordered_map<UInt128, size_t, UInt128Hash> hash_to_pos;
-
+    /// (hash, offset) pairs sorted by hash, then offset; runs of equal hashes are the groups.
+    std::vector<std::pair<UInt128, size_t>> sorted;
+    sorted.reserve(offsets.size());
     for (size_t offset = 0; offset < offsets.size(); ++offset)
-    {
-        const UInt128 hash = getBlockUnifiedHash(offset, partition_id).hash;
-        auto [it, inserted] = hash_to_pos.try_emplace(hash, result.size());
-        if (inserted)
-            result.emplace_back(hash, std::vector<size_t>{});
-        result[it->second].second.push_back(offset);
-    }
+        sorted.emplace_back(getBlockUnifiedHash(offset, partition_id).hash, offset);
+    std::sort(sorted.begin(), sorted.end());
 
+    std::vector<std::pair<UInt128, std::vector<size_t>>> result;
+    for (const auto & [hash, offset] : sorted)
+    {
+        if (result.empty() || result.back().first != hash)
+            result.emplace_back(hash, std::vector<size_t>{});
+        result.back().second.push_back(offset);
+    }
     return result;
 }
 
