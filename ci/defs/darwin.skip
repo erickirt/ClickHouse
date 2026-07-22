@@ -6,10 +6,6 @@
 
 # ─────────────────────────── macOS platform gaps (keep skipped) ───────────────────────────
 
-# Transactions are not supported on this build (experimental, NOT_IMPLEMENTED).
-03803_transaction_mutation_race
-03916_attach_as_replicated_implicit_transaction
-
 # ─────── NOT a macOS platform gap: env/harness/portability - verify on CI or fix ───────
 
 # Local fast-test server lacks these cluster/keeper definitions (CLUSTER_DOESNT_EXIST / NO_ZOOKEEPER);
