@@ -664,7 +664,13 @@ StorageReplicatedMergeTree::StorageReplicatedMergeTree(
                   *
                   * Otherwise `metadata_version` for not first replica will be initialized with 0 by default.
                   */
-                setInMemoryMetadata(metadata_snapshot->withMetadataVersion(metadata_version));
+                /// This metadata snapshot lives for the table's lifetime, so route the clone into the
+                /// dedicated MergeTree arena explicitly (rather than relying on the factory-level scope
+                /// in registerStorageMergeTree), so it converges with the ALTER / restart paths.
+                {
+                    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+                    setInMemoryMetadata(metadata_snapshot->withMetadataVersion(metadata_version));
+                }
                 metadata_snapshot = getInMemoryMetadataPtr(getContext(), true);
             }
         }
