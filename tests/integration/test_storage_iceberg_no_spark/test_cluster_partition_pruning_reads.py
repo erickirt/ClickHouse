@@ -73,12 +73,14 @@ def test_cluster_partition_pruning_reads(started_cluster_iceberg_no_spark, stora
             total += int(value) if value and value != "\\N" else 0
         return total
 
-    # Pruning must reduce the files actually opened on the cluster path, matching
-    # the single-node behaviour. With `WHERE a = 1` over 5 identity partitions,
-    # exactly one data file is read when pruning is on.
+    # The fixture is deterministic: 5 identity partitions, `WHERE a = 1`. Pin the
+    # exact files opened so a shared partial-pruning regression on both paths
+    # cannot pass. Without pruning all 5 data files are read; with pruning exactly
+    # 1 is read on both the cluster and single-node paths.
     cluster_no_pruning = files_read(tf_cluster, 0)
     cluster_pruning = files_read(tf_cluster, 1)
     single_pruning = files_read(tf_single, 1)
 
-    assert cluster_no_pruning > cluster_pruning
-    assert cluster_pruning == single_pruning
+    assert cluster_no_pruning == 5
+    assert cluster_pruning == 1
+    assert single_pruning == 1
