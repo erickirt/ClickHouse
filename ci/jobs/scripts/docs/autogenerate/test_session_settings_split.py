@@ -28,7 +28,14 @@ def generated_page(names):
                 "\nSee [force_aggregate](#force_aggregate_partitions_independently) "
                 "and its [example](#force_aggregate_partitions_independently-example).\n\n"
                 "### OpenSSL compatibility {#openssl}\n\n"
-                "See [OpenSSL](#openSSL).\n"
+                "See [OpenSSL](#openSSL).\n\n"
+                "### Parallel processing using `SAMPLE` key\n\n"
+                "Details.\n\n"
+                "### Resize Node: Inputs/Outputs\n\n"
+                "More details.\n\n"
+                "```text\n"
+                "### Not a rendered heading\n"
+                "```\n"
             )
         sections.append(
             f"## {name} {{#{name}}}\n\n"
@@ -150,8 +157,12 @@ def main():
         assert 'aria-expanded={isOpen}' in explorer
         assert '<details' not in explorer
         assert '<summary' not in explorer
-        assert explorer.startswith("const SessionSettingsExplorer = () => {")
-        assert "  const entries = " in explorer
+        assert explorer.startswith("const entries = ")
+        component_start = explorer.index("const SessionSettingsExplorer = () => {")
+        assert explorer.index("const entries = ") < component_start
+        assert explorer.index("const anchorRoutes = ") < component_start
+        assert "  const entries = " not in explorer
+        assert "  const anchorRoutes = " not in explorer
         assert "<ExplorerGroup" not in explorer
         assert "<Branch" not in explorer
         assert "const anchorRoutes = " in explorer
@@ -184,6 +195,13 @@ def main():
             "/reference/settings/session-settings/filesystem/cache"
         assert generated_manifest["anchorRoutes"]["openssl"] == \
             "/reference/settings/session-settings/filesystem/cache"
+        assert generated_manifest["anchorRoutes"][
+            "parallel-processing-using-sample-key"
+        ] == "/reference/settings/session-settings/filesystem/cache"
+        assert generated_manifest["anchorRoutes"][
+            "resize-node-inputs/outputs"
+        ] == "/reference/settings/session-settings/filesystem/cache"
+        assert "not-a-rendered-heading" not in generated_manifest["anchorRoutes"]
         assert generated_manifest["anchorRoutes"]["page_cache_alpha"] == \
             "/reference/settings/session-settings/page/cache"
         assert "](/reference/settings/session-settings/filesystem/cache#openssl)" in cache_page
@@ -281,6 +299,10 @@ def main():
             component_path = docs / family["component_path"]
             explorer = by_path[component_path]
             assert f'const {family["component_name"]} = () => {{' in explorer
+            component_start = explorer.index(
+                f'const {family["component_name"]} = () => {{')
+            assert explorer.index("const entries = ") < component_start
+            assert explorer.index("const anchorRoutes = ") < component_start
             assert f'const marker = "{family["base_route"]}";' in explorer
             assert (
                 f'"href":"{family["base_route"]}/filesystem/cache'
