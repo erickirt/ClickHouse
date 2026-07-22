@@ -272,6 +272,11 @@ function write_max_threads_override
     cpus=$(pinned_cpu_list)
     if [ -z "$cpus" ]
     then
+        # Pinning is disabled (non-x86_64). Reused workspaces may carry an
+        # override from an earlier x86_64 run; remove it so the static
+        # max_threads actually applies.
+        rm -f left/config/users.d/zzz-cpu-pinning-max-threads.xml \
+            right/config/users.d/zzz-cpu-pinning-max-threads.xml ||:
         return 0
     fi
     max_threads=$(( $(echo "$cpus" | tr -cd , | wc -c) + 1 ))
@@ -1404,7 +1409,9 @@ create view test_runs as
         -- The worst per-single-run wall time across the queries of the test:
         -- each query is judged against its own run count, so a mixed test
         -- cannot hide a genuinely slow query behind a high average count.
-        max(t.client / ((t.runs + 1) * 2)) max_single_run_time
+        -- client-time excludes prewarm (perf.py measures from after it), so
+        -- the divisor is the measured runs only: runs per server x 2 servers.
+        max(t.client / (t.runs * 2)) max_single_run_time
     from (
         select
             -- The query id is the same for both servers, so no need to divide here.

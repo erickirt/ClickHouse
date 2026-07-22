@@ -594,6 +594,13 @@ def write_max_threads_override():
     """
     if not Utils.is_amd():
         print("Not x86_64 - keeping the static max_threads")
+        # Reused workspaces (mkdir -p / cp -r) may carry an override from an
+        # earlier x86_64 run; remove it so the static value actually applies.
+        for config_dir in (perf_left_config, perf_right_config):
+            stale = Path(config_dir) / "users.d" / MAX_THREADS_OVERRIDE_FILE
+            if stale.exists():
+                print(f"Removing stale max_threads override [{stale}]")
+                stale.unlink()
         return True
     max_threads = len(get_physical_core_cpu_list().split(","))
     for config_dir in (perf_left_config, perf_right_config):
