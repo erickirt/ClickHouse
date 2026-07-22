@@ -38,17 +38,17 @@ settings=(
     --prefer_localhost_replica=0
 )
 
-mod_prefix="${CLICKHOUSE_DATABASE}_04613_mod_$RANDOM$RANDOM"
+mod_prefix="${CLICKHOUSE_DATABASE}_04625_mod_$RANDOM$RANDOM"
 
 $CLICKHOUSE_CLIENT -q "
-    CREATE TABLE t_04613 (k UInt64, v UInt64) ENGINE = ReplacingMergeTree ORDER BY k;
-    SYSTEM STOP MERGES t_04613;
-    INSERT INTO t_04613 SELECT number, number FROM numbers(650e3);
-    INSERT INTO t_04613 SELECT number, number % 520000 FROM numbers(650e3);
+    CREATE TABLE t_04625 (k UInt64, v UInt64) ENGINE = ReplacingMergeTree ORDER BY k;
+    SYSTEM STOP MERGES t_04625;
+    INSERT INTO t_04625 SELECT number, number FROM numbers(650e3);
+    INSERT INTO t_04625 SELECT number, number % 520000 FROM numbers(650e3);
 "
 
-final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04613$')) FINAL GROUP BY v FORMAT Null"
-no_final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04613$')) GROUP BY v FORMAT Null"
+final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04625$')) FINAL GROUP BY v FORMAT Null"
+no_final_query="SELECT v FROM cluster('test_shard_localhost', merge(currentDatabase(), '^t_04625$')) GROUP BY v FORMAT Null"
 
 run_pair "$mod_prefix" final "$final_query" "${settings[@]}" &
 run_pair "$mod_prefix" no-final "$no_final_query" "${settings[@]}" &
@@ -79,5 +79,5 @@ $CLICKHOUSE_CLIENT -q "
     AND has(initiators, initial_query_id)
     ORDER BY 1;
 
-    DROP TABLE t_04613;
+    DROP TABLE t_04625;
 "
