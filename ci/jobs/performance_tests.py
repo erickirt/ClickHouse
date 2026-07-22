@@ -514,21 +514,28 @@ def get_physical_core_cpu_list():
     # to start the servers. Pick, per physical core, the first sibling the
     # process is actually allowed to run on.
     getaffinity = getattr(os, "sched_getaffinity", None)
-    allowed = getaffinity(0) if getaffinity else None
-    cores = {}
     try:
-        for path in Path("/sys/devices/system/cpu").glob(
-            "cpu[0-9]*/topology/thread_siblings_list"
-        ):
-            # Formats seen in the wild: "0,8", "0-1", "0" (no SMT).
+        allowed = getaffinity(0) if getaffinity else None
+    except OSError:
+        allowed = None
+    cores = {}
+    # Per-file tolerance, matching the compare.sh copy: one unreadable or
+    # malformed sibling file must not discard the rest of the topology, or
+    # the two pinners could pin the main run and the confirm rerun to
+    # different CPU sets.
+    for path in Path("/sys/devices/system/cpu").glob(
+        "cpu[0-9]*/topology/thread_siblings_list"
+    ):
+        # Formats seen in the wild: "0,8", "0-1", "0" (no SMT).
+        try:
             siblings = [
                 int(s) for s in re.split(r"[,-]", path.read_text().strip()) if s
             ]
-            usable = [c for c in siblings if allowed is None or c in allowed]
-            if usable:
-                cores[min(siblings)] = min(usable)
-    except (OSError, ValueError):
-        cores = {}
+        except (OSError, ValueError):
+            continue
+        usable = [c for c in siblings if allowed is None or c in allowed]
+        if usable:
+            cores[min(siblings)] = min(usable)
     cpus = set(cores.values())
     if not cpus:
         print(
@@ -897,6 +904,12 @@ class CHServer:
 
     def start(self):
         print(f"Starting [{self.name}] ClickHouse server")
+        # Rewrite the max_threads override right before starting: praktika
+        # stages can be re-entered by a fresh process whose affinity mask may
+        # differ from the one CONFIGURE saw, and taskset (start_cmd) is
+        # computed at construction time - the override must match it.
+        # Idempotent; compare.sh::restart does the same for its flows.
+        write_max_threads_override()
         print("Command: ", self.start_cmd)
         self.log_fd = open(self.log_file, "w")
         self.proc = subprocess.Popen(

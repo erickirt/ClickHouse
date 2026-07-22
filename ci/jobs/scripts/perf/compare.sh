@@ -94,8 +94,6 @@ function configure
     rm left/config/config.d/backups.xml ||:
     cp -rv right/config left ||:
 
-    write_max_threads_override
-
     # Start a temporary server to rename the tables
     while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
     echo all killed
@@ -203,15 +201,20 @@ import os
 import re
 from pathlib import Path
 
-allowed = os.sched_getaffinity(0)
+try:
+    allowed = os.sched_getaffinity(0)
+except OSError:
+    raise SystemExit(1)
 cores = {}
 for path in Path("/sys/devices/system/cpu").glob(
     "cpu[0-9]*/topology/thread_siblings_list"
 ):
-    # Formats seen in the wild: "0,8", "0-1", "0" (no SMT).
+    # Formats seen in the wild: "0,8", "0-1", "0" (no SMT). Per-file
+    # tolerance, matching get_physical_core_cpu_list in
+    # ci/jobs/performance_tests.py.
     try:
         siblings = [int(s) for s in re.split(r"[,-]", path.read_text().strip()) if s]
-    except ValueError:
+    except (OSError, ValueError):
         continue
     usable = [c for c in siblings if c in allowed]
     if usable:
@@ -226,6 +229,7 @@ PYEOF
         # Fallback: the first half of the ALLOWED cpus (siblings are
         # enumerated after all physical cores on our runners), so that a
         # cpuset-limited run cannot end up with disallowed CPU ids.
+        echo "pinned_cpu_list: sysfs topology probe failed, falling back to the first half of the allowed cpus" >&2
         local allowed_expanded
         allowed_expanded=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status 2>/dev/null \
             | tr ',' '\n' \
@@ -264,7 +268,7 @@ function write_max_threads_override
     # m7i.4xlarge) so the invariant holds on any x86_64 shape. The CI flow
     # writes the same override from performance_tests.py
     # (MAX_THREADS_OVERRIDE_XML, keep in sync); the standalone entrypoints
-    # (stage=run_tests, the manual README flow, compare-releases.sh) prepare
+    # (stage=run_tests, the manual README flow) prepare
     # their configs here. The zzz- prefix sorts the file after the static
     # users.d files, overriding them.
     local cpus max_threads dir
@@ -276,8 +280,10 @@ function write_max_threads_override
     max_threads=$(( $(echo "$cpus" | tr -cd , | wc -c) + 1 ))
     for dir in left right
     do
-        if [ -d "$dir/config/users.d" ]
+        if ! [ -d "$dir/config/users.d" ]
         then
+            echo "write_max_threads_override: $dir/config/users.d does not exist, pinned servers would keep the static max_threads" >&2
+        else
             cat > "$dir/config/users.d/zzz-cpu-pinning-max-threads.xml" <<EOF
 <clickhouse>
     <profiles>
@@ -295,6 +301,13 @@ function restart
 {
     while pkill -f clickhouse-serv ; do echo . ; sleep 1 ; done
     echo all killed
+
+    # All measured (pinned) servers are started by this function: the stage
+    # cascade invokes it before run_tests, and the confirm_changes rerun
+    # calls it directly. Writing the override here guarantees taskset and
+    # max_threads travel together even when configure was skipped and stale
+    # users.d content is on disk.
+    write_max_threads_override
 
     match_reference_debug_info
 
@@ -609,6 +622,12 @@ function analyze_queries
 rm -v analyze-commands.txt analyze-errors.log all-queries.tsv unstable-queries.tsv ./*-report.tsv raw-queries.tsv ||:
 rm -rf analyze ||:
 mkdir analyze analyze/tmp ||:
+
+# Demotions belong to a specific analysis: re-analyzing invalidates any
+# earlier confirmation results, otherwise a later `stage=report` run would
+# silently demote current rows with a stale unconfirmed-queries.tsv left in
+# the workspace. confirm_changes recreates the file after this stage.
+rm -f analyze-confirm/unconfirmed-queries.tsv ||:
 
 # Split the raw test output into files suitable for analysis.
 # To debug calculations only for a particular test, substitute a suitable
@@ -990,18 +1009,24 @@ do
 
     # The test file goes first: argparse would swallow it into the greedy
     # nargs='*' --queries-to-run otherwise. No profiling on reruns.
+    # The output goes through a temp file renamed only on success: a partial
+    # raw file from a failed rerun could otherwise demote the queries that
+    # did rerun, contradicting "the whole test keeps its original verdict".
     # shellcheck disable=SC2086
-    if ! "$perf_py" "$confirm_test_file" \
+    if "$perf_py" "$confirm_test_file" \
         --host localhost localhost \
         --port "$LEFT_SERVER_PORT" "$RIGHT_SERVER_PORT" \
         --binary left/clickhouse right/clickhouse \
         --http-port "$LEFT_SERVER_HTTP_PORT" "$RIGHT_SERVER_HTTP_PORT" \
         ${CHPC_RUNS:+--runs "$CHPC_RUNS"} --max-queries 0 --profile-seconds 0 \
         --queries-to-run $confirm_indexes \
-        > "analyze-confirm/$confirm_test-raw.tsv" \
+        > "analyze-confirm/$confirm_test-raw.tsv.tmp" \
         2> "analyze-confirm/$confirm_test-err.log"
     then
+        mv "analyze-confirm/$confirm_test-raw.tsv.tmp" "analyze-confirm/$confirm_test-raw.tsv"
+    else
         echo "confirm_changes: rerun of $confirm_test failed, its queries keep their original verdict"
+        rm -f "analyze-confirm/$confirm_test-raw.tsv.tmp" ||:
     fi
 done
 
@@ -1372,17 +1397,41 @@ create view query_runs as select * from file('analyze/query-runs.tsv', TSV,
 --
 create view test_runs as
     select test,
-        -- Default to 7 runs if we can't determine the number of runs.
-        if((ceil(median(t.runs), 0) as r) != 0, r, 7) runs
+        -- The adaptive policy gives every query its own run count, so the
+        -- per-test wall-clock budget must follow the actual totals: use the
+        -- average of the per-query counts (total-preserving), not a median
+        -- that a few high-count microqueries could inflate. Kept integer
+        -- (ceil) so the test-times.tsv schema and its CIDB upload stay
+        -- unchanged. Default to 7 runs if we can't determine the number.
+        if((ceil(sum(t.runs) / count(*), 0) as r) != 0, r, 7) runs,
+        -- The worst per-single-run wall time across the queries of the test:
+        -- each query is judged against its own run count, so a mixed test
+        -- cannot hide a genuinely slow query behind a high average count.
+        max(t.client / ((t.runs + 1) * 2)) max_single_run_time
     from (
         select
             -- The query id is the same for both servers, so no need to divide here.
-            uniqExact(query_id) runs,
-            test, query_index
+            uniqExact(query_runs.query_id) runs,
+            any(client_times.client) client,
+            query_runs.test test, query_runs.query_index query_index
         from query_runs
-        group by test, query_index
+        left join (
+            select * from file('analyze/client-times.tsv', TSV,
+                'test text, query_index int, client float, server float')
+            ) client_times
+            on client_times.test = query_runs.test
+                and client_times.query_index = query_runs.query_index
+        group by query_runs.test, query_runs.query_index
         ) t
     group by test
+    ;
+
+-- The worst per-single-run wall time per test, in a separate file so that the
+-- test-times.tsv schema (and its CIDB upload) stays unchanged. Consumed by
+-- report.py's single-query slow gate.
+create table max_single_run_report engine File(TSV, 'report/max-single-run-times.tsv')
+    as select test, round(max_single_run_time, 3)
+    from test_runs
     ;
 
 create view test_times_view as
