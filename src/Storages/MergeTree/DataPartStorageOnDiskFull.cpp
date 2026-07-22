@@ -9,8 +9,6 @@
 #include <IO/WriteBufferFromFileBase.h>
 #include <Interpreters/Context.h>
 #include <Storages/MergeTree/MergeTreeIndicesSerialization.h>
-#include <Common/Jemalloc.h>
-#include <Common/JemallocMergeTreeArena.h>
 #include <Common/typeid_cast.h>
 
 namespace DB
@@ -40,15 +38,14 @@ MutableDataPartStoragePtr DataPartStorageOnDiskFull::create(
 
 MutableDataPartStoragePtr DataPartStorageOnDiskFull::getProjection(const std::string & name, bool use_parent_transaction) // NOLINT
 {
-    /// The projection storage and its path strings live for the projection part's whole lifetime, so
-    /// create them in the dedicated arena (this runs before the projection builder's own scope).
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+    /// Not arena-scoped: most callers use this only as a short-lived filesystem handle (CHECK TABLE,
+    /// mutation hardlink/copy, existence probes). The part-lifetime projection storage is created via
+    /// `getProjectionPartBuilder`, which scopes the arena itself.
     return std::shared_ptr<DataPartStorageOnDiskFull>(new DataPartStorageOnDiskFull(volume, std::string(fs::path(root_path) / part_dir), name, use_parent_transaction ? transaction : nullptr));
 }
 
 DataPartStoragePtr DataPartStorageOnDiskFull::getProjection(const std::string & name) const
 {
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
     return std::make_shared<DataPartStorageOnDiskFull>(volume, std::string(fs::path(root_path) / part_dir), name);
 }
 

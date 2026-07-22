@@ -1523,6 +1523,9 @@ static void finalizeMutatedPart(
     {
         ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
         reallocateByCopy(new_data_part->checksums);
+        /// TTL-recalculating mutations rebuild `ttl_infos` during execution (in the default arenas),
+        /// so re-home the final maps here, mirroring `MergedBlockOutputStream::finalizePartAsync`.
+        reallocateByCopy(new_data_part->ttl_infos);
         if (new_data_part->index_granularity)
             new_data_part->index_granularity = new_data_part->index_granularity->clone();
     }
@@ -3505,11 +3508,15 @@ bool MutateTask::prepare()
         }
     }
 
-    /// Same rationale as `MergeTreeData::loadDataPart`: the per-part `SingleDiskVolume` and the
-    /// resulting `IMergeTreeDataPart` constructed below live for the mutated part's lifetime.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
-    auto single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + ctx->future_part->name, ctx->space_reservation->getDisk(), 0);
+    /// Same rationale as `MergeTreeData::loadDataPart`: the per-part `SingleDiskVolume` lives for the
+    /// mutated part's lifetime, so create it in the dedicated arena. `build()` re-enters the arena for
+    /// the part object; the mutation planning below (column transforms, projection/statistics
+    /// collections, file lists, task construction) is transient and stays on the default per-CPU arenas.
+    VolumePtr single_disk_volume;
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + ctx->future_part->name, ctx->space_reservation->getDisk(), 0);
+    }
     ctx->disk = single_disk_volume->getDisk();
 
     std::string prefix;
@@ -3541,6 +3548,11 @@ bool MutateTask::prepare()
     if (!new_columns_substreams.empty())
         ctx->new_data_part->setColumnsSubstreams(new_columns_substreams);
     ctx->new_data_part->partition.assign(ctx->source_part->partition);
+
+    /// Re-home the part-lifetime metadata assigned above (partition, ttl_infos) into the dedicated
+    /// arena; `setColumns` / `setColumnsSubstreams` already self-scope. Everything below is transient
+    /// mutation planning and deliberately stays on the default per-CPU arenas.
+    ctx->new_data_part->moveMetadataToDedicatedArena();
 
     /// Don't change granularity type while mutating subset of columns
     ctx->mrk_extension = ctx->source_part->index_granularity_info.mark_type.getFileExtension();

@@ -248,7 +248,12 @@ MergedBlockOutputStream::Finalizer MergedBlockOutputStream::finalizePartAsync(
     new_part->rows_count = rows_count;
     new_part->modification_time = time(nullptr);
 
-    new_part->checksums = checksums;
+    {
+        /// The checksums map lives on the part for its whole lifetime: copy it into the part under the
+        /// dedicated arena directly, rather than assigning and re-homing with a second copy later.
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        new_part->checksums = checksums;
+    }
     new_part->setBytesOnDisk(checksums.getTotalSizeOnDisk());
     new_part->setBytesUncompressedOnDisk(checksums.getTotalSizeUncompressedOnDisk());
     new_part->index_granularity = writer->getIndexGranularity();
@@ -280,16 +285,19 @@ MergedBlockOutputStream::Finalizer MergedBlockOutputStream::finalizePartAsync(
     if (default_codec != nullptr)
         new_part->default_codec = default_codec;
 
-    /// `checksums` and the index granularity are built during the write (in the default arenas) and
+    /// The TTL infos and the index granularity are built during the write (in the default arenas) and
     /// assigned above; re-home them into the dedicated MergeTree arena so a freshly written part's
     /// long-lived metadata lives there, like a reloaded part's. The in-memory primary index is
-    /// already built in the arena by the writer. Runs for insert / merge / mutation, and for
-    /// projections via each projection part's own finalize. When the feature is off the scope is a
-    /// no-op, so skip the O(files + marks) copies entirely rather than paying them in the default arenas.
+    /// already built in the arena by the writer, and `checksums` was copied under the arena above.
+    /// Runs for insert / merge / mutation, and for projections via each projection part's own
+    /// finalize. When the feature is off, skip the O(marks) copies rather than paying them for nothing.
     if (JemallocMergeTreeArena::isEnabled())
     {
         ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-        reallocateByCopy(new_part->checksums);
+        /// `TTLTransform` rebuilds `ttl_infos` from scratch during the write (in the default arenas),
+        /// discarding the copy re-homed at prepare time, so re-home the final maps here. `checksums`
+        /// was already copied into the part under the arena above.
+        reallocateByCopy(new_part->ttl_infos);
         if (new_part->index_granularity)
             new_part->index_granularity = new_part->index_granularity->clone();
     }

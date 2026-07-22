@@ -2428,17 +2428,16 @@ MergeTreeData::LoadPartResult MergeTreeData::loadDataPart(
     LoadPartResult res;
 
     /// The per-part `SingleDiskVolume` is stored on the resulting part and shares its lifetime, so
-    /// create it (and the storage clone below) in the dedicated MergeTree arena. `build()` and
+    /// create it in the dedicated MergeTree arena. The storage wrapper the part actually keeps is
+    /// created (and arena-routed) by the builder's `getPartStorageByType`; `build()` and
     /// `loadColumnsChecksumsIndexes` below run OUTSIDE this scope on purpose: `build()` re-enters the
     /// arena itself for the part object, while the metadata load's transient parse / consistency
     /// scratch belongs in the default per-CPU arenas (it re-enters the arena only for the persistent
     /// metadata it caches).
     VolumePtr single_disk_volume;
-    MutableDataPartStoragePtr data_part_storage;
     {
         ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
         single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + part_name, part_disk_ptr, 0);
-        data_part_storage = std::make_shared<DataPartStorageOnDiskFull>(single_disk_volume, relative_data_path, part_name);
     }
 
     String part_path = fs::path(relative_data_path) / part_name;
@@ -2534,7 +2533,7 @@ MergeTreeData::LoadPartResult MergeTreeData::loadDataPart(
     {
         if ((*it)->checksums.getTotalChecksumHex() == res.part->checksums.getTotalChecksumHex())
         {
-            LOG_ERROR(log, "Duplicate part {}", data_part_storage->getFullPath());
+            LOG_ERROR(log, "Duplicate part {}", res.part->getDataPartStorage().getFullPath());
             res.part->is_duplicate = true;
             return res;
         }

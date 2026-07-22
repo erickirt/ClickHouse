@@ -1413,7 +1413,13 @@ MergeTreeDataPartBuilder IMergeTreeDataPart::getProjectionPartBuilder(
     const String & projection_name, ProjectionDescriptionRawPtr projection, bool is_temp_projection)
 {
     const char * projection_extension = is_temp_projection ? ".tmp_proj" : ".proj";
-    auto projection_storage = getDataPartStorage().getProjection(projection_name + projection_extension, !is_temp_projection);
+    /// The projection storage is stored on the resulting projection part for its lifetime, so create
+    /// it in the dedicated arena (this is the part-lifetime projection-storage creation site).
+    MutableDataPartStoragePtr projection_storage;
+    {
+        ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
+        projection_storage = getDataPartStorage().getProjection(projection_name + projection_extension, !is_temp_projection);
+    }
     MergeTreeDataPartBuilder builder(storage, projection_name, projection_storage, getReadSettings());
     return builder.withPartInfo(MergeListElement::FAKE_RESULT_PART_FOR_PROJECTION).withParentPart(this).withProjection(projection);
 }
@@ -1552,12 +1558,10 @@ std::shared_ptr<IMergeTreeDataPart::Index> IMergeTreeDataPart::loadIndex() const
     /// Memory for index must not be accounted as memory usage for query, because it belongs to a table.
     MemoryTrackerBlockerInThread temporarily_disable_memory_tracker;
 
-    /// The loaded primary-index `Columns` live for the part's lifetime when stored on the part
-    /// (`primary_key_lazy_load=0`, or lazy load with `use_primary_key_cache=0`), or for the
-    /// cache entry's lifetime when the result is handed to `PrimaryIndexCache`. `loadIndex` is
-    /// reachable from `loadColumnsChecksumsIndexes` (already wrapped) but also from `getIndex`
-    /// and `loadIndexToCache` on the lazy-load path; wrapping inside `loadIndex` itself covers
-    /// every entry point.
+    /// The loaded primary-index `Columns` are long-lived (kept on the part or handed to
+    /// `PrimaryIndexCache`), so route them into the dedicated parts arena. Keeping cache-owned indices
+    /// here too (rather than the cache arena) is deliberate: re-homing on the prewarm path would run
+    /// after the part is committed and could fail the INSERT, so the primary index lives in one arena.
     ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
 
     auto metadata_snapshot = getMetadataSnapshot();
@@ -1860,10 +1864,9 @@ void IMergeTreeDataPart::loadPartitionAndMinMaxIndex()
 
 void IMergeTreeDataPart::loadChecksums(bool require)
 {
-    /// `MergeTreeDataPartChecksums` is a `std::map<String, MergeTreeDataPartChecksum>` that lives as
-    /// long as the part. Its tree-node allocations belong in the parts arena.
-    ScopedJemallocThreadArena mergetree_arena_scope(JemallocMergeTreeArena::getArenaIndex());
-
+    /// Arena-agnostic: the real part-load callers (`loadColumnsChecksumsIndexes`, the projection load)
+    /// already run inside the parts-arena scope, while transient checksum-only probes must stay on the
+    /// default arenas. So the caller picks the arena rather than pinning it here.
     if (auto buf = readFileIfExists("checksums.txt"))
     {
         if (checksums.read(*buf))
