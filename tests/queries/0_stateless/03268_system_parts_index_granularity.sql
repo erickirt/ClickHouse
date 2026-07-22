@@ -16,9 +16,9 @@ ALTER TABLE t MODIFY SETTING enable_index_granularity_compression = 1;
 
 INSERT INTO t SELECT number, toString(number) FROM numbers(100);
 
--- The reserved capacity may exceed the in-memory size by an implementation-defined amount, so assert
--- the stable invariant (the allocation is reported and at least the in-memory size) instead of the
--- exact byte count.
-SELECT index_granularity_bytes_in_memory, index_granularity_bytes_in_memory_allocated >= index_granularity_bytes_in_memory FROM system.parts where table = 't' and database = currentDatabase() ORDER BY name;
+-- The reserved capacity depends on the build: on jemalloc builds it is tightened to the exact
+-- in-memory size when the part is finalized, while builds without jemalloc keep the vector's growth
+-- capacity (128 bytes for this adaptive part). Accept exactly those two values and nothing else.
+SELECT index_granularity_bytes_in_memory, index_granularity_bytes_in_memory_allocated = index_granularity_bytes_in_memory OR index_granularity_bytes_in_memory_allocated = 128 FROM system.parts where table = 't' and database = currentDatabase() ORDER BY name;
 
 DROP TABLE IF EXISTS t;
