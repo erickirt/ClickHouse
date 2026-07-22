@@ -29,12 +29,14 @@ TEST(Exception, RecordToSystemErrorsOnlyRecordsSuppressedExceptions)
     {
         Exception::SuppressErrorCodesScope scope;
         suppressed = Exception(ErrorCodes::CANNOT_PARSE_TEXT, "suppressed");
+
+        EXPECT_EQ(getLocalErrorCount(ErrorCodes::CANNOT_PARSE_TEXT), suppressed_count);
+        suppressed.recordToSystemErrors();
+        EXPECT_EQ(getLocalErrorCount(ErrorCodes::CANNOT_PARSE_TEXT), suppressed_count + 1);
+        suppressed.recordToSystemErrors();
+        EXPECT_EQ(getLocalErrorCount(ErrorCodes::CANNOT_PARSE_TEXT), suppressed_count + 1);
     }
 
-    EXPECT_EQ(getLocalErrorCount(ErrorCodes::CANNOT_PARSE_TEXT), suppressed_count);
-    suppressed.recordToSystemErrors();
-    EXPECT_EQ(getLocalErrorCount(ErrorCodes::CANNOT_PARSE_TEXT), suppressed_count + 1);
-    suppressed.recordToSystemErrors();
     EXPECT_EQ(getLocalErrorCount(ErrorCodes::CANNOT_PARSE_TEXT), suppressed_count + 1);
 
     const auto unrecorded_count = getLocalErrorCount(ErrorCodes::STD_EXCEPTION);
