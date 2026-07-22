@@ -468,12 +468,7 @@ void StorageMergeTree::alter(
     auto old_storage_settings = getSettings();
     const auto & query_settings = local_context->getSettingsRef();
 
-    /// Read the current committed metadata directly, bypassing the query-scoped snapshot cache
-    /// (enable_shared_storage_snapshot_in_query), which may have been pinned earlier in this query
-    /// (e.g. by the access check that runs before lockForAlter) to a pre-ALTER structure. The
-    /// comment- and settings-only branches below commit this snapshot via setInMemoryMetadata under
-    /// the alter lock; a stale base would overwrite a concurrently applied ALTER and drop columns.
-    auto metadata_snapshot = getInMemoryMetadataPtr(local_context, true);
+    auto metadata_snapshot = getInMemoryMetadataPtr(local_context, /*bypass_metadata_cache*/ true);
     StorageInMemoryMetadata new_metadata = *metadata_snapshot;
     const StorageInMemoryMetadata & old_metadata = *metadata_snapshot;
 

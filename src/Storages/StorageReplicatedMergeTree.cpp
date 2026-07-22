@@ -6791,12 +6791,7 @@ void StorageReplicatedMergeTree::alter(
     auto table_id = getStorageID();
     const auto & query_settings = query_context->getSettingsRef();
 
-    /// Read the committed metadata fresh under the alter lock, bypassing the query-scoped snapshot
-    /// cache (enable_shared_storage_snapshot_in_query): it may have been pinned earlier in the query
-    /// (e.g. by the access check, before lockForAlter) to a pre-ALTER structure. The comment/settings
-    /// branches below commit this base via setInMemoryMetadata under the alter lock, so a stale base
-    /// would drop a column a concurrently applied ALTER_METADATA (also under lockForAlter) just added.
-    auto metadata_snapshot = getInMemoryMetadataPtr(query_context, true);
+    auto metadata_snapshot = getInMemoryMetadataPtr(query_context, /*bypass_metadata_cache*/ true);
     StorageInMemoryMetadata future_metadata = *metadata_snapshot;
     /// Snapshot the sorting key before applying commands, to compare with the resolved future one.
     KeyDescription old_sorting_key = future_metadata.sorting_key;
@@ -6921,11 +6916,7 @@ void StorageReplicatedMergeTree::alter(
         alter_entry.emplace();
         mutation_znode.reset();
 
-        /// Read committed metadata fresh (bypass the query-scoped cache), same reason as the fresh read at
-        /// the top of this method. Here it also backs the bundled comment/settings local commit and the
-        /// versioned zookeeper_path/metadata write below, so a stale base would drop a concurrently applied
-        /// column and write an outdated metadata_version.
-        auto current_metadata = getInMemoryMetadataPtr(query_context, true);
+        auto current_metadata = getInMemoryMetadataPtr(query_context, /*bypass_metadata_cache*/ true);
 
         ReplicatedMergeTreeTableMetadata future_metadata_in_zk(*this, current_metadata);
         if (ast_to_str(future_metadata.sorting_key.definition_ast) != ast_to_str(current_metadata->sorting_key.definition_ast))

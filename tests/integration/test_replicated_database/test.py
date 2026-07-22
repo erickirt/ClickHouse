@@ -2264,6 +2264,7 @@ def _drive_mixed_alter_race(db, cycles=8, wide_columns=6000, extra_url_settings=
         )
 
     last_error = None
+    synced_cycles = 0
     for i in range(cycles):
         # Hold back the table queue on competing so the ALTER_METADATA of the next
         # ADD COLUMN executes at a controlled moment.
@@ -2304,6 +2305,17 @@ echo "ALTER_DONE"
 
         competing_node.query(f"SYSTEM START REPLICATION QUEUES {db}.rmt")
         competing_node.query(f"SYSTEM SYNC REPLICA {db}.rmt")
+
+        # The mixed ALTER must overlap the concurrent ADD COLUMN to exercise the
+        # stale current_metadata window. "Applying changes locally" (SYNC_FOUND=1)
+        # confirms the ADD COLUMN was applied locally while the mixed ALTER ran. If
+        # the poll missed it, this cycle did not set up the race - retry rather than
+        # let a non-overlapping run silently false-pass.
+        if "SYNC_FOUND=1" not in race_out:
+            logging.info("mixed-alter race cycle %s did not synchronize; retrying", i)
+            continue
+        synced_cycles += 1
+
         present = competing_node.query(
             f"SELECT count() FROM system.columns "
             f"WHERE database='{db}' AND table='rmt' AND name='m{i}'"
@@ -2355,6 +2367,12 @@ echo "ALTER_DONE"
             logging.info("mixed-alter race fired: %s", forensics)
             return (f"m{i}", alter_error, forensics)
 
+    if synced_cycles == 0:
+        raise Exception(
+            f"mixed-alter race never synchronized in {cycles} cycles "
+            f"(SYNC_FOUND stayed 0): the test could not set up the race window, "
+            f"so a pass here would be meaningless"
+        )
     return (None, last_error, None)
 
 
