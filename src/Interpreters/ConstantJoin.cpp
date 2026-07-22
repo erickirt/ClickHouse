@@ -364,12 +364,9 @@ void ConstantJoin::shrinkStoredBlocksToFit(size_t & total_bytes_in_join)
         }
         catch (...)
         {
-            stored_block.rebuildReplicatedColumns();
-            size_t partial_new_size = stored_block.allocatedBytes();
-            if (old_size >= partial_new_size)
-                allocated_size -= old_size - partial_new_size;
-            else
-                allocated_size += partial_new_size - old_size;
+            /// `cloneResized` allocates a compacted copy while memory is already tight, so an allocation
+            /// failure here is possible. The exception should faild the query; no need for cleanup.
+            LOG_WARNING(log, "Failed to shrink stored blocks: {}", getCurrentExceptionMessage(/*with_stacktrace=*/ false));
             throw;
         }
 
