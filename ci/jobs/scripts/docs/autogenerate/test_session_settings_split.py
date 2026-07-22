@@ -21,7 +21,8 @@ def load_module():
 
 def generated_page(names):
     sections = []
-    for name in names:
+    for setting in names:
+        name, anchor = setting if isinstance(setting, tuple) else (setting, setting)
         related = ""
         if name == "filesystem_cache_alpha":
             related = (
@@ -38,7 +39,7 @@ def generated_page(names):
                 "```\n"
             )
         sections.append(
-            f"## {name} {{#{name}}}\n\n"
+            f"## {name} {{#{anchor}}}\n\n"
             f'<SettingsInfoBlock type="Bool" default_value="0" />\n\n'
             f"Description for {name}.{related}\n")
     return (
@@ -89,6 +90,45 @@ def main():
         "standalone",
     ]
 
+    complex_page = generated_page([
+        "ordinary_setting",
+        "config-file",
+        "distributed_ddl.max_tasks_in_queue",
+        ("openSSL.client.caConfig", "openssl.client.caconfig"),
+    ])
+    _, _, complex_sections = mod.parse_settings_page(complex_page)
+    assert [
+        (section.name, section.anchor)
+        for section in complex_sections
+    ] == [
+        ("ordinary_setting", "ordinary_setting"),
+        ("config-file", "config-file"),
+        (
+            "distributed_ddl.max_tasks_in_queue",
+            "distributed_ddl.max_tasks_in_queue",
+        ),
+        ("openSSL.client.caConfig", "openssl.client.caconfig"),
+    ]
+    server_family = mod.SETTINGS_SPLIT_FAMILIES["server-settings"]
+    complex_pages = mod.group_session_settings(
+        complex_sections,
+        base_route=server_family["base_route"],
+        max_characters=server_family["max_characters"],
+    )
+    complex_anchor_routes = mod._settings_anchor_routes(
+        complex_pages, source_sections=complex_sections
+    )
+    complex_explorer = mod._settings_explorer_component(
+        complex_pages, complex_anchor_routes, server_family
+    )
+    assert (
+        '"name":"openSSL.client.caConfig",'
+        '"href":"/reference/settings/server-settings/settings/other'
+        '#openssl.client.caconfig"'
+    ) in complex_explorer
+    assert complex_anchor_routes["openssl.client.caconfig"] == \
+        "/reference/settings/server-settings/settings/other"
+
     with tempfile.TemporaryDirectory() as temp:
         docs = Path(temp)
         dest = docs / "reference/settings/session-settings.mdx"
@@ -109,6 +149,7 @@ def main():
         expected_paths = {
             dest,
             docs / "snippets/components/SessionSettingsExplorer/SessionSettingsExplorer.jsx",
+            docs / "reference/settings/session-settings/filesystem.mdx",
             docs / "reference/settings/session-settings/filesystem/cache.mdx",
             docs / "reference/settings/session-settings/filesystem/prefetch.mdx",
             docs / "reference/settings/session-settings/force.mdx",
@@ -132,7 +173,8 @@ def main():
             docs / "reference/settings/session-settings/filesystem/cache.mdx"]
         assert "](/reference/settings/session-settings/force#force_aggregate_partitions_independently)" in cache_page
         assert "](/reference/settings/session-settings/force#force_aggregate_partitions_independently-example)" in cache_page
-        assert docs / "reference/settings/session-settings/filesystem.mdx" not in by_path
+        assert "## filesystem_unmatched" in by_path[
+            docs / "reference/settings/session-settings/filesystem.mdx"]
         assert "## force_data_skipping_indices" in by_path[
             docs / "reference/settings/session-settings/force.mdx"]
         assert "## force_optimize_projection" in by_path[
@@ -145,7 +187,7 @@ def main():
         assert docs / "reference/settings/session-settings/retired.mdx" not in by_path
         assert "## standalone" in by_path[
             docs / "reference/settings/session-settings/other.mdx"]
-        assert "## filesystem_unmatched" in by_path[
+        assert "## filesystem_unmatched" not in by_path[
             docs / "reference/settings/session-settings/other.mdx"]
         for name in names:
             assert f'<a id="{name}" href="' not in by_path[dest]
@@ -183,6 +225,8 @@ def main():
         assert navigation["directory"] == "none"
         assert navigation["pages"][0]["group"] == "filesystem_*"
         assert "root" not in navigation["pages"][0]
+        assert navigation["pages"][0]["pages"][0] == \
+            "reference/settings/session-settings/filesystem"
         assert navigation["pages"][1]["group"] == "force_*"
         assert "root" not in navigation["pages"][1]
         assert navigation["pages"][1]["pages"][0] == \
@@ -213,14 +257,20 @@ def main():
         assert all(
             page["settings"] <= mod.SESSION_SETTINGS_MAX_PER_PAGE
             for page in generated_manifest["pageStats"])
-        assert all(
-            page["settings"] != 1
-            for page in generated_manifest["pageStats"])
+        assert [
+            page["path"]
+            for page in generated_manifest["pageStats"]
+            if page["settings"] == 1
+        ] == [
+            "/reference/settings/session-settings/filesystem",
+            "/reference/settings/session-settings/other",
+        ]
         assert all(
             page["settings"] > 0
             for page in generated_manifest["pageStats"])
-        assert not any(
+        assert any(
             route["prefix"] == "filesystem"
+            and route["target"] == "/reference/settings/session-settings/filesystem"
             for route in generated_manifest["routes"])
         assert all(
             page["label"].endswith("_*")
@@ -231,6 +281,33 @@ def main():
             for page in generated_manifest["pageStats"])
         assert "sidebarTitle: 'filesystem_cache_*'" in cache_page
         assert "title: 'filesystem_cache_* session settings'" in cache_page
+
+        regrouped = mod.group_session_settings([
+            mod.SettingSection(
+                "timeout_before_checking_execution_speed",
+                "timeout_before_checking_execution_speed",
+                "parent setting",
+            ),
+            mod.SettingSection(
+                "timeout_overflow_mode",
+                "timeout_overflow_mode",
+                "child setting one",
+            ),
+            mod.SettingSection(
+                "timeout_overflow_mode_only",
+                "timeout_overflow_mode_only",
+                "child setting two",
+            ),
+        ])
+        timeout_parent = next(
+            page for page in regrouped if page.label == "timeout_*"
+        )
+        assert [section.name for section in timeout_parent.sections] == [
+            "timeout_before_checking_execution_speed"
+        ]
+        assert [child.label for child in timeout_parent.children] == [
+            "timeout_overflow_*"
+        ]
 
         assert all(
             len(page["path"].removeprefix(mod.SESSION_SETTINGS_BASE_ROUTE).strip("/").split("/")) <= 2

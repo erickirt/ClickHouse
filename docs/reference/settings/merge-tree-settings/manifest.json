@@ -3,7 +3,7 @@
   "settings": 354,
   "anchorRoutes": {
     "adaptive_write_buffer_initial_size": "/reference/settings/merge-tree-settings/other",
-    "add_implicit_sign_column_constraint_for_collapsing_engine": "/reference/settings/merge-tree-settings/other",
+    "add_implicit_sign_column_constraint_for_collapsing_engine": "/reference/settings/merge-tree-settings/add",
     "add_minmax_index_for_block_number_column": "/reference/settings/merge-tree-settings/add/minmax",
     "add_minmax_index_for_block_offset_column": "/reference/settings/merge-tree-settings/add/minmax",
     "add_minmax_index_for_numeric_columns": "/reference/settings/merge-tree-settings/add/minmax",
@@ -99,7 +99,7 @@
     "initialization_retry_period": "/reference/settings/merge-tree-settings/other",
     "kill_delay_period": "/reference/settings/merge-tree-settings/kill/delay",
     "kill_delay_period_random_add": "/reference/settings/merge-tree-settings/kill/delay",
-    "kill_threads": "/reference/settings/merge-tree-settings/other",
+    "kill_threads": "/reference/settings/merge-tree-settings/kill",
     "lightweight_mutation_projection_mode": "/reference/settings/merge-tree-settings/other",
     "load_existing_rows_count_for_old_parts": "/reference/settings/merge-tree-settings/other",
     "lock_acquire_timeout_for_background_operations": "/reference/settings/merge-tree-settings/other",
@@ -213,7 +213,7 @@
     "number_of_mutations_to_delay": "/reference/settings/merge-tree-settings/number/of",
     "number_of_mutations_to_throw": "/reference/settings/merge-tree-settings/number/of",
     "number_of_partitions_to_consider_for_merge": "/reference/settings/merge-tree-settings/number/of",
-    "object_serialization_version": "/reference/settings/merge-tree-settings/other",
+    "object_serialization_version": "/reference/settings/merge-tree-settings/object",
     "object_shared_data_buckets_for_compact_part": "/reference/settings/merge-tree-settings/object/shared",
     "object_shared_data_buckets_for_wide_part": "/reference/settings/merge-tree-settings/object/shared",
     "object_shared_data_serialization_version": "/reference/settings/merge-tree-settings/object/shared",
@@ -221,7 +221,7 @@
     "old_parts_lifetime": "/reference/settings/merge-tree-settings/other",
     "optimize_row_order": "/reference/settings/merge-tree-settings/other",
     "packed_skip_index_max_bytes": "/reference/settings/merge-tree-settings/other",
-    "part_minmax_index_columns": "/reference/settings/merge-tree-settings/other",
+    "part_minmax_index_columns": "/reference/settings/merge-tree-settings/part",
     "part_moves_between_shards_delay_seconds": "/reference/settings/merge-tree-settings/part/moves",
     "part_moves_between_shards_enable": "/reference/settings/merge-tree-settings/part/moves",
     "parts_to_delay_insert": "/reference/settings/merge-tree-settings/parts/to",
@@ -246,7 +246,7 @@
     "remove_rolled_back_parts_immediately": "/reference/settings/merge-tree-settings/remove",
     "remove_unused_patch_parts": "/reference/settings/merge-tree-settings/remove",
     "replace_long_file_name_to_hash": "/reference/settings/merge-tree-settings/other",
-    "replicated_can_become_leader": "/reference/settings/merge-tree-settings/other",
+    "replicated_can_become_leader": "/reference/settings/merge-tree-settings/replicated",
     "replicated_deduplication_window": "/reference/settings/merge-tree-settings/replicated/deduplication",
     "replicated_deduplication_window_for_async_inserts": "/reference/settings/merge-tree-settings/replicated/deduplication",
     "replicated_deduplication_window_seconds": "/reference/settings/merge-tree-settings/replicated/deduplication",
@@ -560,6 +560,11 @@
       "target": "/reference/settings/merge-tree-settings/part/moves"
     },
     {
+      "prefix": "replicated",
+      "mode": "token",
+      "target": "/reference/settings/merge-tree-settings/replicated"
+    },
+    {
       "prefix": "text_index",
       "mode": "token",
       "target": "/reference/settings/merge-tree-settings/text/index"
@@ -710,6 +715,11 @@
       "target": "/reference/settings/merge-tree-settings/escape"
     },
     {
+      "prefix": "object",
+      "mode": "token",
+      "target": "/reference/settings/merge-tree-settings/object"
+    },
+    {
       "prefix": "remove",
       "mode": "token",
       "target": "/reference/settings/merge-tree-settings/remove"
@@ -755,6 +765,21 @@
       "target": "/reference/settings/merge-tree-settings/write"
     },
     {
+      "prefix": "kill",
+      "mode": "token",
+      "target": "/reference/settings/merge-tree-settings/kill"
+    },
+    {
+      "prefix": "part",
+      "mode": "token",
+      "target": "/reference/settings/merge-tree-settings/part"
+    },
+    {
+      "prefix": "add",
+      "mode": "token",
+      "target": "/reference/settings/merge-tree-settings/add"
+    },
+    {
       "prefix": "max",
       "mode": "token",
       "target": "/reference/settings/merge-tree-settings/max"
@@ -776,6 +801,7 @@
     }
   ],
   "pages": [
+    "/reference/settings/merge-tree-settings/add",
     "/reference/settings/merge-tree-settings/add/minmax",
     "/reference/settings/merge-tree-settings/allow",
     "/reference/settings/merge-tree-settings/allow/experimental",
@@ -802,6 +828,7 @@
     "/reference/settings/merge-tree-settings/in/memory",
     "/reference/settings/merge-tree-settings/inactive/parts",
     "/reference/settings/merge-tree-settings/index/granularity",
+    "/reference/settings/merge-tree-settings/kill",
     "/reference/settings/merge-tree-settings/kill/delay",
     "/reference/settings/merge-tree-settings/map/buckets",
     "/reference/settings/merge-tree-settings/map/serialization",
@@ -835,8 +862,10 @@
     "/reference/settings/merge-tree-settings/min/relative",
     "/reference/settings/merge-tree-settings/min/rows",
     "/reference/settings/merge-tree-settings/number/of",
+    "/reference/settings/merge-tree-settings/object",
     "/reference/settings/merge-tree-settings/object/shared",
     "/reference/settings/merge-tree-settings/other",
+    "/reference/settings/merge-tree-settings/part",
     "/reference/settings/merge-tree-settings/part/moves",
     "/reference/settings/merge-tree-settings/parts/to",
     "/reference/settings/merge-tree-settings/prefer/fetch",
@@ -845,6 +874,7 @@
     "/reference/settings/merge-tree-settings/refresh",
     "/reference/settings/merge-tree-settings/remote/fs",
     "/reference/settings/merge-tree-settings/remove",
+    "/reference/settings/merge-tree-settings/replicated",
     "/reference/settings/merge-tree-settings/replicated/deduplication",
     "/reference/settings/merge-tree-settings/replicated/fetches",
     "/reference/settings/merge-tree-settings/replicated/max",
@@ -861,496 +891,526 @@
   ],
   "pageStats": [
     {
+      "path": "/reference/settings/merge-tree-settings/add",
+      "label": "add_*",
+      "settings": 1,
+      "characters": 340
+    },
+    {
       "path": "/reference/settings/merge-tree-settings/add/minmax",
       "label": "add_minmax_*",
       "settings": 5,
-      "characters": 2088
+      "characters": 2083
     },
     {
       "path": "/reference/settings/merge-tree-settings/allow",
       "label": "allow_*",
       "settings": 13,
-      "characters": 5965
+      "characters": 5952
     },
     {
       "path": "/reference/settings/merge-tree-settings/allow/experimental",
       "label": "allow_experimental_*",
       "settings": 3,
-      "characters": 1345
+      "characters": 1342
     },
     {
       "path": "/reference/settings/merge-tree-settings/always",
       "label": "always_*",
       "settings": 2,
-      "characters": 458
+      "characters": 456
     },
     {
       "path": "/reference/settings/merge-tree-settings/async",
       "label": "async_*",
       "settings": 2,
-      "characters": 579
+      "characters": 577
     },
     {
       "path": "/reference/settings/merge-tree-settings/cache/populated",
       "label": "cache_populated_*",
       "settings": 2,
-      "characters": 1240
+      "characters": 1238
     },
     {
       "path": "/reference/settings/merge-tree-settings/check",
       "label": "check_*",
       "settings": 2,
-      "characters": 925
+      "characters": 923
     },
     {
       "path": "/reference/settings/merge-tree-settings/cleanup",
       "label": "cleanup_*",
       "settings": 2,
-      "characters": 410
+      "characters": 408
     },
     {
       "path": "/reference/settings/merge-tree-settings/cleanup/delay",
       "label": "cleanup_delay_*",
       "settings": 2,
-      "characters": 477
+      "characters": 475
     },
     {
       "path": "/reference/settings/merge-tree-settings/columns",
       "label": "columns_*",
       "settings": 2,
-      "characters": 578
+      "characters": 576
     },
     {
       "path": "/reference/settings/merge-tree-settings/compact/parts",
       "label": "compact_parts_*",
       "settings": 3,
-      "characters": 770
+      "characters": 767
     },
     {
       "path": "/reference/settings/merge-tree-settings/compress",
       "label": "compress_*",
       "settings": 3,
-      "characters": 1057
+      "characters": 1054
     },
     {
       "path": "/reference/settings/merge-tree-settings/concurrent/part",
       "label": "concurrent_part_*",
       "settings": 2,
-      "characters": 1206
+      "characters": 1204
     },
     {
       "path": "/reference/settings/merge-tree-settings/dead/blobs",
       "label": "dead_blobs_*",
       "settings": 2,
-      "characters": 1800
+      "characters": 1798
     },
     {
       "path": "/reference/settings/merge-tree-settings/detach",
       "label": "detach_*",
       "settings": 2,
-      "characters": 841
+      "characters": 839
     },
     {
       "path": "/reference/settings/merge-tree-settings/disable",
       "label": "disable_*",
       "settings": 3,
-      "characters": 657
+      "characters": 654
     },
     {
       "path": "/reference/settings/merge-tree-settings/distributed/index",
       "label": "distributed_index_*",
       "settings": 2,
-      "characters": 807
+      "characters": 805
     },
     {
       "path": "/reference/settings/merge-tree-settings/enable",
       "label": "enable_*",
       "settings": 6,
-      "characters": 2633
+      "characters": 2627
     },
     {
       "path": "/reference/settings/merge-tree-settings/enable/block",
       "label": "enable_block_*",
       "settings": 2,
-      "characters": 332
+      "characters": 330
     },
     {
       "path": "/reference/settings/merge-tree-settings/escape",
       "label": "escape_*",
       "settings": 2,
-      "characters": 1065
+      "characters": 1063
     },
     {
       "path": "/reference/settings/merge-tree-settings/exclude",
       "label": "exclude_*",
       "settings": 2,
-      "characters": 2015
+      "characters": 2013
     },
     {
       "path": "/reference/settings/merge-tree-settings/fault/probability",
       "label": "fault_probability_*",
       "settings": 2,
-      "characters": 330
+      "characters": 328
     },
     {
       "path": "/reference/settings/merge-tree-settings/fsync",
       "label": "fsync_*",
       "settings": 2,
-      "characters": 401
+      "characters": 399
     },
     {
       "path": "/reference/settings/merge-tree-settings/in/memory",
       "label": "in_memory_*",
       "settings": 2,
-      "characters": 292
+      "characters": 290
     },
     {
       "path": "/reference/settings/merge-tree-settings/inactive/parts",
       "label": "inactive_parts_*",
       "settings": 2,
-      "characters": 841
+      "characters": 839
     },
     {
       "path": "/reference/settings/merge-tree-settings/index/granularity",
       "label": "index_granularity_*",
       "settings": 2,
-      "characters": 456
+      "characters": 454
+    },
+    {
+      "path": "/reference/settings/merge-tree-settings/kill",
+      "label": "kill_*",
+      "settings": 1,
+      "characters": 120
     },
     {
       "path": "/reference/settings/merge-tree-settings/kill/delay",
       "label": "kill_delay_*",
       "settings": 2,
-      "characters": 282
+      "characters": 280
     },
     {
       "path": "/reference/settings/merge-tree-settings/map/buckets",
       "label": "map_buckets_*",
       "settings": 3,
-      "characters": 2337
+      "characters": 2334
     },
     {
       "path": "/reference/settings/merge-tree-settings/map/serialization",
       "label": "map_serialization_*",
       "settings": 2,
-      "characters": 1377
+      "characters": 1375
     },
     {
       "path": "/reference/settings/merge-tree-settings/marks",
       "label": "marks_*",
       "settings": 2,
-      "characters": 419
+      "characters": 417
     },
     {
       "path": "/reference/settings/merge-tree-settings/materialize",
       "label": "materialize_*",
       "settings": 3,
-      "characters": 1341
+      "characters": 1338
     },
     {
       "path": "/reference/settings/merge-tree-settings/materialize/projections",
       "label": "materialize_projections_*",
       "settings": 2,
-      "characters": 1400
+      "characters": 1398
     },
     {
       "path": "/reference/settings/merge-tree-settings/max",
       "label": "max_*",
       "settings": 10,
-      "characters": 4055
+      "characters": 4045
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/bytes",
       "label": "max_bytes_*",
       "settings": 2,
-      "characters": 1772
+      "characters": 1770
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/delay",
       "label": "max_delay_*",
       "settings": 2,
-      "characters": 1651
+      "characters": 1649
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/files",
       "label": "max_files_*",
       "settings": 2,
-      "characters": 569
+      "characters": 567
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/merge",
       "label": "max_merge_*",
       "settings": 2,
-      "characters": 822
+      "characters": 820
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/number",
       "label": "max_number_*",
       "settings": 2,
-      "characters": 651
+      "characters": 649
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/part",
       "label": "max_part_*",
       "settings": 2,
-      "characters": 308
+      "characters": 306
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/parts",
       "label": "max_parts_*",
       "settings": 2,
-      "characters": 778
+      "characters": 776
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/postpone",
       "label": "max_postpone_*",
       "settings": 4,
-      "characters": 1468
+      "characters": 1464
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/replicated",
       "label": "max_replicated_*",
       "settings": 6,
-      "characters": 3048
+      "characters": 3042
     },
     {
       "path": "/reference/settings/merge-tree-settings/max/suspicious",
       "label": "max_suspicious_*",
       "settings": 2,
-      "characters": 539
+      "characters": 537
     },
     {
       "path": "/reference/settings/merge-tree-settings/merge",
       "label": "merge_*",
       "settings": 2,
-      "characters": 780
+      "characters": 778
     },
     {
       "path": "/reference/settings/merge-tree-settings/merge/max",
       "label": "merge_max_*",
       "settings": 5,
-      "characters": 3263
+      "characters": 3258
     },
     {
       "path": "/reference/settings/merge-tree-settings/merge/selecting",
       "label": "merge_selecting_*",
       "settings": 2,
-      "characters": 649
+      "characters": 647
     },
     {
       "path": "/reference/settings/merge-tree-settings/merge/selector",
       "label": "merge_selector_*",
       "settings": 7,
-      "characters": 2495
+      "characters": 2488
     },
     {
       "path": "/reference/settings/merge-tree-settings/merge/tree",
       "label": "merge_tree_*",
       "settings": 4,
-      "characters": 1022
+      "characters": 1018
     },
     {
       "path": "/reference/settings/merge-tree-settings/merge/with",
       "label": "merge_with_*",
       "settings": 2,
-      "characters": 391
+      "characters": 389
     },
     {
       "path": "/reference/settings/merge-tree-settings/min",
       "label": "min_*",
       "settings": 8,
-      "characters": 3211
+      "characters": 3203
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/age",
       "label": "min_age_*",
       "settings": 2,
-      "characters": 543
+      "characters": 541
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/bytes",
       "label": "min_bytes_*",
       "settings": 5,
-      "characters": 1658
+      "characters": 1653
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/compressed",
       "label": "min_compressed_*",
       "settings": 2,
-      "characters": 458
+      "characters": 456
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/delay",
       "label": "min_delay_*",
       "settings": 2,
-      "characters": 440
+      "characters": 438
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/free",
       "label": "min_free_*",
       "settings": 2,
-      "characters": 1648
+      "characters": 1646
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/level",
       "label": "min_level_*",
       "settings": 2,
-      "characters": 657
+      "characters": 655
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/relative",
       "label": "min_relative_*",
       "settings": 3,
-      "characters": 607
+      "characters": 604
     },
     {
       "path": "/reference/settings/merge-tree-settings/min/rows",
       "label": "min_rows_*",
       "settings": 4,
-      "characters": 773
+      "characters": 769
     },
     {
       "path": "/reference/settings/merge-tree-settings/number/of",
       "label": "number_of_*",
       "settings": 6,
-      "characters": 3187
+      "characters": 3181
+    },
+    {
+      "path": "/reference/settings/merge-tree-settings/object",
+      "label": "object_*",
+      "settings": 1,
+      "characters": 658
     },
     {
       "path": "/reference/settings/merge-tree-settings/object/shared",
       "label": "object_shared_*",
       "settings": 4,
-      "characters": 3275
+      "characters": 3271
+    },
+    {
+      "path": "/reference/settings/merge-tree-settings/part",
+      "label": "part_*",
+      "settings": 1,
+      "characters": 677
     },
     {
       "path": "/reference/settings/merge-tree-settings/part/moves",
       "label": "part_moves_*",
       "settings": 2,
-      "characters": 481
+      "characters": 479
     },
     {
       "path": "/reference/settings/merge-tree-settings/parts/to",
       "label": "parts_to_*",
       "settings": 2,
-      "characters": 1347
+      "characters": 1345
     },
     {
       "path": "/reference/settings/merge-tree-settings/prefer/fetch",
       "label": "prefer_fetch_*",
       "settings": 2,
-      "characters": 991
+      "characters": 989
     },
     {
       "path": "/reference/settings/merge-tree-settings/prewarm",
       "label": "prewarm_*",
       "settings": 2,
-      "characters": 571
+      "characters": 569
     },
     {
       "path": "/reference/settings/merge-tree-settings/primary/key",
       "label": "primary_key_*",
       "settings": 4,
-      "characters": 1110
+      "characters": 1106
     },
     {
       "path": "/reference/settings/merge-tree-settings/refresh",
       "label": "refresh_*",
       "settings": 2,
-      "characters": 964
+      "characters": 962
     },
     {
       "path": "/reference/settings/merge-tree-settings/remote/fs",
       "label": "remote_fs_*",
       "settings": 3,
-      "characters": 1012
+      "characters": 1009
     },
     {
       "path": "/reference/settings/merge-tree-settings/remove",
       "label": "remove_*",
       "settings": 3,
-      "characters": 690
+      "characters": 687
+    },
+    {
+      "path": "/reference/settings/merge-tree-settings/replicated",
+      "label": "replicated_*",
+      "settings": 1,
+      "characters": 235
     },
     {
       "path": "/reference/settings/merge-tree-settings/replicated/deduplication",
       "label": "replicated_deduplication_*",
       "settings": 4,
-      "characters": 3286
+      "characters": 3282
     },
     {
       "path": "/reference/settings/merge-tree-settings/replicated/fetches",
       "label": "replicated_fetches_*",
       "settings": 5,
-      "characters": 1645
+      "characters": 1640
     },
     {
       "path": "/reference/settings/merge-tree-settings/replicated/max",
       "label": "replicated_max_*",
       "settings": 7,
-      "characters": 1357
+      "characters": 1350
     },
     {
       "path": "/reference/settings/merge-tree-settings/shared/merge",
       "label": "shared_merge_*",
       "settings": 51,
-      "characters": 21642
+      "characters": 21591
     },
     {
       "path": "/reference/settings/merge-tree-settings/sleep/before",
       "label": "sleep_before_*",
       "settings": 2,
-      "characters": 378
+      "characters": 376
     },
     {
       "path": "/reference/settings/merge-tree-settings/table",
       "label": "table_*",
       "settings": 2,
-      "characters": 1558
+      "characters": 1556
     },
     {
       "path": "/reference/settings/merge-tree-settings/text/index",
       "label": "text_index_*",
       "settings": 4,
-      "characters": 1564
+      "characters": 1560
     },
     {
       "path": "/reference/settings/merge-tree-settings/use",
       "label": "use_*",
       "settings": 6,
-      "characters": 1529
+      "characters": 1523
     },
     {
       "path": "/reference/settings/merge-tree-settings/use/minimalistic",
       "label": "use_minimalistic_*",
       "settings": 2,
-      "characters": 654
+      "characters": 652
     },
     {
       "path": "/reference/settings/merge-tree-settings/vertical/merge",
       "label": "vertical_merge_*",
       "settings": 6,
-      "characters": 1802
+      "characters": 1796
     },
     {
       "path": "/reference/settings/merge-tree-settings/write",
       "label": "write_*",
       "settings": 2,
-      "characters": 1664
+      "characters": 1662
     },
     {
       "path": "/reference/settings/merge-tree-settings/write/ahead",
       "label": "write_ahead_*",
       "settings": 3,
-      "characters": 486
+      "characters": 483
     },
     {
       "path": "/reference/settings/merge-tree-settings/zero/copy",
       "label": "zero_copy_*",
       "settings": 4,
-      "characters": 1324
+      "characters": 1320
     },
     {
       "path": "/reference/settings/merge-tree-settings/other",
       "label": "Other",
-      "settings": 50,
-      "characters": 33079
+      "settings": 45,
+      "characters": 30999
     }
   ]
 }

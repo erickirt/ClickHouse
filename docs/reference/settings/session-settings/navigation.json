@@ -21,7 +21,13 @@
       ]
     },
     "reference/settings/session-settings/alter",
-    "reference/settings/session-settings/analyzer/compatibility",
+    {
+      "group": "analyzer_*",
+      "pages": [
+        "reference/settings/session-settings/analyzer",
+        "reference/settings/session-settings/analyzer/compatibility"
+      ]
+    },
     {
       "group": "apply_*",
       "pages": [
@@ -48,7 +54,13 @@
         "reference/settings/session-settings/azure/upload"
       ]
     },
-    "reference/settings/session-settings/backup/restore",
+    {
+      "group": "backup_*",
+      "pages": [
+        "reference/settings/session-settings/backup",
+        "reference/settings/session-settings/backup/restore"
+      ]
+    },
     {
       "group": "cast_*",
       "pages": [
@@ -76,9 +88,21 @@
     "reference/settings/session-settings/compile",
     "reference/settings/session-settings/connect/timeout",
     "reference/settings/session-settings/correlated/subqueries",
-    "reference/settings/session-settings/count/distinct",
+    {
+      "group": "count_*",
+      "pages": [
+        "reference/settings/session-settings/count",
+        "reference/settings/session-settings/count/distinct"
+      ]
+    },
     "reference/settings/session-settings/create",
-    "reference/settings/session-settings/cross/join",
+    {
+      "group": "cross_*",
+      "pages": [
+        "reference/settings/session-settings/cross",
+        "reference/settings/session-settings/cross/join"
+      ]
+    },
     {
       "group": "database_*",
       "pages": [
@@ -87,10 +111,22 @@
       ]
     },
     "reference/settings/session-settings/dead/blobs",
-    "reference/settings/session-settings/deduplicate/insert",
+    {
+      "group": "deduplicate_*",
+      "pages": [
+        "reference/settings/session-settings/deduplicate",
+        "reference/settings/session-settings/deduplicate/insert"
+      ]
+    },
     "reference/settings/session-settings/default",
     "reference/settings/session-settings/delta/lake",
-    "reference/settings/session-settings/describe/include",
+    {
+      "group": "describe_*",
+      "pages": [
+        "reference/settings/session-settings/describe",
+        "reference/settings/session-settings/describe/include"
+      ]
+    },
     "reference/settings/session-settings/dictionary",
     {
       "group": "distributed_*",
@@ -104,7 +140,13 @@
         "reference/settings/session-settings/distributed/replica"
       ]
     },
-    "reference/settings/session-settings/dynamic/disk",
+    {
+      "group": "dynamic_*",
+      "pages": [
+        "reference/settings/session-settings/dynamic",
+        "reference/settings/session-settings/dynamic/disk"
+      ]
+    },
     "reference/settings/session-settings/empty/result",
     {
       "group": "enable_*",
@@ -119,7 +161,13 @@
         "reference/settings/session-settings/enable/software"
       ]
     },
-    "reference/settings/session-settings/engine/file",
+    {
+      "group": "engine_*",
+      "pages": [
+        "reference/settings/session-settings/engine",
+        "reference/settings/session-settings/engine/file"
+      ]
+    },
     {
       "group": "external_*",
       "pages": [
@@ -130,6 +178,7 @@
     {
       "group": "filesystem_*",
       "pages": [
+        "reference/settings/session-settings/filesystem",
         "reference/settings/session-settings/filesystem/cache",
         "reference/settings/session-settings/filesystem/prefetch"
       ]
@@ -220,7 +269,13 @@
       ]
     },
     "reference/settings/session-settings/lightweight",
-    "reference/settings/session-settings/load/balancing",
+    {
+      "group": "load_*",
+      "pages": [
+        "reference/settings/session-settings/load",
+        "reference/settings/session-settings/load/balancing"
+      ]
+    },
     "reference/settings/session-settings/local/filesystem",
     {
       "group": "log_*",
@@ -230,7 +285,13 @@
         "reference/settings/session-settings/log/query"
       ]
     },
-    "reference/settings/session-settings/low/cardinality",
+    {
+      "group": "low_*",
+      "pages": [
+        "reference/settings/session-settings/low",
+        "reference/settings/session-settings/low/cardinality"
+      ]
+    },
     "reference/settings/session-settings/materialize",
     "reference/settings/session-settings/materialized/views",
     {
@@ -271,7 +332,13 @@
         "reference/settings/session-settings/memory/profiler"
       ]
     },
-    "reference/settings/session-settings/merge/tree",
+    {
+      "group": "merge_*",
+      "pages": [
+        "reference/settings/session-settings/merge",
+        "reference/settings/session-settings/merge/tree"
+      ]
+    },
     "reference/settings/session-settings/metrics/perf",
     {
       "group": "min_*",
@@ -341,15 +408,28 @@
       ]
     },
     "reference/settings/session-settings/parsedatetime",
-    "reference/settings/session-settings/partial/merge",
+    {
+      "group": "partial_*",
+      "pages": [
+        "reference/settings/session-settings/partial",
+        "reference/settings/session-settings/partial/merge"
+      ]
+    },
     "reference/settings/session-settings/parts/to",
-    "reference/settings/session-settings/postgresql/connection",
+    {
+      "group": "postgresql_*",
+      "pages": [
+        "reference/settings/session-settings/postgresql",
+        "reference/settings/session-settings/postgresql/connection"
+      ]
+    },
     "reference/settings/session-settings/prefer",
     "reference/settings/session-settings/preferred",
     "reference/settings/session-settings/promql",
     {
       "group": "query_*",
       "pages": [
+        "reference/settings/session-settings/query",
         "reference/settings/session-settings/query/cache",
         "reference/settings/session-settings/query/plan",
         "reference/settings/session-settings/query/profiler"
@@ -367,16 +447,29 @@
     },
     "reference/settings/session-settings/reader/executor",
     "reference/settings/session-settings/receive",
-    "reference/settings/session-settings/regexp/dict",
+    {
+      "group": "regexp_*",
+      "pages": [
+        "reference/settings/session-settings/regexp",
+        "reference/settings/session-settings/regexp/dict"
+      ]
+    },
     {
       "group": "remote_*",
       "pages": [
+        "reference/settings/session-settings/remote",
         "reference/settings/session-settings/remote/filesystem",
         "reference/settings/session-settings/remote/fs"
       ]
     },
     "reference/settings/session-settings/replace/running",
-    "reference/settings/session-settings/restore/replace",
+    {
+      "group": "restore_*",
+      "pages": [
+        "reference/settings/session-settings/restore",
+        "reference/settings/session-settings/restore/replace"
+      ]
+    },
     "reference/settings/session-settings/rewrite",
     {
       "group": "s3_*",
@@ -401,8 +494,20 @@
     "reference/settings/session-settings/shared/merge",
     "reference/settings/session-settings/short/circuit",
     "reference/settings/session-settings/show",
-    "reference/settings/session-settings/skip/unavailable",
-    "reference/settings/session-settings/sleep/in",
+    {
+      "group": "skip_*",
+      "pages": [
+        "reference/settings/session-settings/skip",
+        "reference/settings/session-settings/skip/unavailable"
+      ]
+    },
+    {
+      "group": "sleep_*",
+      "pages": [
+        "reference/settings/session-settings/sleep",
+        "reference/settings/session-settings/sleep/in"
+      ]
+    },
     "reference/settings/session-settings/split",
     "reference/settings/session-settings/storage",
     {
@@ -414,10 +519,28 @@
     },
     "reference/settings/session-settings/system",
     "reference/settings/session-settings/table",
-    "reference/settings/session-settings/temporary/files",
+    {
+      "group": "temporary_*",
+      "pages": [
+        "reference/settings/session-settings/temporary",
+        "reference/settings/session-settings/temporary/files"
+      ]
+    },
     "reference/settings/session-settings/text/index",
-    "reference/settings/session-settings/throw/on",
-    "reference/settings/session-settings/timeout/overflow",
+    {
+      "group": "throw_*",
+      "pages": [
+        "reference/settings/session-settings/throw",
+        "reference/settings/session-settings/throw/on"
+      ]
+    },
+    {
+      "group": "timeout_*",
+      "pages": [
+        "reference/settings/session-settings/timeout",
+        "reference/settings/session-settings/timeout/overflow"
+      ]
+    },
     "reference/settings/session-settings/totals",
     "reference/settings/session-settings/trace/profile",
     "reference/settings/session-settings/update",
@@ -441,10 +564,22 @@
     },
     "reference/settings/session-settings/validate",
     "reference/settings/session-settings/vector/search",
-    "reference/settings/session-settings/wait/for",
+    {
+      "group": "wait_*",
+      "pages": [
+        "reference/settings/session-settings/wait",
+        "reference/settings/session-settings/wait/for"
+      ]
+    },
     "reference/settings/session-settings/webassembly/udf",
     "reference/settings/session-settings/window/view",
-    "reference/settings/session-settings/write/through",
+    {
+      "group": "write_*",
+      "pages": [
+        "reference/settings/session-settings/write",
+        "reference/settings/session-settings/write/through"
+      ]
+    },
     "reference/settings/session-settings/other"
   ]
 }

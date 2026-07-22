@@ -43,6 +43,7 @@
     {
       "group": "database_*",
       "pages": [
+        "reference/settings/server-settings/settings/database",
         "reference/settings/server-settings/settings/database/catalog",
         "reference/settings/server-settings/settings/database/replicated"
       ]
@@ -56,10 +57,17 @@
     },
     "reference/settings/server-settings/settings/dictionaries",
     "reference/settings/server-settings/settings/disable",
-    "reference/settings/server-settings/settings/disk/connections",
+    {
+      "group": "disk_*",
+      "pages": [
+        "reference/settings/server-settings/settings/disk",
+        "reference/settings/server-settings/settings/disk/connections"
+      ]
+    },
     {
       "group": "distributed_*",
       "pages": [
+        "reference/settings/server-settings/settings/distributed",
         "reference/settings/server-settings/settings/distributed/cache",
         "reference/settings/server-settings/settings/distributed/ddl"
       ]
@@ -67,13 +75,20 @@
     {
       "group": "dns_*",
       "pages": [
+        "reference/settings/server-settings/settings/dns",
         "reference/settings/server-settings/settings/dns/allow",
         "reference/settings/server-settings/settings/dns/cache"
       ]
     },
     "reference/settings/server-settings/settings/drop/distributed",
     "reference/settings/server-settings/settings/enable",
-    "reference/settings/server-settings/settings/encryption/header",
+    {
+      "group": "encryption_*",
+      "pages": [
+        "reference/settings/server-settings/settings/encryption",
+        "reference/settings/server-settings/settings/encryption/header"
+      ]
+    },
     "reference/settings/server-settings/settings/format",
     "reference/settings/server-settings/settings/global/profiler",
     "reference/settings/server-settings/settings/graphite",
@@ -87,6 +102,7 @@
     {
       "group": "iceberg_*",
       "pages": [
+        "reference/settings/server-settings/settings/iceberg",
         "reference/settings/server-settings/settings/iceberg/catalog",
         "reference/settings/server-settings/settings/iceberg/compaction",
         "reference/settings/server-settings/settings/iceberg/metadata",
@@ -116,10 +132,18 @@
         "reference/settings/server-settings/settings/jemalloc/flush"
       ]
     },
-    "reference/settings/server-settings/settings/keeper",
+    {
+      "group": "keeper_*",
+      "pages": [
+        "reference/settings/server-settings/settings/keeper",
+        "reference/settings/server-settings/settings/keeper/server-socket"
+      ]
+    },
     "reference/settings/server-settings/settings/license",
     "reference/settings/server-settings/settings/listen",
     "reference/settings/server-settings/settings/load/marks",
+    "reference/settings/server-settings/settings/logger-async",
+    "reference/settings/server-settings/settings/logger-console",
     "reference/settings/server-settings/settings/mark/cache",
     {
       "group": "max_*",
@@ -151,7 +175,15 @@
     "reference/settings/server-settings/settings/min",
     "reference/settings/server-settings/settings/mlock/executable",
     "reference/settings/server-settings/settings/mysql",
-    "reference/settings/server-settings/settings/oom/canary",
+    {
+      "group": "oom_*",
+      "pages": [
+        "reference/settings/server-settings/settings/oom",
+        "reference/settings/server-settings/settings/oom/canary"
+      ]
+    },
+    "reference/settings/server-settings/settings/openssl-client-requiretlsv1",
+    "reference/settings/server-settings/settings/openssl-server-requiretlsv1",
     {
       "group": "os_*",
       "pages": [
@@ -176,17 +208,25 @@
       "group": "query_*",
       "pages": [
         "reference/settings/server-settings/settings/query",
+        "reference/settings/server-settings/settings/query/cache-max",
         "reference/settings/server-settings/settings/query/condition"
       ]
     },
     "reference/settings/server-settings/settings/remote",
-    "reference/settings/server-settings/settings/replicated/fetches",
+    {
+      "group": "replicated_*",
+      "pages": [
+        "reference/settings/server-settings/settings/replicated",
+        "reference/settings/server-settings/settings/replicated/fetches"
+      ]
+    },
     "reference/settings/server-settings/settings/s3",
     "reference/settings/server-settings/settings/s3queue",
     "reference/settings/server-settings/settings/show",
     "reference/settings/server-settings/settings/shutdown/wait",
     "reference/settings/server-settings/settings/skip",
     "reference/settings/server-settings/settings/snapshot/cleaner",
+    "reference/settings/server-settings/settings/startup",
     {
       "group": "storage_*",
       "pages": [
@@ -198,12 +238,19 @@
     {
       "group": "tcp_*",
       "pages": [
+        "reference/settings/server-settings/settings/tcp",
         "reference/settings/server-settings/settings/tcp/close",
         "reference/settings/server-settings/settings/tcp/port"
       ]
     },
     "reference/settings/server-settings/settings/temporary/data",
-    "reference/settings/server-settings/settings/text/index",
+    {
+      "group": "text_*",
+      "pages": [
+        "reference/settings/server-settings/settings/text",
+        "reference/settings/server-settings/settings/text/index"
+      ]
+    },
     {
       "group": "threadpool_*",
       "pages": [

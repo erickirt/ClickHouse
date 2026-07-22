@@ -3,7 +3,13 @@
   "root": "reference/settings/merge-tree-settings",
   "directory": "none",
   "pages": [
-    "reference/settings/merge-tree-settings/add/minmax",
+    {
+      "group": "add_*",
+      "pages": [
+        "reference/settings/merge-tree-settings/add",
+        "reference/settings/merge-tree-settings/add/minmax"
+      ]
+    },
     {
       "group": "allow_*",
       "pages": [
@@ -44,7 +50,13 @@
     "reference/settings/merge-tree-settings/in/memory",
     "reference/settings/merge-tree-settings/inactive/parts",
     "reference/settings/merge-tree-settings/index/granularity",
-    "reference/settings/merge-tree-settings/kill/delay",
+    {
+      "group": "kill_*",
+      "pages": [
+        "reference/settings/merge-tree-settings/kill",
+        "reference/settings/merge-tree-settings/kill/delay"
+      ]
+    },
     {
       "group": "map_*",
       "pages": [
@@ -102,8 +114,20 @@
       ]
     },
     "reference/settings/merge-tree-settings/number/of",
-    "reference/settings/merge-tree-settings/object/shared",
-    "reference/settings/merge-tree-settings/part/moves",
+    {
+      "group": "object_*",
+      "pages": [
+        "reference/settings/merge-tree-settings/object",
+        "reference/settings/merge-tree-settings/object/shared"
+      ]
+    },
+    {
+      "group": "part_*",
+      "pages": [
+        "reference/settings/merge-tree-settings/part",
+        "reference/settings/merge-tree-settings/part/moves"
+      ]
+    },
     "reference/settings/merge-tree-settings/parts/to",
     "reference/settings/merge-tree-settings/prefer/fetch",
     "reference/settings/merge-tree-settings/prewarm",
@@ -114,6 +138,7 @@
     {
       "group": "replicated_*",
       "pages": [
+        "reference/settings/merge-tree-settings/replicated",
         "reference/settings/merge-tree-settings/replicated/deduplication",
         "reference/settings/merge-tree-settings/replicated/fetches",
         "reference/settings/merge-tree-settings/replicated/max"

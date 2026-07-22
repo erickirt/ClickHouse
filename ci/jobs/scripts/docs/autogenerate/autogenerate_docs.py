@@ -60,7 +60,10 @@ SESSION_SETTINGS_SECOND_LEVEL_MIN = 2
 SESSION_SETTINGS_GENERATOR_VERSION = 5
 SESSION_SETTINGS_BASE_ROUTE = "/reference/settings/session-settings"
 SESSION_SETTINGS_HEADING_RE = re.compile(
-    r"^## (?P<name>[a-z0-9_]+)\s+\{#(?P=name)\}\s*$", re.MULTILINE)
+    r"^##[ \t]+(?P<name>[A-Za-z0-9_.-]+)[ \t]+"
+    r"\{#(?P<anchor>[^}\s]+)\}[ \t]*$",
+    re.MULTILINE,
+)
 MARKDOWN_HEADING_RE = re.compile(
     r"^(?P<hashes>#{1,4})[ \t]+(?P<title>.+?)[ \t]*$")
 MARKDOWN_HEADING_ID_RE = re.compile(
@@ -594,6 +597,7 @@ class GeneratedArtifact:
 @dataclass(frozen=True)
 class SettingSection:
     name: str
+    anchor: str
     markdown: str
 
     @property
@@ -646,9 +650,12 @@ def parse_settings_page(content):
     sections = []
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(generated_body)
+        markdown = generated_body[match.start():end].strip("\n") + "\n"
+        markdown = markdown.replace(match.group(0), match.group(0).rstrip(), 1)
         sections.append(SettingSection(
             match.group("name"),
-            generated_body[match.start():end].strip("\n") + "\n",
+            match.group("anchor"),
+            markdown,
         ))
     if preamble is None:
         preamble = generated_body[:matches[0].start()].strip("\n")
@@ -724,8 +731,6 @@ def group_session_settings(
                 match_mode="token",
                 sections=child_sections,
             ))
-        if len(parent.sections) == 1:
-            parent.sections.clear()
         # Do not add a purely structural top-level category when it contains
         # only one page. Promote that page in the explorer/navigation while
         # retaining its two-token label and stable two-segment route.
@@ -880,7 +885,7 @@ def _settings_anchor_routes(pages, preamble="", source_sections=None):
     list(_markdown_heading_anchors(preamble, seen_slugs))
 
     section_routes = {
-        section.name: page.route
+        section.anchor: page.route
         for page in walk_setting_pages(pages)
         for section in page.sections
     }
@@ -890,7 +895,7 @@ def _settings_anchor_routes(pages, preamble="", source_sections=None):
         for section in page.sections
     ]
     for section in ordered_sections:
-        route = section_routes[section.name]
+        route = section_routes[section.anchor]
         anchors = _markdown_heading_anchors(section.markdown, seen_slugs)
         for anchor in anchors:
             previous = anchor_routes.setdefault(anchor, route)
@@ -1004,7 +1009,7 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
             "label": page.label,
             "count": subtree_count(page),
             "settings": [
-                {"name": section.name, "href": f"{page.route}#{section.name}"}
+                {"name": section.name, "href": f"{page.route}#{section.anchor}"}
                 for section in page.sections
             ],
             "children": [explorer_entry(child) for child in page.children],

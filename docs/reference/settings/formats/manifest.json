@@ -416,103 +416,103 @@
       "path": "/reference/settings/formats/bool",
       "label": "bool_*",
       "settings": 2,
-      "characters": 380
+      "characters": 374
     },
     {
       "path": "/reference/settings/formats/date/time",
       "label": "date_time_*",
       "settings": 4,
-      "characters": 3642
+      "characters": 3630
     },
     {
       "path": "/reference/settings/formats/format",
       "label": "format_*",
       "settings": 5,
-      "characters": 3116
+      "characters": 3101
     },
     {
       "path": "/reference/settings/formats/format/avro",
       "label": "format_avro_*",
       "settings": 6,
-      "characters": 3621
+      "characters": 3603
     },
     {
       "path": "/reference/settings/formats/format/binary",
       "label": "format_binary_*",
       "settings": 3,
-      "characters": 1244
+      "characters": 1235
     },
     {
       "path": "/reference/settings/formats/format/capn",
       "label": "format_capn_*",
       "settings": 3,
-      "characters": 888
+      "characters": 879
     },
     {
       "path": "/reference/settings/formats/format/csv",
       "label": "format_csv_*",
       "settings": 4,
-      "characters": 935
+      "characters": 923
     },
     {
       "path": "/reference/settings/formats/format/custom",
       "label": "format_custom_*",
       "settings": 7,
-      "characters": 1127
+      "characters": 1106
     },
     {
       "path": "/reference/settings/formats/format/regexp",
       "label": "format_regexp_*",
       "settings": 3,
-      "characters": 638
+      "characters": 629
     },
     {
       "path": "/reference/settings/formats/format/schema",
       "label": "format_schema_*",
       "settings": 3,
-      "characters": 2269
+      "characters": 2260
     },
     {
       "path": "/reference/settings/formats/format/template",
       "label": "format_template_*",
       "settings": 5,
-      "characters": 998
+      "characters": 983
     },
     {
       "path": "/reference/settings/formats/input/format",
       "label": "input_format_*",
       "settings": 126,
-      "characters": 55768
+      "characters": 55390
     },
     {
       "path": "/reference/settings/formats/output/format",
       "label": "output_format_*",
       "settings": 104,
-      "characters": 49114
+      "characters": 48802
     },
     {
       "path": "/reference/settings/formats/schema/inference",
       "label": "schema_inference_*",
       "settings": 4,
-      "characters": 1998
+      "characters": 1986
     },
     {
       "path": "/reference/settings/formats/show/create",
       "label": "show_create_*",
       "settings": 2,
-      "characters": 469
+      "characters": 463
     },
     {
       "path": "/reference/settings/formats/type/json",
       "label": "type_json_*",
       "settings": 4,
-      "characters": 1708
+      "characters": 1696
     },
     {
       "path": "/reference/settings/formats/other",
       "label": "Other",
       "settings": 11,
-      "characters": 4292
+      "characters": 4259
     }
   ]
 }
