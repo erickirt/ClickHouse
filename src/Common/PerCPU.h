@@ -32,14 +32,16 @@ ALWAYS_INLINE inline Int32 getCurrentCPU()
     /// macOS has no `sched_getcpu`. XNU exposes the current CPU number to userspace in the low 12
     /// bits of a per-CPU register, extracted exactly as libsyscall's `_os_cpu_number` (up to 4096
     /// CPUs): https://github.com/apple-oss-distributions/xnu/blob/1031c584a5e37aff177559b9f69dbd3c8c3fd30a/libsyscall/os/tsd.h
-    /// The layout is Apple-internal and documented there as "subject to change"; if it ever does,
-    /// callers still bound the value, so the worst case is degraded sharding, not incorrectness.
+    /// The layout is Apple-internal and documented there as "subject to change"; e.g. macOS 11
+    /// kept the CPU number in `TPIDRRO_EL0` instead, so there this reads unrelated TLS bits. Callers
+    /// bound the value, so on such systems the worst case is degraded sharding, not incorrectness.
     UInt64 tpidr;
     __asm__ volatile("mrs %0, TPIDR_EL0" : "=r"(tpidr));
     return static_cast<Int32>(tpidr & 0xfff);
 #elif defined(OS_DARWIN) && defined(__x86_64__)
-    /// Same source as above (`_os_cpu_number`): the CPU number is in the low 12 bits of the
-    /// per-CPU IDT base, read cheaply via `sidt`.
+    /// Same source as above (`_os_cpu_number`): XNU encodes the CPU number in the low 12 bits of the
+    /// per-CPU IDTR *limit* (the first word `sidt` stores: 16-bit limit + low 48 bits of the base),
+    /// so masking the first word matches Apple's implementation exactly.
     struct { UInt64 limit_and_base_low; UInt64 base_high; } idtr;
     __asm__ volatile("sidt %0" : "=m"(idtr));
     return static_cast<Int32>(idtr.limit_and_base_low & 0xfff);

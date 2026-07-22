@@ -1536,20 +1536,6 @@ try
     total_memory_tracker.setJemallocFlushProfileOnMemoryExceeded(server_settings[ServerSetting::jemalloc_flush_profile_on_memory_exceeded]);
     total_memory_tracker.setJemallocFlushProfileOnMemoryExceededSeconds(server_settings[ServerSetting::jemalloc_flush_profile_on_memory_exceeded_interval]);
 
-    /// Create the dedicated MergeTree metadata arena pool before any parts are loaded.
-    JemallocMergeTreeArena::initialize(server_settings[ServerSetting::jemalloc_merge_tree_arenas]);
-    const size_t created_arenas = JemallocMergeTreeArena::getArenaIndices().size();
-    const size_t intended_arenas = JemallocMergeTreeArena::getIntendedArenaCount();
-    if (created_arenas < intended_arenas)
-    {
-        global_context->addOrUpdateWarningMessage(
-            Context::WarningType::MERGE_TREE_JEMALLOC_ARENA_POOL_DEGRADED,
-            PreformattedMessage::create(
-                "Could only create {} of the {} requested dedicated jemalloc arena(s) for MergeTree "
-                "metadata; the remaining allocations fall back to the default arena.",
-                created_arenas, intended_arenas));
-    }
-
     Poco::ThreadPool server_pool(
         /* minCapacity */3,
         /* maxCapacity */server_settings[ServerSetting::max_connections],
@@ -1834,6 +1820,22 @@ try
     server_settings.loadSettingsFromConfig(config());
     validate_insert_deduplication_version(server_settings);
     global_context->configureServerWideThrottling();
+
+    /// Create the dedicated MergeTree metadata arena pool. Placed after the ZooKeeper-include reload
+    /// above so a `from_zk` value of the setting is honored, and still well before any parts are loaded.
+    JemallocMergeTreeArena::initialize(server_settings[ServerSetting::jemalloc_merge_tree_arenas]);
+    const size_t created_arenas = JemallocMergeTreeArena::getArenaIndices().size();
+    const size_t intended_arenas = JemallocMergeTreeArena::getIntendedArenaCount();
+    if (created_arenas < intended_arenas)
+    {
+        global_context->addOrUpdateWarningMessage(
+            Context::WarningType::MERGE_TREE_JEMALLOC_ARENA_POOL_DEGRADED,
+            PreformattedMessage::create(
+                "Could only create {} of the {} requested dedicated jemalloc arena(s) for MergeTree metadata; {}.",
+                created_arenas, intended_arenas,
+                created_arenas > 0 ? "the pool runs with the created arenas"
+                                   : "MergeTree metadata falls back to the default arenas"));
+    }
 
 #if defined(OS_LINUX)
     if (server_settings[ServerSetting::skip_binary_checksum_checks])

@@ -1259,13 +1259,14 @@ void AsynchronousMetrics::update(TimePoint update_time, bool force_update)
             mt_pdirty += pdirty;
         }
 
-        new_values["jemalloc.mergetree_arena.pactive"] = { mt_pactive,
-            "Active pages summed across the dedicated jemalloc MergeTree arena pool." };
-        new_values["jemalloc.mergetree_arena.pdirty"] = { mt_pdirty,
-            "Dirty pages summed across the dedicated jemalloc MergeTree arena pool." };
-
+        /// Publish only complete sums: a partial prefix would look like a plausible pool total.
         if (read_ok)
         {
+            new_values["jemalloc.mergetree_arena.pactive"] = { mt_pactive,
+                "Active pages summed across the dedicated jemalloc MergeTree arena pool." };
+            new_values["jemalloc.mergetree_arena.pdirty"] = { mt_pdirty,
+                "Dirty pages summed across the dedicated jemalloc MergeTree arena pool." };
+
             const size_t page_size = jemalloc_page_size_mib.getValue();
             new_values["jemalloc.mergetree_arena.active_bytes"] = { mt_pactive * page_size,
                 "Active bytes summed across the dedicated jemalloc MergeTree arena pool "
@@ -1281,8 +1282,9 @@ void AsynchronousMetrics::update(TimePoint update_time, bool force_update)
                 "contribute. Disjoint from the cache arena and JIT arena. The per-part columns "
                 "`system.parts.primary_key_bytes_in_memory[_allocated]` and "
                 "`system.parts.index_granularity_bytes_in_memory[_allocated]` are subsets of this metric "
-                "(when their values are non-zero — they can also live in `PrimaryIndexCacheBytes` instead, "
-                "which is in the cache arena and not counted here)."};
+                "(when their values are non-zero). The primary index is allocated here even when it is "
+                "owned by `PrimaryIndexCache` (deliberate: re-homing it at the cache boundary could fail "
+                "after a part is already committed), so `PrimaryIndexCacheBytes` overlaps with this metric."};
             new_values["jemalloc.mergetree_arena.dirty_bytes"] = { mt_pdirty * page_size,
                 "Dirty bytes summed across the dedicated jemalloc MergeTree arena pool that are eligible "
                 "for purging back to the OS."};

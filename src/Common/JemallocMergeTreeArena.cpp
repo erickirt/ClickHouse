@@ -55,7 +55,7 @@ std::optional<unsigned> createArena()
         LOG_ERROR(
             &Poco::Logger::get("JemallocMergeTreeArena"),
             "Failed to create dedicated jemalloc MergeTree arena (mallctl error: {}). "
-            "MergeTree allocations will use the default arena.",
+            "The pool continues with the arenas created so far (the default arenas if none).",
             err);
         return {};
     }
@@ -97,12 +97,13 @@ std::vector<UInt32> getAllowedCPUs()
         if (errno != EINVAL) /// EINVAL means the set was too small; anything else is a real error.
             break;
     }
+    /// On a real affinity-read failure, return empty rather than fabricating [0, getNumCPUs()):
+    /// a guessed mask could map allowed CPUs onto only a few slots while unreachable arenas still
+    /// count in the pool. The caller fails closed to a single arena, reachable from any CPU.
+#else
+    for (UInt32 cpu = 0; cpu < PerCPU::getNumCPUs(); ++cpu)
+        cpus.push_back(cpu);
 #endif
-    if (cpus.empty())
-    {
-        for (UInt32 cpu = 0; cpu < PerCPU::getNumCPUs(); ++cpu)
-            cpus.push_back(cpu);
-    }
     return cpus;
 }
 
@@ -119,7 +120,18 @@ void initialize(size_t num_arenas)
         /// Size the pool to the CPUs we can actually route to and build a dense CPU->slot map, so
         /// every created arena receives allocations even under a restrictive or sparse affinity
         /// mask (`cpu_id % N` alone would leave arenas unreachable and overstate the count).
-        const std::vector<UInt32> allowed_cpus = getAllowedCPUs();
+        std::vector<UInt32> allowed_cpus = getAllowedCPUs();
+        if (allowed_cpus.empty())
+        {
+            /// Affinity discovery failed; fail closed to one shared arena (reachable from any CPU,
+            /// no CPU map needed) instead of guessing a map that could leave arenas unreachable.
+            LOG_WARNING(
+                &Poco::Logger::get("JemallocMergeTreeArena"),
+                "Cannot determine the CPUs this process may run on; "
+                "using a single dedicated MergeTree arena instead of {}.",
+                num_arenas);
+            allowed_cpus.push_back(0);
+        }
         num_arenas = std::min(num_arenas, allowed_cpus.size());
         intended_arena_count = num_arenas;
 
