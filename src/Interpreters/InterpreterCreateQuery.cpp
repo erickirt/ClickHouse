@@ -1985,6 +1985,13 @@ namespace
 void checkForUnsupportedColumns(IStorage & storage, LoadingStrictnessLevel mode, ContextPtr context)
 {
     auto metadata_snapshot = storage.getInMemoryMetadataPtr(context, false);
+
+    /// Validate the final column types once the schema is known. For inferred schemas the
+    /// pre-construction check does not see the columns, so a table could otherwise be created
+    /// with a type that is rejected on load. Views and dictionaries are exempt, as elsewhere.
+    if (!storage.isView() && !storage.isDictionary())
+        checkAllTypesAreAllowedInTable(metadata_snapshot->getColumns().getAll());
+
     if (mode <= LoadingStrictnessLevel::CREATE && hasColumnsWithDynamicStructure(metadata_snapshot->getColumns()) && !storage.supportsColumnsWithDynamicStructure())
     {
         throw Exception(ErrorCodes::ILLEGAL_COLUMN,
