@@ -114,36 +114,61 @@ class GHAuth:
         return cls._get_access_token_by_jwt(jwt_token, installation_id)
 
     @classmethod
-    def auth(cls, app_id, app_key, installation_id: int) -> None:
-        if USING_PYJWT:
-            access_token = cls._get_access_token(app_key, app_id, installation_id)
-        else:
-            access_token = cls._get_access_token_deprecated(app_key, app_id, installation_id)
-        Shell.check(
-            "gh auth login --with-token",
-            stdin_str=f"{access_token}\n",
-            strict=True,
-            retries=4,
-            retry_errors=_GH_AUTH_RETRY_ERRORS,
-        )
+    def auth_with_app(
+        cls, app_id, app_key, installation_id: int, no_strict: bool = False
+    ) -> bool:
+        """
+        Authenticate `gh` with a token minted from the GitHub App secrets.
+
+        By default an authentication failure raises; pass `no_strict=True` to
+        instead print a warning and return False.
+        """
+        try:
+            if USING_PYJWT:
+                access_token = cls._get_access_token(app_key, app_id, installation_id)
+            else:
+                access_token = cls._get_access_token_deprecated(app_key, app_id, installation_id)
+            return Shell.check(
+                "gh auth login --with-token",
+                stdin_str=f"{access_token}\n",
+                strict=not no_strict,
+                retries=4,
+                retry_errors=_GH_AUTH_RETRY_ERRORS,
+            )
+        except Exception as e:
+            if not no_strict:
+                raise
+            print(f"WARNING: GH auth failed: {e}")
+            return False
 
     @classmethod
-    def auth_with_lambda(cls, lambda_name: str, region: str = "") -> None:
+    def auth_with_lambda(
+        cls, lambda_name: str, region: str = "", no_strict: bool = False
+    ) -> bool:
         """
         Authenticate `gh` with a token minted by the given AWS Lambda.
+
+        By default an authentication failure raises; pass `no_strict=True` to
+        instead print a warning and return False.
         """
-        print(f"Mint GitHub token via lambda [{lambda_name}]")
-        access_token = cls._get_access_token_from_lambda(lambda_name, region)
-        Shell.check(
-            "gh auth login --with-token",
-            stdin_str=f"{access_token}\n",
-            strict=True,
-            retries=4,
-            retry_errors=_GH_AUTH_RETRY_ERRORS,
-        )
+        try:
+            print(f"Mint GitHub token via lambda [{lambda_name}]")
+            access_token = cls._get_access_token_from_lambda(lambda_name, region)
+            return Shell.check(
+                "gh auth login --with-token",
+                stdin_str=f"{access_token}\n",
+                strict=not no_strict,
+                retries=4,
+                retry_errors=_GH_AUTH_RETRY_ERRORS,
+            )
+        except Exception as e:
+            if not no_strict:
+                raise
+            print(f"WARNING: GH auth failed: {e}")
+            return False
 
     @classmethod
-    def auth_from_settings(cls, workflow=None, force=False) -> bool:
+    def auth(cls, workflow=None, force=False, no_strict: bool = False) -> bool:
         """
         Authenticate `gh` for GitHub API calls and return whether `gh` is usable.
 
@@ -154,7 +179,9 @@ class GHAuth:
         the ambient `gh` token is assumed and this is a no-op.
 
         The token is minted at most once per process unless `force` is set.
-        Returns False only if authentication was attempted and failed.
+
+        By default an authentication failure raises. Pass `no_strict=True` to
+        instead print a warning and return False (the historical behaviour).
         """
         from praktika.secret import Secret
         from praktika.settings import Settings
@@ -168,7 +195,9 @@ class GHAuth:
 
         try:
             if lambda_name:
-                cls.auth_with_lambda(lambda_name, Settings.GH_AUTH_LAMBDA_REGION)
+                authenticated = cls.auth_with_lambda(
+                    lambda_name, Settings.GH_AUTH_LAMBDA_REGION, no_strict=no_strict
+                )
             elif Settings.SECRET_GH_APP_ID:
                 app_id, pem, installation_id = (
                     Secret.Config(
@@ -192,19 +221,23 @@ class GHAuth:
                     )
                     .get_value()
                 )
-                cls.auth(
-                    app_id=app_id, app_key=pem, installation_id=int(installation_id)
+                authenticated = cls.auth_with_app(
+                    app_id=app_id,
+                    app_key=pem,
+                    installation_id=int(installation_id),
+                    no_strict=no_strict,
                 )
             else:
                 # No custom auth configured - rely on the ambient gh token.
                 return True
         except Exception as e:
+            if not no_strict:
+                raise
             print(f"WARNING: GH auth failed: {e}")
-            cls._authenticated = False
-            return False
+            authenticated = False
 
-        cls._authenticated = True
-        return True
+        cls._authenticated = authenticated
+        return authenticated
 
 
 # if __name__ == "__main__":
@@ -219,4 +252,4 @@ class GHAuth:
 #         type=Secret.Type.AWS_SSM_SECRET,
 #     ).get_value()
 #     print(app_id, pem)
-#     GHAuth.auth(app_id, pem)
+#     GHAuth.auth_with_app(app_id, pem)

@@ -571,7 +571,7 @@ def _config_workflow(workflow: Workflow.Config, job_name) -> Result:
         )
         env.dump()
 
-    if not GHAuth.auth_from_settings(workflow, force=True):
+    if not GHAuth.auth(workflow, force=True, no_strict=True):
         print("WARNING: Failed to auth with GH")
 
     # refresh PR data
@@ -984,7 +984,7 @@ def _finish_workflow(workflow, job_name):
         or workflow.enable_open_issues_check
         or workflow.post_hooks
     ):
-        GHAuth.auth_from_settings(workflow)
+        GHAuth.auth(workflow, no_strict=True)
 
     update_final_report = False
     results = []
