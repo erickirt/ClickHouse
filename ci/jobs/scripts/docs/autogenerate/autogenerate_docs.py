@@ -1219,6 +1219,75 @@ def generate_artifacts(gen, binary, docs_dir, repo_root, migrate, lk, file_map, 
     return [GeneratedArtifact(Path(dest), content)]
 
 
+def stale_settings_page_paths(family_name, artifacts, docs_dir):
+    """Find generated detail pages that are absent from the current artifact set."""
+    family = SETTINGS_SPLIT_FAMILIES[family_name]
+    marker = family["marker"]
+    shard_dir = (
+        Path(docs_dir) / family["base_route"].lstrip("/")
+    ).resolve()
+    current_pages = {
+        artifact.path.resolve()
+        for artifact in artifacts
+        if marker in artifact.content
+    }
+    outside_shard = [
+        path for path in current_pages if not path.is_relative_to(shard_dir)
+    ]
+    if outside_shard:
+        raise ValueError(
+            f"generated {family_name} page is outside {shard_dir}: "
+            + ", ".join(str(path) for path in sorted(outside_shard))
+        )
+    if not shard_dir.is_dir():
+        return []
+
+    stale = []
+    for path in sorted(shard_dir.rglob("*.mdx")):
+        if path.is_symlink():
+            raise ValueError(f"refusing to inspect generated-page symlink: {path}")
+        if path.resolve() in current_pages:
+            continue
+        if marker in path.read_text(encoding="utf-8"):
+            stale.append(path)
+    return stale
+
+
+def reconcile_generated_artifacts(
+        artifacts, stale_paths, docs_dir, *, check=False, write=False):
+    """Check, write, or preview one generator's current and obsolete artifacts."""
+    docs_root = Path(docs_dir).resolve()
+    drift = 0
+    for path in stale_paths:
+        rel = os.path.relpath(path.resolve(), docs_root)
+        if check:
+            print(f"DRIFT: {rel} is an obsolete generated page")
+            drift += 1
+        elif write:
+            path.unlink()
+            print(f"deleted: {rel}")
+        else:
+            print(f"[dry-run] would delete: {rel}")
+
+    for artifact in artifacts:
+        dest, new = artifact.path, artifact.content
+        rel = os.path.relpath(dest.resolve(), docs_root)
+        if check:
+            current = dest.read_text(encoding="utf-8") if dest.is_file() else ""
+            if current != new:
+                print(f"DRIFT: {rel} is stale")
+                drift += 1
+            else:
+                print(f"ok: {rel}")
+        elif write:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(new, encoding="utf-8")
+            print(f"wrote: {rel}")
+        else:
+            print(f"[dry-run] would update: {rel}")
+    return drift
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1312,22 +1381,17 @@ def main(argv=None):
     for gen in generators:
         artifacts = generate_artifacts(
             gen, binary, docs_dir, repo_root, migrate, lk, file_map, args.remap)
-        for artifact in artifacts:
-            dest, new = artifact.path, artifact.content
-            rel = os.path.relpath(dest, docs_dir)
-            if args.check:
-                current = dest.read_text(encoding="utf-8") if dest.is_file() else ""
-                if current != new:
-                    print(f"DRIFT: {rel} is stale")
-                    drift += 1
-                else:
-                    print(f"ok: {rel}")
-            elif args.write:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(new, encoding="utf-8")
-                print(f"wrote: {rel}")
-            else:
-                print(f"[dry-run] would update: {rel}")
+        stale_paths = []
+        if gen["name"] in SETTINGS_SPLIT_FAMILIES and args.remap:
+            stale_paths = stale_settings_page_paths(
+                gen["name"], artifacts, docs_dir)
+        drift += reconcile_generated_artifacts(
+            artifacts,
+            stale_paths,
+            docs_dir,
+            check=args.check,
+            write=args.write,
+        )
     return 1 if drift else 0
 
 

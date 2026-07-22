@@ -215,6 +215,42 @@ def main():
             len(page["path"].removeprefix(mod.SESSION_SETTINGS_BASE_ROUTE).strip("/").split("/")) <= 2
             for page in generated_manifest["pageStats"])
 
+    with tempfile.TemporaryDirectory() as temp:
+        docs = Path(temp)
+        dest = docs / "reference/settings/session-settings.mdx"
+        first_artifacts = mod.split_session_settings_page(
+            dest, generated_page(["foo_alpha", "foo_beta"]), docs)
+        assert mod.reconcile_generated_artifacts(
+            first_artifacts, [], docs, write=True) == 0
+        obsolete_page = docs / "reference/settings/session-settings/foo.mdx"
+        assert obsolete_page.is_file()
+
+        second_artifacts = mod.split_session_settings_page(
+            dest, generated_page(["qux_alpha", "qux_beta"]), docs)
+        # Simulate the old write behavior: update the current artifacts without
+        # reconciling pages emitted by the previous grouping.
+        assert mod.reconcile_generated_artifacts(
+            second_artifacts, [], docs, write=True) == 0
+        assert obsolete_page.is_file()
+
+        stale_paths = mod.stale_settings_page_paths(
+            "session-settings", second_artifacts, docs)
+        assert stale_paths == [obsolete_page.resolve()]
+        assert mod.reconcile_generated_artifacts(
+            second_artifacts, stale_paths, docs, check=True) == 1
+        assert obsolete_page.is_file()
+
+        assert mod.reconcile_generated_artifacts(
+            second_artifacts, stale_paths, docs, write=True) == 0
+        assert not obsolete_page.exists()
+        assert (
+            docs / "reference/settings/session-settings/qux.mdx"
+        ).is_file()
+        assert not mod.stale_settings_page_paths(
+            "session-settings", second_artifacts, docs)
+        assert mod.reconcile_generated_artifacts(
+            second_artifacts, [], docs, check=True) == 0
+
     family_names = [
         "filesystem_cache_alpha", "filesystem_cache_beta",
         "filesystem_prefetch_alpha", "filesystem_prefetch_beta",
