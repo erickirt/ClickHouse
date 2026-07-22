@@ -242,11 +242,8 @@ AvroSerializer::SchemaWithSerializeFn AvroSerializer::createSchemaWithSerializeF
         }
         case TypeIndex::String:
         {
-            /// Iceberg `string` -> Avro `string`, Iceberg `binary` -> Avro `bytes`. Both read
-            /// as ClickHouse DataTypeString, so on the Iceberg path (mapper with per-path
-            /// logical-type info) pick from the source logical type rather than the generic
-            /// output_format_avro_string_column_pattern regex, which cannot tell them apart.
-            /// Off the Iceberg path (or without string-path info) keep the regex-driven choice.
+            /// Iceberg `string` and `binary` both read as DataTypeString; on the Iceberg path pick
+            /// from the source logical type, else keep the regex-driven choice.
             bool as_string = traits->isStringAsString(column_name);
             if (column_mapper && column_mapper->hasIcebergStringInfo())
                 as_string = column_mapper->isIcebergStringPath(column_path);
@@ -549,8 +546,7 @@ void AvroSerializer::setIcebergFieldIds(const avro::NodePtr & node, const String
     {
         case avro::AVRO_RECORD:
         {
-            /// A record maps a dotted path per field. Set the field-id of each field and
-            /// descend into it. The dotted path matches IcebergSchemaProcessor::traverseSchema.
+            /// Set each field's id by its dotted path (as in IcebergSchemaProcessor) and descend.
             auto * node_record = dynamic_cast<avro::NodeRecord *>(node.get());
             if (!node_record)
                 return;
@@ -572,9 +568,8 @@ void AvroSerializer::setIcebergFieldIds(const avro::NodePtr & node, const String
         }
         case avro::AVRO_UNION:
         {
-            /// Nullable(T) and Variant are Avro unions wrapping the actual type; the field-id
-            /// belongs to the wrapped record/array/map, not the union. Descend without extending
-            /// the path so nested records inside e.g. Nullable(Tuple(...)) still get field-ids.
+            /// Nullable/Variant union: the id belongs to the wrapped type, so descend without
+            /// extending the path (nested records in e.g. Nullable(Tuple(...)) still get ids).
             for (size_t i = 0; i < node->leaves(); ++i)
                 setIcebergFieldIds(node->leafAt(static_cast<int>(i)), path);
             return;
@@ -587,8 +582,7 @@ void AvroSerializer::setIcebergFieldIds(const avro::NodePtr & node, const String
         }
         case avro::AVRO_MAP:
         {
-            /// An Avro map has two leaves: key (leaf 0) and value (leaf 1). Only the value can
-            /// carry a nested record; keys are always strings. Path suffixes match traverseComplexType.
+            /// Only the map value (leaf 1) can carry a nested record; keys are always strings.
             if (node->leaves() >= 2)
                 setIcebergFieldIds(node->leafAt(1), Nested::concatenateName(path, "value"));
             return;

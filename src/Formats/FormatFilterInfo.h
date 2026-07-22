@@ -30,12 +30,9 @@ public:
     const std::unordered_map<String, Int64> & getStorageColumnEncoding() const { return storage_encoding; }
     const std::unordered_map<Int64, String> & getFieldIdToClickHouseName() const { return field_id_to_clickhouse_name; }
 
-    /// Paths whose Iceberg logical type is `string` (as opposed to `binary`). Both Iceberg
-    /// `string` and `binary` are read as ClickHouse DataTypeString, so an output format that
-    /// needs to reproduce the source logical type (e.g. ORC string vs binary) must consult this.
-    /// `hasIcebergStringInfo()` distinguishes "logical-type info was supplied" from "no info":
-    /// a mapper that only carries field-id encoding (no string-path info) must fall back to the
-    /// setting/spec default instead of treating every DataTypeString path as `binary`.
+    /// Paths whose Iceberg logical type is `string` (not `binary`); both read as DataTypeString,
+    /// so a writer preserving that distinction (ORC/Avro string vs binary) consults this.
+    /// hasIcebergStringInfo() lets a field-id-only mapper fall back to the default, not force binary.
     void setIcebergStringPaths(std::unordered_set<String> && iceberg_string_paths_)
     {
         iceberg_string_paths = std::move(iceberg_string_paths_);

@@ -95,10 +95,8 @@ void traverseComplexType(Poco::JSON::Object::Ptr type, std::unordered_map<String
     }
 }
 
-/// Collects the paths whose Iceberg logical type is exactly `string`. Iceberg `string` and
-/// `binary` both read as ClickHouse DataTypeString, so an output writer that must preserve the
-/// source logical type (ORC string vs binary) needs to know which paths are genuine `string`.
-/// `type` is either a JSON string (primitive leaf) or an object (complex type).
+/// Collects the paths whose Iceberg logical type is exactly `string` (both `string` and `binary`
+/// read as DataTypeString). `type` is a JSON string (primitive leaf) or object (complex type).
 void collectStringPaths(const Poco::Dynamic::Var & type, std::unordered_set<String> & result, const String & current_path)
 {
     if (type.isString())

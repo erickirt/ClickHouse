@@ -61,9 +61,8 @@ void MultipleFileWriter::startNewFile()
         format_settings->parquet.bloom_filter_push_down = true;
         format_settings->parquet.filter_push_down = true;
     }
-    /// The ORC String -> `string` normalization is applied inside ORCBlockOutputFormat when a
-    /// column mapper is present (all Iceberg ORC writers pass one), so it also covers the
-    /// compaction/mutation rewrite paths without touching format_settings here.
+    /// The ORC String/FixedString logical-type handling lives in ORCBlockOutputFormat, keyed on
+    /// the column mapper, so it covers the compaction/mutation rewrite paths too.
     FormatFilterInfoPtr format_filter_info = std::make_shared<FormatFilterInfo>(nullptr, context, column_mapper, nullptr, nullptr);
     output_format = FormatFactory::instance().getOutputFormatParallelIfPossible(
         write_format, *buffer, *sample_block, context, format_settings, format_filter_info);

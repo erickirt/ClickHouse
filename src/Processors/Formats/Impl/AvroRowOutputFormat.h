@@ -56,16 +56,12 @@ public:
 
 private:
     /// Type names for different complex types (e.g. enums, fixed strings) must be unique. We use simple incremental number to give them different names.
-    /// `column_path` is the dotted path of the field (mirrors setIcebergFieldIds / IcebergSchemaProcessor:
-    /// `t.x`, `arr.element`, `m.value`); on the Iceberg path it selects Avro `string` vs `bytes` for a
-    /// String column from the source Iceberg logical type instead of the generic string-column regex.
+    /// `column_path` is the field's dotted path (`t.x`, `arr.element`, `m.value`); on the Iceberg
+    /// path it picks Avro `string` vs `bytes` for a String column from the source logical type.
     SchemaWithSerializeFn createSchemaWithSerializeFn(const DataTypePtr & data_type, size_t & type_name_increment, const String & column_name, const String & column_path);
 
-    /// Walks the Avro schema tree and sets Iceberg `field-id` on every record field, descending
-    /// through union (Nullable/Variant), array and map wrapper nodes so records nested inside e.g.
-    /// Nullable(Tuple(...)) or Array(Tuple(...)) also carry field-ids, as the Iceberg spec requires
-    /// (https://iceberg.apache.org/spec/#avro). Dotted paths mirror IcebergSchemaProcessor's
-    /// traversal (`t.x`, `arr.element`, `m.value`). No-op without a mapper.
+    /// Sets the Iceberg `field-id` on every Avro record field, descending through union
+    /// (Nullable/Variant), array and map wrappers so nested records also get ids. No-op without a mapper.
     void setIcebergFieldIds(const avro::NodePtr & node, const String & path);
 
     std::vector<SerializeFn> serialize_fns;

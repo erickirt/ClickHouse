@@ -92,9 +92,7 @@ ORCBlockOutputFormat::ORCBlockOutputFormat(WriteBuffer & out_, SharedHeader head
 
 std::unique_ptr<orc::Type> ORCBlockOutputFormat::getORCType(const DataTypePtr & type, const String & column_path)
 {
-    /// A Nullable(T) maps to the same ORC node as T; only its Iceberg `required` flag differs.
-    /// Strip it here so the flag is computed from the outer type and the id-map lookup uses the
-    /// same path the schema traversal produced.
+    /// Nullable(T) maps to the same ORC node as T; only the Iceberg `required` flag differs.
     const bool required = !type->isNullable();
     const DataTypePtr unwrapped = removeNullable(type);
 
@@ -166,12 +164,8 @@ std::unique_ptr<orc::Type> ORCBlockOutputFormat::getORCType(const DataTypePtr & 
             break;
         case TypeIndex::String:
         {
-            /// Iceberg `string` must be ORC `string`, but Iceberg `binary` also reads as
-            /// DataTypeString (SchemaProcessor getSimpleType) and must stay ORC `binary`.
-            /// When per-path logical-type info is available, force `string` only where the field
-            /// is genuinely Iceberg `string`, leaving `binary` fields as ORC `binary`. A mapper
-            /// without string-path info (e.g. a bare field-id mapper) falls back to the
-            /// setting-driven choice rather than forcing every String path to binary.
+            /// Iceberg `string` and `binary` both read as DataTypeString; force ORC `string` only
+            /// for genuine `string` paths, else fall back to the setting (also for non-Iceberg writes).
             bool force_string = format_settings.orc.output_string_as_string;
             if (column_mapper && column_mapper->hasIcebergStringInfo())
                 force_string = column_mapper->isIcebergStringPath(column_path);
@@ -180,10 +174,8 @@ std::unique_ptr<orc::Type> ORCBlockOutputFormat::getORCType(const DataTypePtr & 
         }
         case TypeIndex::FixedString:
         {
-            /// Iceberg exposes `fixed[L]` as FixedString(L), which maps to ORC `binary`.
-            /// output_format_orc_string_as_string defaults to true, so for Iceberg writes
-            /// (column_mapper != nullptr) force `binary` regardless of the setting to keep
-            /// the fixed[L] logical type; keep the setting-driven choice otherwise.
+            /// Iceberg `fixed[L]` (FixedString) must stay ORC `binary`, so for Iceberg writes
+            /// force `binary` regardless of the setting; keep the setting-driven choice otherwise.
             if (format_settings.orc.output_string_as_string && !column_mapper)
                 result = orc::createPrimitiveType(orc::TypeKind::STRING);
             else
