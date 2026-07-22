@@ -501,13 +501,15 @@ def get_physical_core_cpu_list():
     end up sharing a hyperthread sibling with each other depending on scheduler
     mood - a top suspect for the amd-vs-arm A/A noise gap (0.51% vs 0.42%).
 
-    Parses /sys/devices/system/cpu/cpu*/topology/thread_siblings_list and keeps
-    the first sibling of each unique pair; falls back to cpus 0..(nproc/2 - 1)
-    if the sysfs topology is unavailable. Only call at runtime on the Linux CI
-    host (there is no /sys on macOS) - never at import time.
+    Parses /sys/devices/system/cpu/cpu*/topology/thread_siblings_list, keeps
+    the first ALLOWED sibling of each unique pair (intersected with the
+    process affinity mask), and falls back to all allowed cpus if the sysfs
+    topology is unavailable. Only call at runtime on the Linux CI host (there
+    is no /sys on macOS) - never at import time.
 
-    Must stay in sync with cpu_pinning_prefix in ci/jobs/scripts/perf/compare.sh
-    (the server restart path used by the confirm-changes stage).
+    Must stay in sync with pinned_cpu_list in ci/jobs/scripts/perf/compare.sh
+    (the server restart path used by the standalone flows and the
+    confirm-changes rerun).
     """
     # Sysfs exposes the HOST topology: on a cpuset-limited run the process may
     # only be allowed a subset of it, and taskset with a disallowed CPU fails
@@ -538,15 +540,19 @@ def get_physical_core_cpu_list():
             cores[min(siblings)] = min(usable)
     cpus = set(cores.values())
     if not cpus:
+        # Without topology, halving would be a guess that drops real cores on
+        # non-SMT hosts and on masks that already expose one sibling per core
+        # (e.g. Cpus_allowed_list: 1,3). Keep every allowed CPU instead: the
+        # degraded mode allows hyperthread sharing (the pre-pinning behavior)
+        # but never skews measurements by idling half the cores.
         print(
-            "WARNING: could not parse cpu topology from sysfs, "
-            "falling back to the first half of the allowed cpus"
+            "WARNING: could not parse cpu topology from sysfs; using all "
+            "allowed cpus (sibling pairs unknown, hyperthread sharing possible)"
         )
         if allowed:
-            allowed_sorted = sorted(allowed)
-            cpus = set(allowed_sorted[: max(len(allowed_sorted) // 2, 1)])
+            cpus = set(allowed)
         else:
-            cpus = set(range(max((os.cpu_count() or 2) // 2, 1)))
+            cpus = set(range(os.cpu_count() or 2))
     return ",".join(str(cpu) for cpu in sorted(cpus))
 
 

@@ -195,7 +195,7 @@ function pinned_cpu_list
     then
         return 0
     fi
-    local cpus half
+    local cpus
     cpus=$(python3 - 2>/dev/null <<'PYEOF' ||:
 import os
 import re
@@ -226,23 +226,20 @@ PYEOF
 )
     if [ -z "$cpus" ]
     then
-        # Fallback: the first half of the ALLOWED cpus (siblings are
-        # enumerated after all physical cores on our runners), so that a
-        # cpuset-limited run cannot end up with disallowed CPU ids.
-        echo "pinned_cpu_list: sysfs topology probe failed, falling back to the first half of the allowed cpus" >&2
-        local allowed_expanded
-        allowed_expanded=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status 2>/dev/null \
+        # Without topology, halving would be a guess that drops real cores on
+        # non-SMT hosts and on masks that already expose one sibling per core
+        # (e.g. Cpus_allowed_list: 1,3). Keep every allowed CPU instead: the
+        # degraded mode allows hyperthread sharing (the pre-pinning behavior)
+        # but never skews measurements by idling half the cores. Must stay in
+        # sync with get_physical_core_cpu_list in ci/jobs/performance_tests.py.
+        echo "pinned_cpu_list: sysfs topology probe failed; using all allowed cpus (sibling pairs unknown, hyperthread sharing possible)" >&2
+        cpus=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status 2>/dev/null \
             | tr ',' '\n' \
-            | awk -F- '{ if (NF == 2) { for (i = $1; i <= $2; i++) print i } else if ($1 != "") print $1 }')
-        if [ -n "$allowed_expanded" ]
+            | awk -F- '{ if (NF == 2) { for (i = $1; i <= $2; i++) print i } else if ($1 != "") print $1 }' \
+            | paste -sd, -)
+        if [ -z "$cpus" ]
         then
-            half=$(( $(echo "$allowed_expanded" | wc -l) / 2 ))
-            if [ "$half" -lt 1 ]; then half=1; fi
-            cpus=$(echo "$allowed_expanded" | head -n "$half" | paste -sd, -)
-        else
-            half=$(( $(nproc) / 2 ))
-            if [ "$half" -lt 1 ]; then half=1; fi
-            cpus=$(seq -s, 0 $(( half - 1 )))
+            cpus=$(seq -s, 0 $(( $(nproc) - 1 )))
         fi
     fi
     echo "$cpus"
