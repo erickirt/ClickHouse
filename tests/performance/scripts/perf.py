@@ -113,7 +113,13 @@ def stat_threshold(left_times, right_times):
     gaps.sort()
     # quantileExact(0.99) semantics.
     q99 = gaps[min(int(0.99 * len(gaps)), len(gaps) - 1)]
-    return q99 / median_left
+    # floor to 3 decimals like eqmed.sql's floor(threshold / l, 3), so the
+    # stop target and the reported stat_threshold round identically at the
+    # tau boundary. The estimators target the same quantile of the same
+    # balanced-split null; this exact enumeration is the deterministic
+    # version of eqmed's 10,000 sampled shuffles (validated: 95.5% equal at
+    # 3 decimals for k <= 8, the residual being the sampling jitter).
+    return int(q99 / median_left * 1000) / 1000
 
 
 parser = argparse.ArgumentParser(description="Run performance test.")

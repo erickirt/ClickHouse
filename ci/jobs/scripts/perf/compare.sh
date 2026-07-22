@@ -1322,14 +1322,20 @@ create table unstable_queries_report engine File(TSV, 'report/unstable-queries.t
 create view test_speedup as
     select
         test,
-        exp2(avg(log2(left / right))) times_speedup,
+        -- Demoted queries (confirmation rerun did not reproduce the change)
+        -- stay visible in the per-query tables via *_show, but must not
+        -- contribute to the per-test aggregates: these feed
+        -- test-perf-changes.tsv and the perf_test_perf_changes_v1 upload,
+        -- which carry the pipeline's confirmed results. That applies to the
+        -- speedup average too - a demoted +20% row must not tilt
+        -- times_speedup - while count(*) stays a plain coverage count.
+        -- ifNotFinite guards the all-rows-demoted case (empty avgIf = nan);
+        -- 1.0x is the neutral value.
+        exp2(ifNotFinite(avgIf(log2(left / right),
+            (queries.test, queries.query_index) not in
+                (select test, query_index from unconfirmed_queries)), 0)) times_speedup,
         count(*) queries,
         unstable + changed bad,
-        -- Demoted queries (confirmation rerun did not reproduce the change)
-        -- stay visible in the per-query tables via *_show, but must not count
-        -- in the per-test aggregates: these feed test-perf-changes.tsv and
-        -- the perf_test_perf_changes_v1 upload, which carry the pipeline's
-        -- confirmed results.
         sum(changed_show and ((queries.test, queries.query_index) not in
             (select test, query_index from unconfirmed_queries))) changed,
         sum(unstable_show and ((queries.test, queries.query_index) not in
