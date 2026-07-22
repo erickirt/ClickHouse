@@ -29,10 +29,6 @@
 02933_replicated_database_forbid_create_as_select
 03100_lwu_40_cleanup_race
 
-# Custom-disk static-storage behavior differs (TABLE_IS_PERMANENTLY_READ_ONLY). Worth a look.
-02454_create_table_with_custom_disk
-04498_alter_table_with_custom_disk
-
 # Flaky on macOS (failed 3/20 runs); investigate before unskipping.
 01903_http_fields
 
