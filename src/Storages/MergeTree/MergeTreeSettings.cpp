@@ -1748,10 +1748,11 @@ Name of storage disk policy
 Name of storage disk. Can be specified instead of storage policy.
 )", 0) \
     DECLARE(Bool, table_disk, false, R"(
-This is table disk, the path/endpoint should point to the table data, not to
-the database data. Supported for object-storage disks whose metadata is stored on
-the object storage itself (s3_plain, s3_plain_rewritable, web), including their
-cached and encrypted variants.
+This is table disk: the path/endpoint points to the table data, not the database data.
+Supported for object-storage disks whose metadata lives on the object storage itself
+(s3_plain, s3_plain_rewritable, web, web_index) and their cached variants. Encrypted
+variants are supported only over the writable s3_plain / s3_plain_rewritable disks, not
+over the read-only web / web_index disks.
 )", 0) \
     DECLARE(Bool, allow_nullable_key, false, R"(
 Allow Nullable types as primary keys.
