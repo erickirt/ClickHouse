@@ -74,9 +74,11 @@ def ch_median(times):
 
 
 # Enumerate all C(2k, k) balanced splits exactly up to this many runs per side
-# (C(16, 8) = 12870); sample beyond that.
+# (C(16, 8) = 12870); sample beyond that. The sample count matches eqmed.sql's
+# numbers(10000) so the stop rule and the final report estimate the same
+# quantile with the same resolution past the enumerable range.
 MAX_EXACT_SPLIT_RUNS = 8
-SAMPLED_SPLITS = 2000
+SAMPLED_SPLITS = 10000
 
 
 def stat_threshold(left_times, right_times):
@@ -924,6 +926,7 @@ for query_index in queries_to_run:
     start_seconds = time.perf_counter()
     server_seconds = 0
     profile_seconds = 0
+    threshold_seconds = 0.0
     run = 0
 
     # Arrays of run times for each connection.
@@ -1019,8 +1022,12 @@ for query_index in queries_to_run:
         if len(all_server_times) == 2 and (
             run <= args.cap or run in fast_check_points
         ):
-            # Connection 0 is the "left" (old) server.
+            # Connection 0 is the "left" (old) server. The computation takes
+            # real wall time (10,000 shuffles in pure python at the sampled
+            # checkpoints), which must not leak into the query's client time.
+            threshold_start_seconds = time.perf_counter()
             threshold = stat_threshold(all_server_times[0], all_server_times[1])
+            threshold_seconds += time.perf_counter() - threshold_start_seconds
             if threshold is not None and threshold <= args.tau:
                 break
 
@@ -1034,7 +1041,7 @@ for query_index in queries_to_run:
         if not is_fast_query or run >= args.cap_fast:
             break
 
-    client_seconds = time.perf_counter() - start_seconds
+    client_seconds = time.perf_counter() - start_seconds - threshold_seconds
     print(f"client-time\t{query_index}\t{client_seconds}\t{server_seconds}")
     median = [statistics.median(t) for t in all_server_times]
     print(f"median\t{query_index}\t{median[0]}")
