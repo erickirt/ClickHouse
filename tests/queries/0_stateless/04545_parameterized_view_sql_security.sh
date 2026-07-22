@@ -32,7 +32,7 @@ EOF
 
 # The invoker has SELECT on the views only, not on the base table.
 # DEFINER/NONE must return rows; INVOKER must be denied. This must hold for BOTH the
-# new analyzer and the old analyzer (the old-analyzer path was the bug: issue #84188).
+# default analyzer and the old analyzer (the old-analyzer path was the bug: issue #84188).
 for analyzer in 1 0; do
     echo "--- enable_analyzer=$analyzer ---"
     echo -n "definer: "
