@@ -1019,10 +1019,12 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
     entries_json = json.dumps(
         [explorer_entry(page) for page in pages], separators=(",", ":"))
     anchor_routes_json = json.dumps(anchor_routes, separators=(",", ":"))
-    template = '''const entries = __SESSION_SETTINGS_ENTRIES__;
-const anchorRoutes = __ANCHOR_ROUTES__;
-
-const __COMPONENT_NAME__ = () => {
+    template = '''const __COMPONENT_NAME__ = () => {
+  // Mintlify's production renderer evaluates the exported component without
+  // preserving module-scope bindings. Lazy state keeps the generated data in
+  // that evaluation scope while constructing it only once per mount.
+  const [entries] = useState(() => (__SESSION_SETTINGS_ENTRIES__));
+  const [anchorRoutes] = useState(() => (__ANCHOR_ROUTES__));
 
   useEffect(() => {
     const rawHash = window.location.hash.slice(1);

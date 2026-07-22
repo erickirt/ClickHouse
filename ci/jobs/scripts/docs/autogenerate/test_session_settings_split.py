@@ -202,15 +202,20 @@ def main():
         assert 'aria-expanded={isOpen}' in explorer
         assert '<details' not in explorer
         assert '<summary' not in explorer
-        assert explorer.startswith("const entries = ")
+        assert explorer.startswith("const SessionSettingsExplorer = () => {")
         component_start = explorer.index("const SessionSettingsExplorer = () => {")
-        assert explorer.index("const entries = ") < component_start
-        assert explorer.index("const anchorRoutes = ") < component_start
-        assert "  const entries = " not in explorer
-        assert "  const anchorRoutes = " not in explorer
+        assert component_start == 0
+        assert explorer.index(
+            "  const [entries] = useState(() => ("
+        ) > component_start
+        assert explorer.index(
+            "  const [anchorRoutes] = useState(() => ("
+        ) > component_start
+        assert "const entries = " not in explorer
+        assert "const anchorRoutes = " not in explorer
         assert "<ExplorerGroup" not in explorer
         assert "<Branch" not in explorer
-        assert "const anchorRoutes = " in explorer
+        assert "const [anchorRoutes] = useState(() => (" in explorer
         assert 'canonicalAnchor(decodedHash.split("-", 1)[0])' in explorer
         assert "window.location.replace(" in explorer
         assert '"openssl":"/reference/settings/session-settings/filesystem/cache"' in explorer
@@ -389,8 +394,13 @@ def main():
             assert f'const {family["component_name"]} = () => {{' in explorer
             component_start = explorer.index(
                 f'const {family["component_name"]} = () => {{')
-            assert explorer.index("const entries = ") < component_start
-            assert explorer.index("const anchorRoutes = ") < component_start
+            assert component_start == 0
+            assert explorer.index(
+                "  const [entries] = useState(() => ("
+            ) > component_start
+            assert explorer.index(
+                "  const [anchorRoutes] = useState(() => ("
+            ) > component_start
             assert f'const marker = "{family["base_route"]}";' in explorer
             assert (
                 f'"href":"{family["base_route"]}/filesystem/cache'
