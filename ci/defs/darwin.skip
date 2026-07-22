@@ -3,13 +3,6 @@
 # These are env/harness/portability issues that likely pass on the CI runner or are fixable,
 # not permanent platform gaps - each is a candidate to re-verify or fix, not to keep forever.
 
-# Local fast-test server lacks these cluster/keeper definitions (CLUSTER_DOESNT_EXIST / NO_ZOOKEEPER);
-# the CI runner config has them, so these likely pass on CI. Re-verify before unskipping.
-02835_parallel_replicas_over_distributed
-02981_insert_select_resize_to_max_insert_threads
-03394_pr_insert_select
-03404_lazy_materialization_distributed
-
 # Needs a `ch` symlink (clickhouse) on PATH, which the Darwin fast test env does not provide.
 03536_ch_as_client_and_local
 
