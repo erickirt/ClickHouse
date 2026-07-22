@@ -3602,31 +3602,52 @@ std::unique_ptr<LazilyReadFromMergeTree> ReadFromMergeTree::keepOnlyRequiredColu
 
 void ReadFromMergeTree::addStartingPartOffsetAndPartOffset(bool & added_part_starting_offset, bool & added_part_offset)
 {
+    /// A read column consumed by a filter is exposed again by adding it back to the filter outputs,
+    /// the same way `PREWHERE` keeps pass-through columns. When the column is the filter column itself
+    /// (e.g. `PREWHERE _part_offset`), it is already among the outputs, so the remove-filter flag is
+    /// cleared instead: after filtering it keeps its original values for the surviving rows.
+    /// Both are required for the data-read pipeline to actually emit it, not only for the plan header.
+    auto reexpose_in_filter = [](ActionsDAG & filter_actions, const String & filter_column_name, bool & remove_filter_column, const String & column_name) -> bool
+    {
+        auto & dag_outputs = filter_actions.getOutputs();
+        for (const auto * input : filter_actions.getInputs())
+        {
+            if (input->result_name != column_name)
+                continue;
+
+            if (std::ranges::find(dag_outputs, input) == dag_outputs.end())
+            {
+                dag_outputs.push_back(input);
+                return true;
+            }
+
+            if (filter_column_name == column_name && remove_filter_column)
+            {
+                remove_filter_column = false;
+                return true;
+            }
+        }
+        return false;
+    };
+
     auto expose_in_output = [&](const String & column_name) -> bool
     {
         if (output_header && output_header->has(column_name))
             return false;
 
-        /// A read column consumed by a filter is exposed again by adding it back to the filter outputs,
-        /// the same way `PREWHERE` keeps pass-through columns. This is required for the data-read pipeline
-        /// to actually emit it, not only for the plan header.
         bool reexposed = false;
-        for (ActionsDAG * filter_actions : {
-                 query_info.row_level_filter ? &query_info.row_level_filter->actions : nullptr,
-                 query_info.prewhere_info ? &query_info.prewhere_info->prewhere_actions : nullptr})
-        {
-            if (!filter_actions)
-                continue;
-            auto & dag_outputs = filter_actions->getOutputs();
-            for (const auto * input : filter_actions->getInputs())
-            {
-                if (input->result_name == column_name && std::ranges::find(dag_outputs, input) == dag_outputs.end())
-                {
-                    dag_outputs.push_back(input);
-                    reexposed = true;
-                }
-            }
-        }
+        if (query_info.row_level_filter)
+            reexposed |= reexpose_in_filter(
+                query_info.row_level_filter->actions,
+                query_info.row_level_filter->column_name,
+                query_info.row_level_filter->do_remove_column,
+                column_name);
+        if (query_info.prewhere_info)
+            reexposed |= reexpose_in_filter(
+                query_info.prewhere_info->prewhere_actions,
+                query_info.prewhere_info->prewhere_column_name,
+                query_info.prewhere_info->remove_prewhere_column,
+                column_name);
 
         if (!reexposed && std::ranges::find(all_column_names, column_name) == all_column_names.end())
             all_column_names.insert(all_column_names.begin(), column_name);
