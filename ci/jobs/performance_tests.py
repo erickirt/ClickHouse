@@ -509,22 +509,37 @@ def get_physical_core_cpu_list():
     Must stay in sync with cpu_pinning_prefix in ci/jobs/scripts/perf/compare.sh
     (the server restart path used by the confirm-changes stage).
     """
-    cpus = set()
+    # Sysfs exposes the HOST topology: on a cpuset-limited run the process may
+    # only be allowed a subset of it, and taskset with a disallowed CPU fails
+    # to start the servers. Pick, per physical core, the first sibling the
+    # process is actually allowed to run on.
+    getaffinity = getattr(os, "sched_getaffinity", None)
+    allowed = getaffinity(0) if getaffinity else None
+    cores = {}
     try:
         for path in Path("/sys/devices/system/cpu").glob(
             "cpu[0-9]*/topology/thread_siblings_list"
         ):
             # Formats seen in the wild: "0,8", "0-1", "0" (no SMT).
-            first = re.split(r"[,-]", path.read_text().strip())[0]
-            cpus.add(int(first))
-    except (OSError, ValueError, IndexError):
-        cpus = set()
+            siblings = [
+                int(s) for s in re.split(r"[,-]", path.read_text().strip()) if s
+            ]
+            usable = [c for c in siblings if allowed is None or c in allowed]
+            if usable:
+                cores[min(siblings)] = min(usable)
+    except (OSError, ValueError):
+        cores = {}
+    cpus = set(cores.values())
     if not cpus:
         print(
             "WARNING: could not parse cpu topology from sysfs, "
-            "falling back to the first half of the cpus"
+            "falling back to the first half of the allowed cpus"
         )
-        cpus = set(range(max((os.cpu_count() or 2) // 2, 1)))
+        if allowed:
+            allowed_sorted = sorted(allowed)
+            cpus = set(allowed_sorted[: max(len(allowed_sorted) // 2, 1)])
+        else:
+            cpus = set(range(max((os.cpu_count() or 2) // 2, 1)))
     return ",".join(str(cpu) for cpu in sorted(cpus))
 
 

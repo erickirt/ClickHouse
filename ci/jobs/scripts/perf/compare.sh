@@ -187,25 +187,59 @@ function match_reference_debug_info
 # initial server starts the same way.
 function pinned_cpu_list
 {
-    # One hyperthread per physical core, as a comma-separated list; empty on
-    # non-x86_64. Must stay in sync with get_physical_core_cpu_list in
+    # One ALLOWED hyperthread per physical core, as a comma-separated list;
+    # empty on non-x86_64. Sysfs exposes the host topology, so on a
+    # cpuset-limited run the sibling list is intersected with the process
+    # affinity mask - a disallowed CPU in taskset would fail to start the
+    # servers. Must stay in sync with get_physical_core_cpu_list in
     # ci/jobs/performance_tests.py.
     if [ "$(uname -m)" != "x86_64" ]
     then
         return 0
     fi
     local cpus half
-    # thread_siblings_list formats: "0,8", "0-1", "0" (no SMT). Keep the
-    # first sibling of each unique pair.
-    cpus=$(sed 's/[,-].*//' /sys/devices/system/cpu/cpu*/topology/thread_siblings_list 2>/dev/null \
-        | sort -un | paste -sd, - ||:)
+    cpus=$(python3 - 2>/dev/null <<'PYEOF' ||:
+import os
+import re
+from pathlib import Path
+
+allowed = os.sched_getaffinity(0)
+cores = {}
+for path in Path("/sys/devices/system/cpu").glob(
+    "cpu[0-9]*/topology/thread_siblings_list"
+):
+    # Formats seen in the wild: "0,8", "0-1", "0" (no SMT).
+    try:
+        siblings = [int(s) for s in re.split(r"[,-]", path.read_text().strip()) if s]
+    except ValueError:
+        continue
+    usable = [c for c in siblings if c in allowed]
+    if usable:
+        cores[min(siblings)] = min(usable)
+cpus = sorted(set(cores.values()))
+if cpus:
+    print(",".join(map(str, cpus)))
+PYEOF
+)
     if [ -z "$cpus" ]
     then
-        # Fallback: the first half of the cpus (siblings are enumerated after
-        # all physical cores on our runners).
-        half=$(( $(nproc) / 2 ))
-        if [ "$half" -lt 1 ]; then half=1; fi
-        cpus=$(seq -s, 0 $(( half - 1 )))
+        # Fallback: the first half of the ALLOWED cpus (siblings are
+        # enumerated after all physical cores on our runners), so that a
+        # cpuset-limited run cannot end up with disallowed CPU ids.
+        local allowed_expanded
+        allowed_expanded=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status 2>/dev/null \
+            | tr ',' '\n' \
+            | awk -F- '{ if (NF == 2) { for (i = $1; i <= $2; i++) print i } else if ($1 != "") print $1 }')
+        if [ -n "$allowed_expanded" ]
+        then
+            half=$(( $(echo "$allowed_expanded" | wc -l) / 2 ))
+            if [ "$half" -lt 1 ]; then half=1; fi
+            cpus=$(echo "$allowed_expanded" | head -n "$half" | paste -sd, -)
+        else
+            half=$(( $(nproc) / 2 ))
+            if [ "$half" -lt 1 ]; then half=1; fi
+            cpus=$(seq -s, 0 $(( half - 1 )))
+        fi
     fi
     echo "$cpus"
 }
