@@ -298,7 +298,11 @@ std::pair<size_t, size_t> parseDecimal(const String & type_name)
     skipWhitespaceIfAny(buf);
     assertChar(',', buf);
     skipWhitespaceIfAny(buf);
-    tryReadIntText(scale, buf);
+    /// readIntText (not tryReadIntText) so a missing scale ("decimal(20,)") is rejected instead of
+    /// silently read as 0. assertEOF then rejects trailing garbage (e.g. "decimal(20,0 0)", whose
+    /// inner whitespace survives canonicalization), mirroring the fixed[N] handling.
+    readIntText(scale, buf);
+    assertEOF(buf);
     return {precision, scale};
 }
 

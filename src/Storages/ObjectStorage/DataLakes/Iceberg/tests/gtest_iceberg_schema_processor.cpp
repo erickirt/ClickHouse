@@ -327,3 +327,44 @@ TEST(IcebergSchemaProcessor, InitialSchemaDecimalMalformedInnerTokenWhitespaceTh
     IcebergSchemaProcessor processor;
     EXPECT_THROW(processor.addIcebergTableSchema(schema), DB::Exception);
 }
+
+/// Trailing garbage after the scale token must be rejected. Canonicalizing spacing does not remove
+/// whitespace between two digits, so "decimal(20,0 0)" keeps the embedded space; the parser must not
+/// stop after reading the scale and silently ignore the rest. This mirrors the fixed[N] handling.
+TEST(IcebergSchemaProcessor, GetSimpleTypeDecimalTrailingGarbageInScaleThrows)
+{
+    EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("decimal(20,0 0)"), DB::Exception);
+}
+
+/// The same malformed scale spelling must be rejected as an initial schema type.
+TEST(IcebergSchemaProcessor, InitialSchemaDecimalTrailingGarbageInScaleThrows)
+{
+    auto schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(20,0 0)"}]})json");
+    IcebergSchemaProcessor processor;
+    EXPECT_THROW(processor.addIcebergTableSchema(schema), DB::Exception);
+}
+
+/// A new schema-id introduced during evolution is parsed at add time (getSimpleType runs on every
+/// field), so a malformed scale in the new schema is rejected when the new schema is added and never
+/// reaches the evolution DAG. The old, valid schema-id remains added.
+TEST(IcebergSchemaProcessor, SchemaEvolutionDecimalTrailingGarbageInScaleThrows)
+{
+    auto old_schema = parseSchema(R"json({"schema-id":0,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(10,2)"}]})json");
+    auto new_schema = parseSchema(R"json({"schema-id":1,"fields":[{"id":1,"name":"c0","required":false,"type":"decimal(20,2 2)"}]})json");
+    IcebergSchemaProcessor processor;
+    processor.addIcebergTableSchema(old_schema);
+    EXPECT_THROW(processor.addIcebergTableSchema(new_schema), DB::Exception);
+}
+
+/// A missing scale ("decimal(20,)") or a sign-only scale ("decimal(20,+)") is malformed metadata and
+/// must be rejected, not silently read as scale 0. The scale is parsed with readIntText, which throws
+/// at end of buffer or on a non-digit, matching how the precision is parsed.
+TEST(IcebergSchemaProcessor, GetSimpleTypeDecimalEmptyScaleThrows)
+{
+    EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("decimal(20,)"), DB::Exception);
+}
+
+TEST(IcebergSchemaProcessor, GetSimpleTypeDecimalSignOnlyScaleThrows)
+{
+    EXPECT_THROW(IcebergSchemaProcessor::getSimpleType("decimal(20,+)"), DB::Exception);
+}
