@@ -1245,8 +1245,15 @@ create view test_speedup as
         exp2(avg(log2(left / right))) times_speedup,
         count(*) queries,
         unstable + changed bad,
-        sum(changed_show) changed,
-        sum(unstable_show) unstable
+        -- Demoted queries (confirmation rerun did not reproduce the change)
+        -- stay visible in the per-query tables via *_show, but must not count
+        -- in the per-test aggregates: these feed test-perf-changes.tsv and
+        -- the perf_test_perf_changes_v1 upload, which carry the pipeline's
+        -- confirmed results.
+        sum(changed_show and ((queries.test, queries.query_index) not in
+            (select test, query_index from unconfirmed_queries))) changed,
+        sum(unstable_show and ((queries.test, queries.query_index) not in
+            (select test, query_index from unconfirmed_queries))) unstable
     from queries
     group by test
     order by times_speedup desc
