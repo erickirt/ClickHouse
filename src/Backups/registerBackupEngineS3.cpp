@@ -9,6 +9,7 @@
 #include <Backups/BackupImpl.h>
 #include <Backups/BackupInfo.h>
 #include <Common/NamedCollections/NamedCollections.h>
+#include <IO/Archives/ArchiveUtils.h>
 #include <IO/Archives/hasRegisteredArchiveFileExtension.h>
 #include <Interpreters/Context.h>
 #include <Storages/ObjectStorage/S3/Configuration.h>
@@ -267,6 +268,11 @@ void registerBackupEngineS3(BackupFactory & factory)
         BackupImpl::ArchiveParams archive_params;
         if (!location.archive_name.empty())
         {
+            if (hasSupportedZipExtension(location.archive_name))
+                throw Exception(ErrorCodes::BAD_ARGUMENTS,
+                    "Zip archive format is not supported for S3 backups because zip requires seeking which S3 does not support efficiently. "
+                    "Use tar.gz or other tar-based formats instead");
+
             if (params.is_internal_backup)
                 throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "Using archives with backups on clusters is disabled");
 
