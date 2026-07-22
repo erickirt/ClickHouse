@@ -10,6 +10,17 @@ doc_type: 'guide'
 import BetaBadge from "/snippets/components/BetaBadge/BetaBadge.jsx";
 import { Image } from "/snippets/components/Image.jsx";
 
+<Visibility for="agents">
+
+</Visibility>
+
+<Visibility for="humans">
+<View title="CLI">
+
+</View>
+
+<View title="Cloud UI">
+
 <BetaBadge link="https://clickhouse.com/cloud/postgres" galaxyTrack={true} galaxyEvent="docs.managed-postgres.quick-start-beta" />
 
 ClickHouse Managed Postgres is enterprise-grade Postgres backed by NVMe storage, delivering up to 10x faster performance for disk-bound workloads compared to network-attached storage like EBS. This quickstart is divided into two parts:
@@ -394,3 +405,6 @@ To delete the resources created in this quickstart:
 
 1. First, delete the ClickPipe integration from the ClickHouse service
 2. Then, delete the Managed Postgres instance from the Cloud Console
+
+</View>
+</Visibility>
