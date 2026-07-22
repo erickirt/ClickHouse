@@ -1410,12 +1410,15 @@ create view test_runs as
         -- each query is judged against its own run count, so a mixed test
         -- cannot hide a genuinely slow query behind a high average count.
         -- client-time excludes prewarm (perf.py measures from after it), so
-        -- the divisor is the measured runs only: runs per server x 2 servers.
-        max(t.client / (t.runs * 2)) max_single_run_time
+        -- the divisor is the measured runs only: runs per server times the
+        -- number of servers that actually ran the query (backward-
+        -- incompatible 'partial' queries run on the new server only).
+        max(t.client / (t.runs * t.versions)) max_single_run_time
     from (
         select
             -- The query id is the same for both servers, so no need to divide here.
             uniqExact(query_runs.query_id) runs,
+            uniqExact(query_runs.version) versions,
             any(client_times.client) client,
             query_runs.test test, query_runs.query_index query_index
         from query_runs
