@@ -219,7 +219,8 @@
                 "clickstack/migration/elastic/migrating-agents",
                 "clickstack/migration/elastic/migrating-sdks"
               ]
-            }
+            },
+            "clickstack/migration/datadog/index"
           ]
         }
       ]
