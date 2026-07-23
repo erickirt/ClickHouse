@@ -1,5 +1,6 @@
 import re
 import shlex
+import time
 
 from praktika.utils import Shell
 
@@ -140,6 +141,90 @@ class Git:
             strict=True,
             retries=retries,
         )
+
+    @staticmethod
+    def enqueue_pull_request(
+        pr: int,
+        repo: str,
+        dry_run: bool = False,
+        verify: bool = True,
+        verbose: bool = True,
+    ) -> bool:
+        """Add PR #`pr` in `repo` to the merge queue via `enqueuePullRequest`.
+
+        `gh pr merge --auto` calls the `enablePullRequestAutoMerge` mutation,
+        which the repo disables in favor of a merge queue on `master`; this calls
+        `enqueuePullRequest` directly - the mutation the "Merge when ready" button
+        on github.com uses.
+
+        GitHub rejects `enqueuePullRequest` with "Pull request is already in the
+        queue" when the PR is already queued (the "Merge when ready" button was
+        clicked on github.com, or a previous run already enqueued it). That is the
+        desired end state, so it is treated as success rather than a failure.
+
+        Returns whether the PR is in the queue. A normal enqueue failure returns
+        `False` (with the real `gh` output surfaced) rather than raising, so the
+        caller decides how to react.
+        """
+        if dry_run:
+            print(f"Dry-run, would enqueue PR #{pr} in {repo} to the merge queue")
+            return True
+
+        pr_node_id = Shell.get_output(
+            f"gh pr view {pr} --json id --jq '.id' --repo {shlex.quote(repo)}"
+        ).strip()
+        if not pr_node_id:
+            print(f"ERROR: Failed to fetch node ID for PR #{pr}")
+            return False
+
+        enqueue_cmd = (
+            "gh api graphql "
+            "-f 'query=mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id})"
+            "{mergeQueueEntry{position state}}}' "
+            f"-f id={pr_node_id}"
+        )
+        returncode, stdout, stderr = Shell.get_res_stdout_stderr(
+            enqueue_cmd, verbose=verbose
+        )
+        already_queued = "already in the queue" in (stdout + stderr).lower()
+        if returncode != 0 and not already_queued:
+            # Surface the real gh output so auth/permission/validation/rate-limit
+            # failures stay diagnosable.
+            if stdout:
+                print(stdout)
+            if stderr:
+                print(stderr)
+            print(
+                f"ERROR: Failed to add PR #{pr} to the merge queue. "
+                f"This often happens when mergeStateStatus is UNKNOWN "
+                f"(GitHub is still computing mergeability after a recent push) "
+                f"or the PR is not yet eligible (failing required checks, "
+                f"missing approvals, out of date with base). "
+                f"Retry manually:\n  {enqueue_cmd}"
+            )
+            return False
+        if already_queued:
+            print(f"PR #{pr} is already in the merge queue")
+
+        if not verify:
+            return True
+
+        # Give GitHub a moment to update the PR's merge state, then verify it
+        # actually landed in the queue.
+        time.sleep(5)
+        merge_status = Shell.get_output(
+            f"gh pr view {pr} --json mergeStateStatus --jq '.mergeStateStatus'"
+            f" --repo {shlex.quote(repo)}"
+        )
+        if merge_status == "QUEUED":
+            print(f"OK: PR #{pr} added to the merge queue")
+        else:
+            print(
+                f"WARNING: PR #{pr} enqueue mutation succeeded but "
+                f"mergeStateStatus is {merge_status} (expected QUEUED). "
+                f"Check the PR on github.com."
+            )
+        return True
 
     def __init__(self):
         self.latest_tag = Shell.get_output("git describe --tags --abbrev=0") or ""

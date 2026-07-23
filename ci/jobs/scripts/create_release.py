@@ -735,25 +735,22 @@ class ReleaseInfo:
 
     def merge_prs(self, dry_run: bool) -> None:
         res = True
+        # Both PRs target `master`, which is behind a merge queue: `gh pr merge
+        # --auto` (the `enablePullRequestAutoMerge` mutation) is disabled there,
+        # so enqueue them via `enqueuePullRequest` instead.
         if self.release_type == "patch":
             assert self.changelog_pr
-            print("Merging ChangeLog PR")
+            print("Enqueuing ChangeLog PR to the merge queue")
             changelog_pr_num = 23456 if dry_run else int(self.changelog_pr.rsplit("/", 1)[-1])
-            res = Shell.check(
-                f"gh pr merge {changelog_pr_num} --repo {GITHUB_REPOSITORY} --merge --auto",
-                verbose=True,
-                dry_run=dry_run,
-                strict=True,
+            res = Git.enqueue_pull_request(
+                changelog_pr_num, GITHUB_REPOSITORY, dry_run=dry_run
             )
         if self.release_type == "new":
             assert self.version_bump_pr
-            print("Merging Version Bump PR")
+            print("Enqueuing Version Bump PR to the merge queue")
             version_bump_pr_num = 23456 if dry_run else int(self.version_bump_pr.rsplit("/", 1)[-1])
-            res = res and Shell.check(
-                f"gh pr merge {version_bump_pr_num} --repo {GITHUB_REPOSITORY} --merge --auto",
-                verbose=True,
-                dry_run=dry_run,
-                strict=True,
+            res = res and Git.enqueue_pull_request(
+                version_bump_pr_num, GITHUB_REPOSITORY, dry_run=dry_run
             )
         else:
             if not dry_run:
