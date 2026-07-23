@@ -68,6 +68,7 @@ protected:
     friend std::vector<String> testPrewarmDataHashes(std::vector<String> data, std::vector<size_t> offsets);
     friend std::vector<String> testPrewarmFilterToPartition(std::vector<String> data, std::vector<size_t> token_offsets, std::vector<UInt64> row_to_partition, size_t num_partitions, bool prewarm);
     friend bool testPrewarmPopulatesCache(std::vector<String> data, std::vector<size_t> token_offsets, std::vector<UInt64> row_to_partition, size_t num_partitions);
+    friend bool testPrewarmDisabledIsNoop(std::vector<String> data, std::vector<size_t> token_offsets);
 
 public:
     using Ptr = std::shared_ptr<DeduplicationInfo>;

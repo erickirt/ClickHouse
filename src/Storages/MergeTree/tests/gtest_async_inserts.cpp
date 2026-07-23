@@ -315,4 +315,41 @@ TEST(AsyncInsertsTest, testPrewarmPopulatesCache)
     EXPECT_TRUE(testPrewarmPopulatesCache({"A","X","A","X","B","Y"}, {2,4,6}, {0,0,0,0,1,1}, 2));
 }
 
+
+/// A disabled info (async insert with async_insert_deduplicate=0, the default) reaches the sink prewarm
+/// call because the guard tests the sink-level `deduplicate` (replicated_deduplication_window!=0), not
+/// `disabled`; but deduplicateSelf/getDeduplicationHashes early-return, so warming hashes is wasted work.
+/// Returns true iff prewarmDataHashes left every empty-token cache untouched on a disabled info.
+bool testPrewarmDisabledIsNoop(std::vector<String> data, std::vector<size_t> token_offsets)
+{
+    MutableColumnPtr column = DataTypeString().createColumn();
+    for (const auto & datum : data)
+        column->insert(datum);
+    Block block({ColumnWithTypeAndName(std::move(column), std::make_shared<DataTypeString>(), "a")});
+
+    auto info = DeduplicationInfo::create(true);
+    info->setRootViewID({});
+    /// Populate the block with dedup enabled, then flip to disabled to model the state the sink sees:
+    /// block present, tokens set, but deduplication off (updateOriginalBlock skips a disabled info).
+    info->disabled = false;
+    info->updateOriginalBlock(Chunk(block.getColumns(), block.rows()), std::make_shared<const Block>(block.cloneEmpty()));
+    info->setUserToken("", token_offsets[0]);
+    for (size_t i = 1; i < token_offsets.size(); ++i)
+        info->setUserToken("", token_offsets[i] - token_offsets[i - 1]);
+    info->disabled = true;
+
+    info->prewarmDataHashes();
+
+    for (const auto & t : info->tokens)
+        if (t.by_user.empty() && t.data_hash_batch.has_value())
+            return false;
+    return true;
+}
+
+TEST(AsyncInsertsTest, testPrewarmDisabledIsNoop)
+{
+    EXPECT_TRUE(testPrewarmDisabledIsNoop({"A","A","B","B","C","A"}, {1,2,3,4,5,6}));
+    EXPECT_TRUE(testPrewarmDisabledIsNoop({"A","X","A","X","B","Y"}, {2,4,6}));
+}
+
 }
