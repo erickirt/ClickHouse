@@ -147,7 +147,6 @@ class Git:
         pr: int,
         repo: str,
         dry_run: bool = False,
-        verify: bool = True,
         verbose: bool = True,
     ) -> bool:
         """Add PR #`pr` in `repo` to the merge queue via `enqueuePullRequest`.
@@ -205,9 +204,6 @@ class Git:
             return False
         if already_queued:
             print(f"PR #{pr} is already in the merge queue")
-
-        if not verify:
-            return True
 
         # Give GitHub a moment to update the PR's merge state, then verify it
         # actually landed in the queue.

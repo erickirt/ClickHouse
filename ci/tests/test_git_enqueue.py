@@ -49,6 +49,23 @@ def test_enqueue_uses_graphql_mutation(monkeypatch):
     assert "id=PR_node" in cmds[0]
 
 
+def test_enqueue_quotes_repo(monkeypatch):
+    """The `repo` argument is shell-quoted in the `gh pr view` commands."""
+    view_cmds = []
+
+    def fake_get_output(command, *_a, **_k):
+        view_cmds.append(command)
+        return "PR_node" if "--json id" in command else "QUEUED"
+
+    monkeypatch.setattr(GIT_MOD.Shell, "get_output", staticmethod(fake_get_output))
+    monkeypatch.setattr(
+        GIT_MOD.Shell, "get_res_stdout_stderr", staticmethod(lambda *_a, **_k: (0, "", ""))
+    )
+    monkeypatch.setattr(GIT_MOD.time, "sleep", lambda *_a, **_k: None)
+    assert Git.enqueue_pull_request(1, "owner/repo; rm -rf /") is True
+    assert view_cmds and all("'owner/repo; rm -rf /'" in c for c in view_cmds)
+
+
 def test_enqueue_dry_run_touches_nothing(monkeypatch):
     def unexpected(*_a, **_k):
         raise AssertionError("dry run must not call Shell")
