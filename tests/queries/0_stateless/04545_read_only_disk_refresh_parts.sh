@@ -55,9 +55,9 @@ done
 
 ${CLICKHOUSE_CLIENT} --query "SELECT * FROM reader"
 
-# Negative: a read-only disk with a LOCAL metadata layer must stay rejected for `table_disk`. Its metadata is not
-# self-contained on the object storage (it can never discover parts written by another server), and being read-only
-# at the disk-wrapper level must not sneak it through.
+# Negative: a disk with a LOCAL metadata layer must stay rejected for `table_disk` (its metadata is not
+# self-contained on the object storage). Assert the metadata-specific message so the check actually covers the
+# metadata-kind predicate: the generic "is not supported for" also matches the older cast-based gate.
 ${CLICKHOUSE_CLIENT} --query "
 CREATE TABLE reader_local (s String) ORDER BY ()
 SETTINGS table_disk = true,
@@ -68,7 +68,7 @@ SETTINGS table_disk = true,
       object_storage_type = local,
       metadata_type = local,
       path = 'disks/04545_local/${CLICKHOUSE_DATABASE}/')
-" 2>&1 | grep -qF "is not supported for" && echo "local metadata read-only disk rejected for table_disk"
+" 2>&1 | grep -qF "requires metadata stored on the object storage" && echo "local metadata read-only disk rejected for table_disk"
 
 ${CLICKHOUSE_CLIENT} --query "DROP TABLE IF EXISTS reader_local SYNC"
 ${CLICKHOUSE_CLIENT} --query "DROP TABLE reader SYNC"
