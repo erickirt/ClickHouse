@@ -750,8 +750,17 @@ class ReleaseInfo:
         first, then enqueue with a few retries to ride out the transient
         `mergeStateStatus == UNKNOWN` GitHub reports right after the status write.
         """
-        print(f"Enqueuing {label} PR to the merge queue")
         pr_num = 23456 if dry_run else int(pr_url.rsplit("/", 1)[-1])
+        if not dry_run:
+            # Idempotent for recovery / reruns: only an open PR needs enqueuing.
+            state = Shell.get_output_or_raise(
+                f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
+                f" --json state --jq .state"
+            ).strip()
+            if state != "OPEN":
+                print(f"{label} PR #{pr_num} is {state}, nothing to merge")
+                return True
+        print(f"Enqueuing {label} PR to the merge queue")
         if not dry_run:
             head_sha = Shell.get_output_or_raise(
                 f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
@@ -771,14 +780,20 @@ class ReleaseInfo:
 
     def merge_prs(self, dry_run: bool) -> None:
         res = True
+        # A recovery / rerun may find no PR (it was already merged and the branch
+        # lookup returned nothing) - that is a no-op, not a failure.
         if self.release_type == "patch":
-            assert self.changelog_pr
-            res = self._enqueue_release_pr(self.changelog_pr, "ChangeLog", dry_run)
+            if self.changelog_pr:
+                res = self._enqueue_release_pr(self.changelog_pr, "ChangeLog", dry_run)
+            else:
+                print("No ChangeLog PR to merge")
         if self.release_type == "new":
-            assert self.version_bump_pr
-            res = res and self._enqueue_release_pr(
-                self.version_bump_pr, "Version Bump", dry_run
-            )
+            if self.version_bump_pr:
+                res = res and self._enqueue_release_pr(
+                    self.version_bump_pr, "Version Bump", dry_run
+                )
+            else:
+                print("No Version Bump PR to merge")
         else:
             if not dry_run:
                 assert not self.version_bump_pr

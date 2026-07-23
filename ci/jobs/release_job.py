@@ -777,18 +777,19 @@ def main():
     # False — so if anything failed, the Slack post below reports the failing
     # step instead of merging.
     #
-    # Only a release that created the changelog/version-bump PRs has anything to
-    # merge; a recovery / out-of-order run did not create them, so skip
-    # --merge-prs there (it would fail looking up a non-existent changelog PR).
-    if create_new_release:
-        step(
-            name="Update Release Info and Merge Created PRs",
-            command=[
-                f"python3 ./ci/jobs/scripts/create_release.py --merge-prs"
-                f" {dry_run_flag}".strip()
-            ],
-            workdir=REPO_PATH,
-        )
+    # Run this whenever the release PR still needs merging, not only on a fresh
+    # `create_new_release` run: a recovery / rerun after a failed merge leaves the
+    # changelog (or version-bump) PR open, and merge_prs must land it. merge_prs
+    # looks the PR up by branch and is a no-op when it is absent or already
+    # merged, so running it unconditionally is safe.
+    step(
+        name="Update Release Info and Merge Created PRs",
+        command=[
+            f"python3 ./ci/jobs/scripts/create_release.py --merge-prs"
+            f" {dry_run_flag}".strip()
+        ],
+        workdir=REPO_PATH,
+    )
 
     # Deferred patch version bump — the LAST release mutation. Bumping the branch
     # version file here (rather than right after the tag push) keeps the branch
