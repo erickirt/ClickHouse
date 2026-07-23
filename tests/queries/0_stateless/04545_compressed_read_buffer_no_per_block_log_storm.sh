@@ -34,7 +34,7 @@ $CLICKHOUSE_CLIENT --send_logs_level=test --query_id="$query_id" -q "
     SELECT json.a FROM t_read_buffer_log FORMAT Null;
 " 2>/dev/null
 
-$CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS"
+$CLICKHOUSE_CLIENT -q "SYSTEM FLUSH LOGS query_log"
 
 # With the fix, LogTest is a handful (buffer-open + seek lines), while thousands of blocks
 # are decompressed. Without the fix, LogTest ~= CompressedReadBufferBlocks (>> 1000).
