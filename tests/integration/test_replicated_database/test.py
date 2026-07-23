@@ -2143,7 +2143,7 @@ def test_alias_with_dropped_target(started_cluster):
         node.query(f"DROP DATABASE IF EXISTS {db_name} SYNC")
 
 
-def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, comment_settings=None):
+def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, extra_url_settings=""):
     """Reproduce the issue #110036 race: a comment-only ALTER (executed locally on
     every replica of a Replicated database) pins its metadata snapshot at
     access-check time (query-scoped metadata cache), while a concurrent table-level
@@ -2153,7 +2153,9 @@ def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, comment_settings
     column while the persisted replica metadata_version stays equal to the ZooKeeper
     /metadata version.
 
-    Returns the name of the lost column, or None if the race never fired.
+    Returns the name of the lost column, or None if every synchronized cycle
+    preserved it. Raises if no cycle ever synchronized (SYNC_FOUND stayed 0), so a
+    run where the race window never opened cannot silently false-pass.
     """
     main_node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
     competing_node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
@@ -2174,6 +2176,7 @@ def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, comment_settings
     )
     competing_node.query(f"SYSTEM SYNC DATABASE REPLICA {db}")
 
+    synced_cycles = 0
     for i in range(cycles):
         # Hold back the table-level queue on competing so the ALTER_METADATA of the
         # next ADD COLUMN executes at a controlled moment.
@@ -2190,15 +2193,42 @@ def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, comment_settings
             ):
                 break
             time.sleep(0.1)
-        # Release the queue and immediately fire a comment-only ALTER in the same
-        # client session, so its local execution on competing overlaps the
-        # ALTER_METADATA application.
-        competing_node.query(
-            f"SYSTEM START REPLICATION QUEUES {db}.rmt; "
-            f"ALTER TABLE {db}.rmt COMMENT COLUMN v 'c{i}';",
-            settings=comment_settings,
-        )
+
+        # Release the queue and, the instant the ALTER_METADATA starts applying
+        # locally ("Applying changes locally", logged by setTableStructure right
+        # after executeMetadataAlter takes the alter lock), fire the comment-only
+        # ALTER over HTTP so its access-check metadata pin lands inside the window.
+        # SYNC_FOUND=1 is the positive overlap signal; a cycle without it never
+        # opened the race window and must not count as a pass.
+        script = f"""
+LOG=/var/log/clickhouse-server/clickhouse-server.log
+PAT='{db}\\.rmt.*Applying changes locally'
+BASE=$(grep -cE "$PAT" $LOG || true)
+curl -sS 'http://127.0.0.1:8123/' --data-binary 'SYSTEM START REPLICATION QUEUES {db}.rmt' > /dev/null
+FOUND=0
+for k in $(seq 1 3000); do
+  CUR=$(grep -cE "$PAT" $LOG || true)
+  if [ "$CUR" -gt "$BASE" ]; then FOUND=1; break; fi
+done
+echo "SYNC_FOUND=$FOUND"
+curl -sS --max-time 600 'http://127.0.0.1:8123/?{extra_url_settings}' \\
+  --data-binary "ALTER TABLE {db}.rmt COMMENT COLUMN v 'c{i}'"
+echo "ALTER_DONE"
+"""
+        race_out = competing_node.exec_in_container(["bash", "-c", script])
+        logging.info("comment-alter race cycle %s output: %s", i, race_out)
+
+        competing_node.query(f"SYSTEM START REPLICATION QUEUES {db}.rmt")
         competing_node.query(f"SYSTEM SYNC REPLICA {db}.rmt")
+
+        # If the ADD COLUMN never started applying locally while the comment ALTER
+        # ran, this cycle did not set up the race - retry rather than let a
+        # non-overlapping run silently false-pass.
+        if "SYNC_FOUND=1" not in race_out:
+            logging.info("comment-alter race cycle %s did not synchronize; retrying", i)
+            continue
+        synced_cycles += 1
+
         present = competing_node.query(
             f"SELECT count() FROM system.columns "
             f"WHERE database='{db}' AND table='rmt' AND name='m{i}'"
@@ -2208,6 +2238,12 @@ def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, comment_settings
             # any further metadata ALTER would repair the structure and hide the bug.
             return f"m{i}"
 
+    if synced_cycles == 0:
+        raise Exception(
+            f"comment-alter race never synchronized in {cycles} cycles "
+            f"(SYNC_FOUND stayed 0): the test could not set up the race window, "
+            f"so a pass here would be meaningless"
+        )
     return None
 
 
