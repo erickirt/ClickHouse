@@ -1112,16 +1112,18 @@ def get_all_server_pids():
 
 
 def is_asan_build(args):
-    """Check if the server is an ASan build — attaching a debugger disables LeakSanitizer detections."""
-    try:
-        result = clickhouse_execute(
-            args,
-            "SELECT count() FROM system.build_options WHERE name = 'CXX_FLAGS' AND position('sanitize=address' IN value)",
-        )
-        return result != b"0"
-    except Exception:
-        # If we can't query the server, check environment variable as fallback.
-        return bool(os.environ.get("ASAN_OPTIONS"))
+    """Check if the server is an ASan build — attaching a debugger disables LeakSanitizer detections.
+
+    Use the build flags collected at startup rather than a live query. This function gates
+    `print_c_stacktraces`, which runs precisely when the server is hung or dead: a live query
+    would then throw and fall back to `ASAN_OPTIONS`, which is exported on some runners (e.g.
+    macOS) even for non-ASan builds, wrongly reporting ASan and suppressing the lldb backtraces.
+    """
+    build_flags = getattr(args, "build_flags", None)
+    if build_flags is not None:
+        return BuildFlags.ADDRESS in build_flags
+    # Build flags not collected yet (server never started): fall back to the environment.
+    return bool(os.environ.get("ASAN_OPTIONS"))
 
 
 def print_c_stacktraces(args) -> None:
