@@ -1,7 +1,63 @@
 [
   {
-    "destination": "/concepts/features/materialized-views",
-    "source": "/engines/table-engines/special/materializedview"
+    "source": "/guides/oss/deployment-and-scaling",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
+  },
+  {
+    "source": "/guides/oss/deployment-and-scaling/index",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
+  },
+  {
+    "source": "/integrations/clickpipes/kinesis/index",
+    "destination": "/integrations/clickpipes/kinesis/overview"
+  },
+  {
+    "source": "/integrations/clickpipes/pubsub/index",
+    "destination": "/integrations/clickpipes/pubsub/overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing/marketplace",
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing/marketplace/index",
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
+  },
+  {
+    "source": "/get-started/migrate/postgres",
+    "destination": "/get-started/migrate/postgres/overview"
+  },
+  {
+    "source": "/get-started/migrate/postgres/index",
+    "destination": "/get-started/migrate/postgres/overview"
+  },
+  {
+    "source": "/products/cloud/features/admin-features/api",
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
+  },
+  {
+    "source": "/products/cloud/features/admin-features/api/index",
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing",
+    "destination": "/products/cloud/reference/billing/billing-overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing/index",
+    "destination": "/products/cloud/reference/billing/billing-overview"
+  },
+  {
+    "source": "/reference/system-tables",
+    "destination": "/reference/system-tables/overview"
+  },
+  {
+    "source": "/reference/system-tables/index",
+    "destination": "/reference/system-tables/overview"
+  },
+  {
+    "source": "/engines/table-engines/special/materializedview",
+    "destination": "/concepts/features/materialized-views"
   },
   {
     "destination": "/get-started/sample-datasets",
@@ -1504,8 +1560,8 @@
     "source": "/cloud/infrastructure/clickhouse-private"
   },
   {
-    "destination": "/products/cloud/features/admin-features/api",
-    "source": "/cloud/manage"
+    "source": "/cloud/manage",
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
   },
   {
     "destination": "/products/cloud/features/admin-features/api/api-overview",
@@ -1560,8 +1616,8 @@
     "source": "/cloud/manage/backups/overview"
   },
   {
-    "destination": "/products/cloud/reference/billing",
-    "source": "/cloud/manage/billing"
+    "source": "/cloud/manage/billing",
+    "destination": "/products/cloud/reference/billing/billing-overview"
   },
   {
     "destination": "/products/cloud/reference/billing/billing-overview",
@@ -1580,8 +1636,8 @@
     "source": "/cloud/manage/close_account"
   },
   {
-    "destination": "/products/cloud/features/admin-features/api",
-    "source": "/cloud/manage/cloud-api"
+    "source": "/cloud/manage/cloud-api",
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
   },
   {
     "destination": "/products/cloud/features/cloud-tiers",
@@ -1608,8 +1664,8 @@
     "source": "/cloud/manage/jan-2025-faq/backup"
   },
   {
-    "destination": "/products/cloud/reference/billing",
-    "source": "/cloud/manage/jan-2025-faq/billing"
+    "source": "/cloud/manage/jan-2025-faq/billing",
+    "destination": "/products/cloud/reference/billing/billing-overview"
   },
   {
     "destination": "/products/cloud/features/cloud-tiers",
@@ -1632,8 +1688,8 @@
     "source": "/cloud/manage/jan-2025-faq/summary"
   },
   {
-    "destination": "/products/cloud/reference/billing/marketplace",
-    "source": "/cloud/manage/marketplace/"
+    "source": "/cloud/manage/marketplace/",
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
   },
   {
     "destination": "/products/cloud/features/monitoring/advanced-dashboard",
@@ -1808,8 +1864,8 @@
     "source": "/cloud/managed-postgres/upgrades"
   },
   {
-    "destination": "/products/cloud/reference/billing/marketplace",
-    "source": "/cloud/marketplace"
+    "source": "/cloud/marketplace",
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
   },
   {
     "destination": "/products/cloud/reference/billing/marketplace/overview",
@@ -2376,8 +2432,8 @@
     "source": "/deletes/overview"
   },
   {
-    "destination": "/guides/oss/deployment-and-scaling",
-    "source": "/deployment-guides/index"
+    "source": "/deployment-guides/index",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "destination": "/products/cloud/features/infrastructure/parallel-replicas",
@@ -3712,8 +3768,8 @@
     "source": "/guides/joining-tables"
   },
   {
-    "destination": "/guides/oss/deployment-and-scaling",
-    "source": "/guides/manage-and-deploy-index"
+    "source": "/guides/manage-and-deploy-index",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "destination": "/concepts/features/operations/update/replacing-merge-tree",
@@ -3964,8 +4020,8 @@
     "source": "/integrations/clickpipes/kinesis"
   },
   {
-    "destination": "/integrations/clickpipes/kinesis",
-    "source": "/integrations/clickpipes/kinesis-index"
+    "source": "/integrations/clickpipes/kinesis-index",
+    "destination": "/integrations/clickpipes/kinesis/overview"
   },
   {
     "destination": "/integrations/clickpipes/mongodb/add-table",
@@ -4092,8 +4148,8 @@
     "source": "/integrations/clickpipes/pubsub"
   },
   {
-    "destination": "/integrations/clickpipes/pubsub",
-    "source": "/integrations/clickpipes/pubsub-index"
+    "source": "/integrations/clickpipes/pubsub-index",
+    "destination": "/integrations/clickpipes/pubsub/overview"
   },
   {
     "destination": "/integrations/clickpipes/kinesis/auth",
@@ -26860,8 +26916,8 @@
     "source": "/migrations/postgres/en/migrations/postgresql"
   },
   {
-    "destination": "/get-started/migrate/postgres",
-    "source": "/migrations/postgresql"
+    "source": "/migrations/postgresql",
+    "destination": "/get-started/migrate/postgres/overview"
   },
   {
     "destination": "/get-started/migrate/postgres/appendix",
@@ -26964,8 +27020,8 @@
     "source": "/observability/managing-data"
   },
   {
-    "destination": "/guides/oss/deployment-and-scaling",
-    "source": "/operations"
+    "source": "/operations",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "destination": "/concepts/features/security/access-rights",
@@ -27280,8 +27336,8 @@
     "source": "/operations/storing-data"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/operations/system-tables/"
+    "source": "/operations/system-tables/",
+    "destination": "/reference/system-tables/overview"
   },
   {
     "destination": "/reference/system-tables/aggregate_function_combinators",
@@ -27968,8 +28024,8 @@
     "source": "/operations/system-tables/zookeeper_watches"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/operations/system_tables"
+    "source": "/operations/system_tables",
+    "destination": "/reference/system-tables/overview"
   },
   {
     "destination": "/reference/engines/table-engines",
@@ -41108,80 +41164,80 @@
     "source": "/starter-guides"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables"
+    "source": "/system_tables",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.asynchronous_metrics"
+    "source": "/system_tables/system.asynchronous_metrics",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.clusters"
+    "source": "/system_tables/system.clusters",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.columns"
+    "source": "/system_tables/system.columns",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.databases"
+    "source": "/system_tables/system.databases",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.dictionaries"
+    "source": "/system_tables/system.dictionaries",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.events"
+    "source": "/system_tables/system.events",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.functions"
+    "source": "/system_tables/system.functions",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.merges"
+    "source": "/system_tables/system.merges",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.metrics"
+    "source": "/system_tables/system.metrics",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.numbers"
+    "source": "/system_tables/system.numbers",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.numbers_mt"
+    "source": "/system_tables/system.numbers_mt",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.one"
+    "source": "/system_tables/system.one",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.parts"
+    "source": "/system_tables/system.parts",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.processes"
+    "source": "/system_tables/system.processes",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.replicas"
+    "source": "/system_tables/system.replicas",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.settings"
+    "source": "/system_tables/system.settings",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.tables"
+    "source": "/system_tables/system.tables",
+    "destination": "/reference/system-tables/overview"
   },
   {
-    "destination": "/reference/system-tables",
-    "source": "/system_tables/system.zookeeper"
+    "source": "/system_tables/system.zookeeper",
+    "destination": "/reference/system-tables/overview"
   },
   {
     "destination": "/guides/oss/deployment-and-scaling/examples/1-shard-2-replicas",
