@@ -971,3 +971,81 @@ def test_prepare_fails_closed_on_stale_branch_version_file(tmp_path):
     )
     assert result.returncode != 0, "stale branch version file should have failed"
     assert "is stale" in (result.stdout + result.stderr)
+
+
+# --- ReleaseInfo._enqueue_release_pr (merge_prs helper) ----------------------
+
+
+def _make_release_info(cr, **overrides):
+    kwargs = dict(
+        version="26.5.6.64",
+        release_type="patch",
+        release_tag="v26.5.6.64-stable",
+        release_branch="26.5",
+        commit_sha="deadbeef",
+        latest=False,
+        codename="stable",
+    )
+    kwargs.update(overrides)
+    return cr.ReleaseInfo(**kwargs)
+
+
+def test_enqueue_release_pr_transient_gh_failure_is_best_effort(monkeypatch):
+    """A transient `gh pr view` failure must not raise (the release is already
+    published) — return False so merge_prs only warns, and never enqueue."""
+    cr = _create_release_module()
+    ri = _make_release_info(cr)
+    monkeypatch.setattr(cr.Shell, "get_output", staticmethod(lambda *a, **k: ""))
+    enqueued = []
+    monkeypatch.setattr(
+        cr.Git,
+        "enqueue_pull_request",
+        staticmethod(lambda *a, **k: enqueued.append(1) or True),
+    )
+    assert ri._enqueue_release_pr("https://x/pull/111", "ChangeLog", False) is False
+    assert not enqueued
+
+
+def test_enqueue_release_pr_skips_already_merged(monkeypatch):
+    """A non-OPEN (e.g. already merged) PR is a no-op, not an enqueue."""
+    cr = _create_release_module()
+    ri = _make_release_info(cr)
+    monkeypatch.setattr(cr.Shell, "get_output", staticmethod(lambda *a, **k: "MERGED"))
+    enqueued = []
+    monkeypatch.setattr(
+        cr.Git,
+        "enqueue_pull_request",
+        staticmethod(lambda *a, **k: enqueued.append(1) or True),
+    )
+    assert ri._enqueue_release_pr("https://x/pull/111", "ChangeLog", False) is True
+    assert not enqueued
+
+
+def test_enqueue_release_pr_open_forces_sync_then_enqueues(monkeypatch):
+    """An OPEN PR: force CH Inc sync on its head, then enqueue it."""
+    cr = _create_release_module()
+    ri = _make_release_info(cr)
+    outputs = iter(["OPEN", "abc123sha"])  # state, then headRefOid
+    monkeypatch.setattr(
+        cr.Shell, "get_output", staticmethod(lambda *a, **k: next(outputs))
+    )
+    posted = {}
+    monkeypatch.setattr(
+        cr.GH,
+        "post_commit_status",
+        staticmethod(
+            lambda name, status, desc, url, sha="", repo="": posted.update(
+                name=name, sha=sha
+            )
+            or True
+        ),
+    )
+    enq = {}
+    monkeypatch.setattr(
+        cr.Git,
+        "enqueue_pull_request",
+        staticmethod(lambda pr, repo, **k: enq.update(pr=pr) or True),
+    )
+    assert ri._enqueue_release_pr("https://x/pull/111", "ChangeLog", False) is True
+    assert posted["name"] == cr.CH_INC_SYNC and posted["sha"] == "abc123sha"
+    assert enq["pr"] == 111

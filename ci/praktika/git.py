@@ -173,6 +173,7 @@ class Git:
         returns `False` (with the real `gh` output surfaced) rather than raising,
         so the caller decides how to react.
         """
+        assert retries >= 1, "retries must be >= 1"
         if dry_run:
             print(f"Dry-run, would enqueue PR #{pr} in {repo} to the merge queue")
             return True
@@ -188,7 +189,7 @@ class Git:
             "gh api graphql "
             "-f 'query=mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id})"
             "{mergeQueueEntry{position state}}}' "
-            f"-f id={pr_node_id}"
+            f"-f id={shlex.quote(pr_node_id)}"
         )
         for attempt in range(1, retries + 1):
             returncode, stdout, stderr = Shell.get_res_stdout_stderr(

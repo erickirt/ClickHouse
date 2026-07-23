@@ -517,7 +517,8 @@ def main():
             # rerun re-creates the branch instead of failing on "already exists".
             porcelain = Shell.get_output(
                 "git status --porcelain --no-renames --untracked-files=all -- "
-                "utils/list-versions/version_date.tsv docs/changelogs SECURITY.md "
+                "utils/list-versions/version_date.tsv "
+                f"{shlex.quote(f'docs/changelogs/{release_tag}.md')} SECURITY.md "
                 "'docker/keeper/Dockerfile*' 'docker/server/Dockerfile*'",
                 strict=True,
             )

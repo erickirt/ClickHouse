@@ -752,20 +752,30 @@ class ReleaseInfo:
         """
         pr_num = 23456 if dry_run else int(pr_url.rsplit("/", 1)[-1])
         if not dry_run:
+            # Best-effort throughout: the release is already published by now, so a
+            # transient `gh` failure here must not fail the release - use
+            # non-strict reads and return False (merge_prs then only warns).
+            #
             # Idempotent for recovery / reruns: only an open PR needs enqueuing.
-            state = Shell.get_output_or_raise(
+            state = Shell.get_output(
                 f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
                 f" --json state --jq .state"
             ).strip()
+            if not state:
+                print(f"ERROR: could not fetch state for {label} PR #{pr_num}")
+                return False
             if state != "OPEN":
                 print(f"{label} PR #{pr_num} is {state}, nothing to merge")
                 return True
         print(f"Enqueuing {label} PR to the merge queue")
         if not dry_run:
-            head_sha = Shell.get_output_or_raise(
+            head_sha = Shell.get_output(
                 f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
                 f" --json headRefOid --jq .headRefOid"
             ).strip()
+            if not head_sha:
+                print(f"ERROR: could not fetch head sha for {label} PR #{pr_num}")
+                return False
             GH.post_commit_status(
                 CH_INC_SYNC,
                 Result.Status.OK,
