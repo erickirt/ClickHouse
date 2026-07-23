@@ -756,6 +756,12 @@ class ReleaseInfo:
             if not dry_run:
                 assert not self.version_bump_pr
         self.prs_merged = res
+        # A failed enqueue must fail the release step (the previous `gh pr merge
+        # --auto` ran with strict=True and raised). `merge_prs`' only failure
+        # signal is an exception - the context manager does not inspect
+        # `prs_merged` - so surface it explicitly instead of exiting 0.
+        if not res:
+            raise RuntimeError("Failed to enqueue the release PR(s) to the merge queue")
 
 
 class RepoTypes:
