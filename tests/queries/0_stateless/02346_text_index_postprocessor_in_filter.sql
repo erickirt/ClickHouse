@@ -23,12 +23,14 @@ SELECT 'if(token NOT IN (keep-set)): only the keep-set survives';
 CREATE TABLE tab_notin (
   id UInt32,
   s String,
-  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s NOT IN ('the', 'fox'), '', s))
+  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s NOT IN ('the', 'fox'), s, ''))
 )
 ENGINE = MergeTree
 ORDER BY id;
 
 INSERT INTO tab_notin VALUES (1, 'the quick brown fox'), (2, 'a fox is here'), (3, 'is the end');
+
+SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_notin, idx);
 
 SELECT 'if(token IN (tuple)): listed stop words retained, non-stop words dropped';
 
@@ -45,8 +47,6 @@ INSERT INTO tab_in_reversed VALUES (1, 'the quick brown fox'), (2, 'a fox is her
 SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_in_reversed, idx);
 SELECT count() FROM tab_in_reversed WHERE hasToken(s, 'fox');
 SELECT count() FROM tab_in_reversed WHERE hasToken(s, 'end');
-
-SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_notin, idx);
 
 SELECT 'if(token IN (array)): array right-hand side, same as tuple';
 CREATE TABLE tab_array (
