@@ -35,7 +35,7 @@ INSERT INTO traces_04627 VALUES ('cluster1', 1, 'trace007');
 -- path AND that the merged outer predicate was pushed below the join (the actual #111452 site), not
 -- merely that some lazy stitch happened. `JoinLazyColumnsStep` alone is generic (single-table lazy
 -- plans build it too, e.g. 02354_vector_search_queries), so it can stay green after the join rewrite
--- regresses. Four columns, all must be 1:
+-- regresses. Five columns, all must be 1:
 --   join_in_plan             - the SQL Join step is present.
 --   preserved_side_topk_sort - top-k-through-join pushed a `Sorting` onto the preserved (left) input,
 --                              i.e. a `Sorting` appears BELOW the Join in the DFS-printed plan.
@@ -44,6 +44,15 @@ INSERT INTO traces_04627 VALUES ('cluster1', 1, 'trace007');
 --                              carrying BOTH the outer `cluster` and inner `ts` predicates BELOW the
 --                              Join. This is the merged dangling filter that #111452 mishandled; the
 --                              other three columns survive independently of it.
+--   merged_filter_keeps_const_conjunct - that same merged filter still carries the constant-true
+--                              `AND 1` conjunct. #111452 fires only on the `AND 1` variant; if a
+--                              planner cleanup folded `cluster = 'cluster1' AND 1` to just
+--                              `cluster = 'cluster1'`, `merged_filter_below_join` would stay 1 while
+--                              the trigger vanished, so this column pins the literal `1` conjunct.
+--                              The match is form-agnostic (` AND 1` trailing, or ` 1 AND ` if
+--                              reordered) because the predicate prints in function form
+--                              (`equals(...) AND 1`) or operator form (`cluster = '...' AND 1`)
+--                              depending on the randomized `query_plan_optimize_prewhere`.
 WITH plan AS
 (
     SELECT rowNumberInAllBlocks() AS rn, explain
@@ -70,7 +79,11 @@ SELECT
     (SELECT count() FROM plan WHERE explain ILIKE '%JoinLazyColumnsStep%') > 0 AS lazy_stitch,
     (SELECT count() FROM plan WHERE explain ILIKE '%ilter column:%'
              AND explain ILIKE '%cluster%' AND explain ILIKE '%ts%'
-             AND rn > (SELECT min(rn) FROM plan WHERE explain ILIKE '%Join (JOIN%')) > 0 AS merged_filter_below_join;
+             AND rn > (SELECT min(rn) FROM plan WHERE explain ILIKE '%Join (JOIN%')) > 0 AS merged_filter_below_join,
+    (SELECT count() FROM plan WHERE explain ILIKE '%ilter column:%'
+             AND explain ILIKE '%cluster%' AND explain ILIKE '%ts%'
+             AND match(explain, '( AND 1$)|( 1 AND )')
+             AND rn > (SELECT min(rn) FROM plan WHERE explain ILIKE '%Join (JOIN%')) > 0 AS merged_filter_keeps_const_conjunct;
 
 -- The regression itself: must return a single row, ts = 1.
 SELECT ts
