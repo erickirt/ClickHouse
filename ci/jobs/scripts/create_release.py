@@ -56,7 +56,13 @@ from ci.jobs.scripts.clickhouse_version import (
 )
 from ci.praktika.gh import GH
 from ci.praktika.git import Git
+from ci.praktika.result import Result
 from ci.praktika.utils import Shell
+
+# The release changelog / version-bump PRs carry `do not test`, so the real
+# `CH Inc sync` required check takes ~10+ min to even start; force it to success
+# on the PR head so the merge queue accepts these bot PRs right away.
+CH_INC_SYNC = "CH Inc sync"
 
 # S3Helper requires boto3 (installed on release machines); ssh has no external deps.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../tests/ci"))
@@ -733,24 +739,45 @@ class ReleaseInfo:
             self.release_url = "dry-run"
         self.dump()
 
+    def _enqueue_release_pr(self, pr_url: str, label: str, dry_run: bool) -> bool:
+        """Add a release bot PR to `master`'s merge queue so it actually merges.
+
+        `master` is behind a merge queue, and `gh pr merge --auto`
+        (`enablePullRequestAutoMerge`) is disabled there, so the PR is added via
+        `enqueuePullRequest` - GitHub then merges it from the queue once its
+        checks pass. GitHub refuses to enqueue a PR whose required `CH Inc sync`
+        check has not completed, so force that status to success on the PR head
+        first, then enqueue with a few retries to ride out the transient
+        `mergeStateStatus == UNKNOWN` GitHub reports right after the status write.
+        """
+        print(f"Enqueuing {label} PR to the merge queue")
+        pr_num = 23456 if dry_run else int(pr_url.rsplit("/", 1)[-1])
+        if not dry_run:
+            head_sha = Shell.get_output_or_raise(
+                f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
+                f" --json headRefOid --jq .headRefOid"
+            ).strip()
+            GH.post_commit_status(
+                CH_INC_SYNC,
+                Result.Status.OK,
+                "release PR: dummy sync status to enable the merge queue",
+                "",
+                sha=head_sha,
+                repo=GITHUB_REPOSITORY,
+            )
+        return Git.enqueue_pull_request(
+            pr_num, GITHUB_REPOSITORY, dry_run=dry_run, retries=10, delay=30
+        )
+
     def merge_prs(self, dry_run: bool) -> None:
         res = True
-        # Both PRs target `master`, which is behind a merge queue: `gh pr merge
-        # --auto` (the `enablePullRequestAutoMerge` mutation) is disabled there,
-        # so enqueue them via `enqueuePullRequest` instead.
         if self.release_type == "patch":
             assert self.changelog_pr
-            print("Enqueuing ChangeLog PR to the merge queue")
-            changelog_pr_num = 23456 if dry_run else int(self.changelog_pr.rsplit("/", 1)[-1])
-            res = Git.enqueue_pull_request(
-                changelog_pr_num, GITHUB_REPOSITORY, dry_run=dry_run
-            )
+            res = self._enqueue_release_pr(self.changelog_pr, "ChangeLog", dry_run)
         if self.release_type == "new":
             assert self.version_bump_pr
-            print("Enqueuing Version Bump PR to the merge queue")
-            version_bump_pr_num = 23456 if dry_run else int(self.version_bump_pr.rsplit("/", 1)[-1])
-            res = res and Git.enqueue_pull_request(
-                version_bump_pr_num, GITHUB_REPOSITORY, dry_run=dry_run
+            res = res and self._enqueue_release_pr(
+                self.version_bump_pr, "Version Bump", dry_run
             )
         else:
             if not dry_run:
@@ -759,11 +786,8 @@ class ReleaseInfo:
         if not res:
             # Best-effort: by the time this runs the release itself (tag, GitHub
             # release, packages) is already published, so a failed PR enqueue must
-            # not fail the release. The changelog / version-bump PR carries `do
-            # not test`, so GitHub refuses to add it to the merge queue while a
-            # required status check (e.g. `CH Inc sync`) is still "expected"
-            # (UNPROCESSABLE). Leave the PR open to be landed separately and only
-            # warn - do not raise.
+            # not fail the release. Leave the PR open to be landed separately and
+            # only warn - do not raise.
             print(
                 "WARNING: could not enqueue the release PR(s) to the merge queue; "
                 "they must be landed separately. The release itself is unaffected."
