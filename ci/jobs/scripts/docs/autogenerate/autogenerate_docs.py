@@ -1016,6 +1016,20 @@ def _settings_explorer(family):
     )
 
 
+def _replace_redundant_h1_with_anchor(preamble):
+    """Keep a historical H1 fragment without rendering a duplicate page title."""
+    match = re.match(r"^# [^\n]+\n+", preamble)
+    if not match:
+        return preamble
+
+    anchors = list(_markdown_heading_anchors(match.group(0), {}))
+    remainder = preamble[match.end():]
+    if not anchors:
+        return remainder
+    anchor = html.escape(anchors[0], quote=True)
+    return f'<a id="{anchor}"></a>\n\n{remainder}'
+
+
 def _settings_explorer_component(pages, anchor_routes=None, family=None):
     family = family or SETTINGS_SPLIT_FAMILIES["session-settings"]
     anchor_routes = anchor_routes or _settings_anchor_routes(pages)
@@ -1300,9 +1314,10 @@ def split_settings_page(dest, content, docs_dir, family_name):
     preamble_without_imports = IMPORT_RE.sub("", preamble).strip()
     # Mintlify renders the frontmatter title as the page H1. Some generated
     # Docusaurus bodies repeat that title as a Markdown H1; keep it out of the
-    # overview shell so the split page has a single title.
-    preamble_without_imports = re.sub(
-        r"^# [^\n]+\n+", "", preamble_without_imports, count=1)
+    # overview shell so the split page has a single visible title, but retain
+    # its historical fragment as an explicit anchor.
+    preamble_without_imports = _replace_redundant_h1_with_anchor(
+        preamble_without_imports)
     explorer_import = (
         f'import {family["component_name"]} from '
         f'"/{family["component_path"]}";'
