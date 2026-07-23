@@ -12,6 +12,7 @@
 #include <Databases/IDatabase.h>
 #include <Interpreters/AddDefaultDatabaseVisitor.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/QueryMetadataCache.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/FunctionNameNormalizer.h>
 #include <Interpreters/IdentifierSemantic.h>
@@ -314,7 +315,21 @@ BlockIO runCommandSegments(CommandSegments & segments, const StoragePtr & table,
         if (auto * alter_commands = std::get_if<AlterCommands>(&segment))
         {
             auto alter_lock = table->lockForAlter(settings[Setting::lock_acquire_timeout]);
-            auto metadata_snapshot = table->getInMemoryMetadataPtr(context, true);
+            /// The query-scoped metadata cache (`enable_shared_storage_snapshot_in_query`) may have pinned a
+            /// metadata snapshot before this alter lock was acquired: the access check reads it earlier in the
+            /// query (see `isRowExistsLightweightDeleteMarker`). Everything below — `validate`, `prepare`,
+            /// `checkAlterIsPossible` and the storage's `alter` (including the metadata that `alter` commits) —
+            /// must observe the metadata committed as of holding the lock. A stale pinned base is otherwise
+            /// committed back by the comment/settings branches and clobbers a concurrently applied `ALTER`,
+            /// and mixing a stale validation snapshot with a fresh apply turns a concurrent `DROP COLUMN` into a
+            /// logical error. Drop the pinned entries so the reads below repopulate fresh under the lock;
+            /// committed metadata cannot change while `lockForAlter` is held.
+            if (auto metadata_cache = context->getQueryMetadataCache())
+            {
+                auto [cache, cache_lock] = metadata_cache->getStorageMetadataCache();
+                cache->clear();
+            }
+            auto metadata_snapshot = table->getInMemoryMetadataPtr(context, false);
             alter_commands->validate(table, context);
 
             bool share_nested = true;

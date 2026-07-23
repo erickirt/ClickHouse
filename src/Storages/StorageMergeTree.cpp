@@ -468,7 +468,7 @@ void StorageMergeTree::alter(
     auto old_storage_settings = getSettings();
     const auto & query_settings = local_context->getSettingsRef();
 
-    auto metadata_snapshot = getInMemoryMetadataPtr(local_context, /*bypass_metadata_cache*/ true);
+    auto metadata_snapshot = getInMemoryMetadataPtr(local_context, /*bypass_metadata_cache*/ false);
     StorageInMemoryMetadata new_metadata = *metadata_snapshot;
     const StorageInMemoryMetadata & old_metadata = *metadata_snapshot;
 
