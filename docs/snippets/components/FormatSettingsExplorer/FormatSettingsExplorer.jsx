@@ -211,12 +211,11 @@ const FormatSettingsExplorer = () => {
         placeholder="Search settings, e.g. parallel replicas or %materialized%"
         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-500 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 dark:border-white/10 dark:bg-transparent dark:text-white dark:placeholder:text-gray-500"
       />
-      <div className="mt-2 flex items-center justify-between gap-4 text-xs text-gray-500 dark:text-gray-400">
-        <span>Search by words, or use % for wildcard patterns.</span>
-        {isSearching && (
+      {isSearching && (
+        <div className="mt-2 text-right text-xs text-gray-500 dark:text-gray-400">
           <span>{matchingCount} matching {matchingCount === 1 ? "setting" : "settings"}</span>
-        )}
-      </div>
+        </div>
+      )}
       <div className="mt-3 w-full overflow-x-auto rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 font-mono text-sm leading-6 dark:border-white/10 dark:bg-transparent">
         <div className="min-w-max font-semibold">/format-settings</div>
         {filteredEntries.length > 0 ? filteredEntries.map((entry, index) => renderGroup(

@@ -416,7 +416,8 @@ def main():
             assert 'const usesWildcard = normalizedSearch.includes("%")' in explorer
             assert 'normalizedSearch.replaceAll("%", "").trim().length > 0' in explorer
             assert "candidateTerm.startsWith(searchTerm)" in explorer
-            assert "Search by words, or use % for wildcard patterns." in explorer
+            assert "Search by words, or use % for wildcard patterns." not in explorer
+            assert "mt-2 text-right text-xs" in explorer
             assert "const filteredEntries = isSearching" in explorer
             assert "const isOpen = isSearching || expandedGroups.has(key)" in explorer
             assert "No matching settings" in explorer
