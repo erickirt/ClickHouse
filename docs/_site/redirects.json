@@ -1,5 +1,101 @@
 [
   {
+    "source": "/clickstack/migration/elastic",
+    "destination": "/clickstack/migration/elastic/intro"
+  },
+  {
+    "source": "/clickstack/migration/elastic/index",
+    "destination": "/clickstack/migration/elastic/intro"
+  },
+  {
+    "source": "/concepts/features/operations/update",
+    "destination": "/concepts/features/operations/update/overview"
+  },
+  {
+    "source": "/concepts/features/operations/update/index",
+    "destination": "/concepts/features/operations/update/overview"
+  },
+  {
+    "source": "/guides/oss/deployment-and-scaling",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
+  },
+  {
+    "source": "/guides/oss/deployment-and-scaling/index",
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
+  },
+  {
+    "source": "/guides/use-cases/observability/build-your-own",
+    "destination": "/guides/use-cases/observability/build-your-own/introduction"
+  },
+  {
+    "source": "/guides/use-cases/observability/build-your-own/index",
+    "destination": "/guides/use-cases/observability/build-your-own/introduction"
+  },
+  {
+    "source": "/integrations/clickpipes/kinesis/index",
+    "destination": "/integrations/clickpipes/kinesis/overview"
+  },
+  {
+    "source": "/integrations/clickpipes/pubsub/index",
+    "destination": "/integrations/clickpipes/pubsub/overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing/marketplace",
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing/marketplace/index",
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
+  },
+  {
+    "source": "/clickstack/ingesting-data",
+    "destination": "/clickstack/ingesting-data/overview"
+  },
+  {
+    "source": "/clickstack/ingesting-data/index",
+    "destination": "/clickstack/ingesting-data/overview"
+  },
+  {
+    "source": "/get-started/migrate/bigquery",
+    "destination": "/get-started/migrate/bigquery/overview"
+  },
+  {
+    "source": "/get-started/migrate/bigquery/index",
+    "destination": "/get-started/migrate/bigquery/overview"
+  },
+  {
+    "source": "/get-started/migrate/postgres",
+    "destination": "/get-started/migrate/postgres/overview"
+  },
+  {
+    "source": "/get-started/migrate/postgres/index",
+    "destination": "/get-started/migrate/postgres/overview"
+  },
+  {
+    "source": "/products/cloud/features/admin-features/api",
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
+  },
+  {
+    "source": "/products/cloud/features/admin-features/api/index",
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing",
+    "destination": "/products/cloud/reference/billing/billing-overview"
+  },
+  {
+    "source": "/products/cloud/reference/billing/index",
+    "destination": "/products/cloud/reference/billing/billing-overview"
+  },
+  {
+    "source": "/reference/system-tables",
+    "destination": "/reference/system-tables/overview"
+  },
+  {
+    "source": "/reference/system-tables/index",
+    "destination": "/reference/system-tables/overview"
+  },
+  {
     "source": "/engines/table-engines/special/materializedview",
     "destination": "/concepts/features/materialized-views"
   },
@@ -1634,7 +1730,7 @@
   },
   {
     "source": "/cloud/manage/marketplace/",
-    "destination": "/products/cloud/reference/billing/marketplace"
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
   },
   {
     "source": "/cloud/manage/monitor/advanced-dashboard",
@@ -2378,7 +2474,7 @@
   },
   {
     "source": "/deployment-guides/index",
-    "destination": "/guides/oss/deployment-and-scaling"
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "source": "/deployment-guides/parallel-replicas",
@@ -3966,7 +4062,7 @@
   },
   {
     "source": "/integrations/clickpipes/kinesis-index",
-    "destination": "/integrations/clickpipes/kinesis"
+    "destination": "/integrations/clickpipes/kinesis/overview"
   },
   {
     "source": "/integrations/clickpipes/mongodb/add_table",
@@ -4094,7 +4190,7 @@
   },
   {
     "source": "/integrations/clickpipes/pubsub-index",
-    "destination": "/integrations/clickpipes/pubsub"
+    "destination": "/integrations/clickpipes/pubsub/overview"
   },
   {
     "source": "/integrations/clickpipes/secure-kinesis",
@@ -41210,7 +41306,7 @@
   },
   {
     "source": "/updating-data",
-    "destination": "/concepts/features/operations/update"
+    "destination": "/concepts/features/operations/update/overview"
   },
   {
     "source": "/updating-data/overview",
@@ -41414,7 +41510,7 @@
   },
   {
     "source": "/use-cases/observability/build-your-own",
-    "destination": "/guides/use-cases/observability/build-your-own"
+    "destination": "/guides/use-cases/observability/build-your-own/introduction"
   },
   {
     "source": "/use-cases/observability/clickstack",
@@ -41798,7 +41894,7 @@
   },
   {
     "source": "/use-cases/observability/clickstack/migration/elastic",
-    "destination": "/clickstack/migration/elastic"
+    "destination": "/clickstack/migration/elastic/intro"
   },
   {
     "source": "/use-cases/observability/clickstack/migration/elastic/concepts",
