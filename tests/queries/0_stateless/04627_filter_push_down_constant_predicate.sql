@@ -14,6 +14,9 @@
 SET enable_analyzer = 1;
 SET query_plan_filter_push_down = 1;
 SET query_plan_merge_expressions = 1;
+-- merged the pushed outer `cluster` predicate with the inner `ts` predicate into one filter node;
+-- the `merged_filter_below_join` oracle column asserts that single merged node, so it must stay on.
+SET query_plan_merge_filters = 1;
 SET query_plan_top_k_through_join = 1;
 SET query_plan_optimize_lazy_materialization = 1;
 SET query_plan_max_limit_for_lazy_materialization = 0;
@@ -29,13 +32,18 @@ CREATE TABLE traces_04627 (cluster String, ts UInt64, trace_id String) ENGINE = 
 INSERT INTO traces_04627 VALUES ('cluster1', 1, 'trace007');
 
 -- Liveness oracle: assert the plan is the JOIN-specific top-k-through-join + lazy-materialization
--- path, not merely that some lazy stitch happened. `JoinLazyColumnsStep` alone is generic (single-table
--- lazy plans build it too, e.g. 02354_vector_search_queries), so it can stay green after the join
--- rewrite regresses. Three columns, all must be 1:
---   join_in_plan            - the SQL Join step is present.
+-- path AND that the merged outer predicate was pushed below the join (the actual #111452 site), not
+-- merely that some lazy stitch happened. `JoinLazyColumnsStep` alone is generic (single-table lazy
+-- plans build it too, e.g. 02354_vector_search_queries), so it can stay green after the join rewrite
+-- regresses. Four columns, all must be 1:
+--   join_in_plan             - the SQL Join step is present.
 --   preserved_side_topk_sort - top-k-through-join pushed a `Sorting` onto the preserved (left) input,
 --                              i.e. a `Sorting` appears BELOW the Join in the DFS-printed plan.
---   lazy_stitch             - lazy materialization split the read (`JoinLazyColumnsStep`).
+--   lazy_stitch              - lazy materialization split the read (`JoinLazyColumnsStep`).
+--   merged_filter_below_join - filter push down + merge filters left a single `Filter column:`
+--                              carrying BOTH the outer `cluster` and inner `ts` predicates BELOW the
+--                              Join. This is the merged dangling filter that #111452 mishandled; the
+--                              other three columns survive independently of it.
 WITH plan AS
 (
     SELECT rowNumberInAllBlocks() AS rn, explain
@@ -59,7 +67,10 @@ SELECT
     (SELECT count() FROM plan WHERE explain ILIKE '%Join (JOIN%') > 0 AS join_in_plan,
     (SELECT count() FROM plan WHERE explain ILIKE '%Sorting%'
              AND rn > (SELECT min(rn) FROM plan WHERE explain ILIKE '%Join (JOIN%')) > 0 AS preserved_side_topk_sort,
-    (SELECT count() FROM plan WHERE explain ILIKE '%JoinLazyColumnsStep%') > 0 AS lazy_stitch;
+    (SELECT count() FROM plan WHERE explain ILIKE '%JoinLazyColumnsStep%') > 0 AS lazy_stitch,
+    (SELECT count() FROM plan WHERE explain ILIKE '%ilter column:%'
+             AND explain ILIKE '%cluster%' AND explain ILIKE '%ts%'
+             AND rn > (SELECT min(rn) FROM plan WHERE explain ILIKE '%Join (JOIN%')) > 0 AS merged_filter_below_join;
 
 -- The regression itself: must return a single row, ts = 1.
 SELECT ts
