@@ -43,6 +43,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int CORRUPTED_DATA;
+    extern const int LOGICAL_ERROR;
     extern const int SUPPORT_IS_DISABLED;
     extern const int UNIQUE_KEY_DENSE_INDEX_UNREADABLE;
 }
@@ -137,6 +138,16 @@ void UniqueKeyDenseIndexOps::writeDenseIndexOnInsert(
     /// throws SUPPORT_IS_DISABLED without RocksDB: a UNIQUE KEY INSERT that cannot
     /// build the dense index fails closed rather than publishing a part with no
     /// `unique_key_index.sst`.
+    ///
+    /// The SST must be a standalone file: every reader (load-time validation and
+    /// the probe) opens it by raw filesystem path via RocksDB. On packed part
+    /// storage `writeFile` would silently bury it inside the archive and every
+    /// subsequent load of the part would fail — fail the INSERT loudly instead.
+    /// (`MergeTreeDataWriter` forces Full storage for UNIQUE KEY parts.)
+    if (storage.getType() != MergeTreeDataPartStorageType::Full)
+        throw Exception(ErrorCodes::LOGICAL_ERROR,
+            "UNIQUE KEY dense index requires full part storage, got part storage type {}",
+            storage.getType().toString());
     SSTIndexWriter::write(
         storage,
         block,
