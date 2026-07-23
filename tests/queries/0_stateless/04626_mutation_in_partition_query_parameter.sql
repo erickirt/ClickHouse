@@ -35,3 +35,46 @@ ALTER TABLE t_mutation_param DROP PARTITION {day:UInt32};
 SELECT count() FROM t_mutation_param;
 
 DROP TABLE t_mutation_param;
+
+-- Tuple-typed query parameters for multi-, one- and zero-field partition keys.
+
+DROP TABLE IF EXISTS t_mutation_param_tuple2;
+CREATE TABLE t_mutation_param_tuple2 (id UInt64, a UInt32, s String, flag Nullable(Bool))
+ENGINE = MergeTree PARTITION BY (a, s) ORDER BY id;
+INSERT INTO t_mutation_param_tuple2 SELECT number, 1, 'x', NULL FROM numbers(5);
+INSERT INTO t_mutation_param_tuple2 SELECT number + 100, 2, 'y', NULL FROM numbers(5);
+
+SET param_part_two = '(1,''x'')';
+ALTER TABLE t_mutation_param_tuple2 UPDATE flag = true IN PARTITION {part_two:Tuple(UInt32, String)} WHERE 1 SETTINGS mutations_sync = 2;
+SELECT countIf(flag), count() FROM t_mutation_param_tuple2;
+DETACH TABLE t_mutation_param_tuple2;
+ATTACH TABLE t_mutation_param_tuple2;
+SELECT countIf(flag), count() FROM t_mutation_param_tuple2;
+DROP TABLE t_mutation_param_tuple2;
+
+DROP TABLE IF EXISTS t_mutation_param_tuple1;
+CREATE TABLE t_mutation_param_tuple1 (id UInt64, a UInt32, flag Nullable(Bool))
+ENGINE = MergeTree PARTITION BY a ORDER BY id;
+INSERT INTO t_mutation_param_tuple1 SELECT number, 1, NULL FROM numbers(5);
+INSERT INTO t_mutation_param_tuple1 SELECT number + 100, 2, NULL FROM numbers(5);
+
+SET param_part_one = '(1)';
+ALTER TABLE t_mutation_param_tuple1 UPDATE flag = true IN PARTITION {part_one:Tuple(UInt32)} WHERE 1 SETTINGS mutations_sync = 2;
+SELECT countIf(flag), count() FROM t_mutation_param_tuple1;
+DETACH TABLE t_mutation_param_tuple1;
+ATTACH TABLE t_mutation_param_tuple1;
+SELECT countIf(flag), count() FROM t_mutation_param_tuple1;
+DROP TABLE t_mutation_param_tuple1;
+
+DROP TABLE IF EXISTS t_mutation_param_tuple0;
+CREATE TABLE t_mutation_param_tuple0 (id UInt64, flag Nullable(Bool))
+ENGINE = MergeTree PARTITION BY tuple() ORDER BY id;
+INSERT INTO t_mutation_param_tuple0 SELECT number, NULL FROM numbers(5);
+
+SET param_part_zero = '()';
+ALTER TABLE t_mutation_param_tuple0 UPDATE flag = true IN PARTITION {part_zero:Tuple()} WHERE 1 SETTINGS mutations_sync = 2;
+SELECT countIf(flag), count() FROM t_mutation_param_tuple0;
+DETACH TABLE t_mutation_param_tuple0;
+ATTACH TABLE t_mutation_param_tuple0;
+SELECT countIf(flag), count() FROM t_mutation_param_tuple0;
+DROP TABLE t_mutation_param_tuple0;
