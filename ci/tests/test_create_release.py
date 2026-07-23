@@ -141,15 +141,15 @@ def test_release_job_points_at_moved_paths():
 
 
 def test_patch_version_bump_is_deferred_after_merge_prs():
-    """The patch branch version bump must run after --merge-prs, the new one before.
+    """The patch branch version bump must run after the merge-PRs step, new before.
 
     Deferring the patch bump to the end keeps the release branch tip equal to the
     released commit throughout publishing, so a rerun after any failure sees an
     un-bumped branch and prepare recovers the existing release instead of
     refusing it as out-of-order or minting a below-tip release — the root-cause
     fix for the rerun/stale-branch review comments, without scanning git tags.
-    The "new" release bump must stay before --merge-prs because it opens the
-    master bump PR that --merge-prs merges.
+    The "new" release bump must stay before the merge step because it opens the
+    master bump PR that the merge step merges.
     """
     text = _read(RELEASE_JOB)
     # Match the actual create_release.py invocations, not prose in comments.
@@ -157,17 +157,19 @@ def test_patch_version_bump_is_deferred_after_merge_prs():
         m.start()
         for m in re.finditer(r"create_release\.py --create-bump-version-pr", text)
     ]
-    merge_pos = text.find("create_release.py --merge-prs")
+    # The merge step is an in-process function call (merge_created_prs), anchored
+    # by its unique step name rather than a CLI string.
+    merge_pos = text.find('name="Update Release Info and Merge Created PRs"')
     assert len(bump_positions) >= 2, (
         "expected a separate 'new' and deferred 'patch' --create-bump-version-pr"
     )
-    assert merge_pos != -1, "release_job.py should invoke --merge-prs"
+    assert merge_pos != -1, "release_job.py should have the merge-PRs step"
     assert any(p < merge_pos for p in bump_positions), (
-        "the 'new' version bump must run before --merge-prs (it opens the PR that "
-        "--merge-prs merges)"
+        "the 'new' version bump must run before the merge step (it opens the PR "
+        "that the merge step merges)"
     )
     assert any(p > merge_pos for p in bump_positions), (
-        "the 'patch' version bump must be deferred to after --merge-prs"
+        "the 'patch' version bump must be deferred to after the merge step"
     )
 
 

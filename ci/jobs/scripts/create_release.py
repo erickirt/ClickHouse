@@ -1058,11 +1058,6 @@ def parse_args() -> argparse.Namespace:
         help="Create GH Release object and attach all packages",
     )
     parser.add_argument(
-        "--merge-prs",
-        action="store_true",
-        help="Merge PRs with version, changelog updates",
-    )
-    parser.add_argument(
         "--post-status",
         action="store_true",
         help="Post release status (prints summary; Slack integration removed)",
@@ -1159,13 +1154,6 @@ if __name__ == "__main__":
         # fail is conveyed by the workflow job result, not re-derived here.
         print(f"{title}: {release_info.release_tag}")
         print(json.dumps(dataclasses.asdict(release_info), indent=2))
-
-    if args.merge_prs:
-        with ReleaseContextManager(
-            release_progress=ReleaseProgress.MERGE_CREATED_PRS
-        ) as release_info:
-            release_info.update_release_info(dry_run=args.dry_run)
-            release_info.merge_prs(dry_run=args.dry_run)
 
     if _ssh_agent and _key_pub:
         _ssh_agent.remove(_key_pub)

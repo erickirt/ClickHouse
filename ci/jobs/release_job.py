@@ -365,6 +365,34 @@ def main():
 
         step(name="Validate Recovery Ref", command=_require_recovery_ref)
 
+    # A recovery / rerun of an already-published patch release must still land its
+    # changelog PR if it went missing - e.g. a previous PR was closed unmerged or
+    # a failed run never opened one. Recreate it when there is neither an open nor
+    # a merged PR for the changelog branch (a merged PR means the changelog is
+    # already in master, so there is nothing to redo). only-repo/only-docker are
+    # targeted artifact re-publish recoveries and must not open PRs or run
+    # changelog.py, so they are excluded. This lets the create-changelog / merge
+    # steps below, otherwise gated on create_new_release, run for a plain rerun.
+    recreate_changelog_pr = False
+    if (
+        ok
+        and args.release_type == "patch"
+        and not create_new_release
+        and not args.only_repo
+        and not args.only_docker
+        and not args.dry_run
+    ):
+        with open(RELEASE_INFO_FILE) as f:
+            _tag = json.load(f)["release_tag"]
+        existing = GH.get_pr_url_by_branch(
+            branch=f"auto/{_tag}", repo="ClickHouse/ClickHouse"
+        )
+        recreate_changelog_pr = not existing
+        print(
+            f"ChangeLog PR for auto/{_tag}: "
+            + (f"exists [{existing}]" if existing else "missing — will recreate")
+        )
+
     if args.release_type == "patch" and not args.only_docker:
         step(
             name="Download All Release Artifacts",
@@ -396,10 +424,10 @@ def main():
         )
 
     # For a "new" release the version bump also opens the master bump PR that
-    # --merge-prs merges below, so it must run here, before that merge. For a
+    # the merge_prs step merges below, so it must run here, before that merge. For a
     # "patch" release the bump is only a direct push of the branch version file
     # and nothing downstream depends on it; it is deferred to the very end of the
-    # run (after --merge-prs) so that a rerun after any failure between the tag
+    # run (after the merge_prs step) so that a rerun after any failure between the tag
     # push and the end always sees an un-bumped branch. prepare then reads the
     # branch tip as the just-released version, recovers the existing release, and
     # never refuses a rerun as "out-of-order" or mints a release below the tip —
@@ -414,7 +442,11 @@ def main():
             workdir=REPO_PATH,
         )
 
-    if ok and args.release_type == "patch" and create_new_release:
+    if (
+        ok
+        and args.release_type == "patch"
+        and (create_new_release or recreate_changelog_pr)
+    ):
         with open(RELEASE_INFO_FILE) as f:
             release_tag = json.load(f)["release_tag"]
         uid = os.getuid()
@@ -450,7 +482,12 @@ def main():
             workdir=REPO_PATH,
         )
 
-    if ok and args.release_type == "patch" and not args.dry_run and create_new_release:
+    if (
+        ok
+        and args.release_type == "patch"
+        and not args.dry_run
+        and (create_new_release or recreate_changelog_pr)
+    ):
         with open(RELEASE_INFO_FILE) as f:
             release_tag = json.load(f)["release_tag"]
 
@@ -469,10 +506,39 @@ def main():
                 strict=True,
             )
             Shell.check("git config user.name robot-clickhouse", strict=True)
-            # -B so a rerun after a partial failure re-creates the branch instead
-            # of failing on "branch already exists".
-            Shell.check(f"git checkout -B {pr_branch}", strict=True)
-            Shell.check("git add -A", strict=True)
+            # The PR must contain ONLY the generated release artifacts, on a clean
+            # master base - never the unrelated commits HEAD carries when the
+            # release runs from a feature branch, nor any file `git add -A` would
+            # sweep in. Capture whatever the generation steps above changed, but
+            # scope the scan to exactly their output paths so a stray file left
+            # elsewhere on a reused runner cannot leak in; then hard-reset onto
+            # origin/master (-f, so the switch can't abort on "local changes would
+            # be overwritten"), restore those paths, and stage only them. -B so a
+            # rerun re-creates the branch instead of failing on "already exists".
+            porcelain = Shell.get_output(
+                "git status --porcelain --no-renames --untracked-files=all -- "
+                "utils/list-versions/version_date.tsv docs/changelogs SECURITY.md "
+                "'docker/keeper/Dockerfile*' 'docker/server/Dockerfile*'",
+                strict=True,
+            )
+            # Porcelain line is "XY <path>"; the path starts at column 3.
+            artifact_files = [ln[3:] for ln in porcelain.splitlines() if ln.strip()]
+            backup_dir = tempfile.mkdtemp(prefix="changelog-artifacts-")
+            for f in artifact_files:
+                dst = os.path.join(backup_dir, f)
+                os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+                shutil.copy2(f, dst)
+            Shell.check(f"git checkout -f -B {pr_branch} origin/master", strict=True)
+            for f in artifact_files:
+                os.makedirs(os.path.dirname(f) or ".", exist_ok=True)
+                shutil.copy2(os.path.join(backup_dir, f), f)
+            shutil.rmtree(backup_dir, ignore_errors=True)
+            if artifact_files:
+                Shell.check(
+                    "git add -- "
+                    + " ".join(shlex.quote(f) for f in artifact_files),
+                    strict=True,
+                )
             # If the changelog PR was already merged on a previous run, master
             # (and this branch, freshly checked out from it) already contain the
             # generated files, so there is nothing to commit — `git commit`
@@ -514,7 +580,7 @@ def main():
                 # this branch (the branch is force-pushed above); `gh pr create`
                 # would then fail with "already exists". Only treat an OPEN or
                 # MERGED PR as reusable — a PR closed without merge must be
-                # recreated, otherwise the downstream --merge-prs (which looks up
+                # recreated, otherwise the downstream merge_prs step (which looks up
                 # open/merged PRs) would find nothing and fail after publication.
                 existing_pr = GH.get_pr_url_by_branch(
                     branch=pr_branch, repo="ClickHouse/ClickHouse"
@@ -761,7 +827,7 @@ def main():
     # Always restore git state — equivalent to `if: ${{ !cancelled() }}`, so it
     # must run even after a failure (hence Result.from_commands_run, not step()
     # which skips when ok is already False). But a failed restore must still
-    # block the release mutation below (--merge-prs), so fold its result into ok.
+    # block the release mutation below (the merge_prs step), so fold its result into ok.
     results.append(
         Result.from_commands_run(
             name="Checkout Back",
@@ -782,12 +848,23 @@ def main():
     # changelog (or version-bump) PR open, and merge_prs must land it. merge_prs
     # looks the PR up by branch and is a no-op when it is absent or already
     # merged, so running it unconditionally is safe.
+    def merge_created_prs():
+        # Imported lazily so the module-level boto3 dependency of create_release
+        # is only needed on the release machine, not at praktika config time.
+        from ci.jobs.scripts.create_release import (
+            ReleaseContextManager,
+            ReleaseProgress,
+        )
+
+        with ReleaseContextManager(
+            release_progress=ReleaseProgress.MERGE_CREATED_PRS
+        ) as release_info:
+            release_info.update_release_info(dry_run=args.dry_run)
+            release_info.merge_prs(dry_run=args.dry_run)
+
     step(
         name="Update Release Info and Merge Created PRs",
-        command=[
-            f"python3 ./ci/jobs/scripts/create_release.py --merge-prs"
-            f" {dry_run_flag}".strip()
-        ],
+        command=merge_created_prs,
         workdir=REPO_PATH,
     )
 
@@ -797,7 +874,7 @@ def main():
     # in that window sees an un-bumped branch and prepare recovers the existing
     # release instead of refusing it or minting a below-tip release. `step` skips
     # it when a prior step already failed, so a failed publish leaves the branch
-    # un-bumped and recoverable. ("new" bumps earlier, above, because --merge-prs
+    # un-bumped and recoverable. ("new" bumps earlier, above, because the merge_prs step
     # merges the master bump PR it opens.)
     if create_new_release and args.release_type == "patch":
         step(
