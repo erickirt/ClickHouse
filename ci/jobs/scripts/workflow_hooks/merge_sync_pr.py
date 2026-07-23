@@ -1,34 +1,45 @@
+import json
+import os
 import re
 import traceback
+from pathlib import Path
 
 from praktika.utils import Shell
 
 SYNC_REPO = "ClickHouse/clickhouse-private"
 
-# The merge queue can merge several PRs in a single batch, so a single push to
-# master may contain multiple merge commits, each corresponding to a different
-# upstream PR (and therefore a different Sync PR). Look back this many commits on
-# master to make sure all of them get their Sync PRs merged, not just the PR for
-# the latest commit.
-NUM_COMMITS = 5
-
 
 def get_linked_pr_numbers():
     """
-    Extract linked PR numbers from the last NUM_COMMITS commits on master.
+    Extract linked PR numbers from the GitHub push event payload.
+
+    The merge queue can merge several PRs in a single batch, so a single push to
+    master may contain multiple merge commits, each corresponding to a different
+    upstream PR (and therefore a different Sync PR). The push event payload lists
+    every commit in the batch under "commits", so it is a reliable source for all
+    of them - unlike the head commit message or local git state, which only
+    reflect the latest PR.
 
     Merge commits produced by the merge queue look like:
         Merge pull request #77106 from XXXX
-    Uses --first-parent so only the merge commits on master are inspected, not
-    the individual commits from the merged branches.
     """
-    raw = Shell.get_output(
-        f"git log --first-parent -n {NUM_COMMITS} --format=%s HEAD",
-        verbose=True,
-    )
+    event_file_path = os.getenv("GITHUB_EVENT_PATH", "")
+    if not event_file_path or not Path(event_file_path).is_file():
+        print(f"WARNING: GITHUB_EVENT_PATH is not set or missing: '{event_file_path}'")
+        return []
+
+    with open(event_file_path, "r", encoding="utf-8") as f:
+        github_event = json.load(f)
+
+    commits = github_event.get("commits", [])
+    if not commits:
+        print("WARNING: No commits found in the push event payload")
+        return []
+
     pr_numbers = []
-    for line in raw.splitlines():
-        match = re.search(r"pull request #(\d+)", line)
+    for commit in commits:
+        message = commit.get("message", "")
+        match = re.search(r"pull request #(\d+)", message)
         if match:
             pr_number = int(match.group(1))
             if pr_number not in pr_numbers:
@@ -43,9 +54,7 @@ def merge_sync_pr(linked_pr_number):
         retries=5,
     )
     if not raw:
-        print(
-            f"WARNING: Failed to retrieve Sync PR list for pr {linked_pr_number} after retries - skipping merge"
-        )
+        print(f"WARNING: Failed to retrieve Sync PR list for pr {linked_pr_number} after retries - skipping merge")
         return
 
     sync_pr_numbers = [n.strip() for n in raw.splitlines() if n.strip()]
@@ -55,10 +64,7 @@ def merge_sync_pr(linked_pr_number):
         return
 
     if len(sync_pr_numbers) > 1:
-        print(
-            f"WARNING: Expected at most one open Sync PR for branch sync-upstream/pr/{linked_pr_number}, "
-            f"found {len(sync_pr_numbers)}: {sync_pr_numbers} - skipping merge"
-        )
+        print(f"WARNING: Expected at most one open Sync PR for branch sync-upstream/pr/{linked_pr_number}, found {len(sync_pr_numbers)}: {sync_pr_numbers} - skipping merge")
         return
 
     sync_pr_number = sync_pr_numbers[0]
@@ -66,9 +72,7 @@ def merge_sync_pr(linked_pr_number):
         print(f"WARNING: Failed to retrieve Sync PR number for pr {linked_pr_number}")
         return
 
-    if not Shell.check(
-        f"gh pr ready {sync_pr_number} --repo {SYNC_REPO}", verbose=True, retries=5
-    ):
+    if not Shell.check(f"gh pr ready {sync_pr_number} --repo {SYNC_REPO}", verbose=True, retries=5):
         print(f"WARNING: Failed to set Sync PR {sync_pr_number} as ready")
         return
 
@@ -87,9 +91,7 @@ def check():
     linked_pr_numbers = get_linked_pr_numbers()
 
     if not linked_pr_numbers:
-        print(
-            f"WARNING: No linked PR numbers found in the last {NUM_COMMITS} commits - skipping merge"
-        )
+        print("WARNING: No linked PR numbers found in the push event - skipping merge")
         return
 
     print(f"Found linked PR numbers to sync: {linked_pr_numbers}")
