@@ -115,16 +115,11 @@ namespace
         stack_trace.emplace();
 #else
         const auto signal_context = *reinterpret_cast<ucontext_t *>(context);
-        asynchronous_stack_unwinding = true;
-        if (0 == sigsetjmp(asynchronous_stack_unwinding_signal_jump_buffer, 1))
-        {
-            stack_trace.emplace(signal_context);
-        }
-        else
-        {
+        /// The ucontext StackTrace constructor recovers internally from a fault while unwinding
+        /// (e.g. off a fiber stack) and yields an empty trace in that case.
+        stack_trace.emplace(signal_context);
+        if (stack_trace->getSize() == 0)
             ProfileEvents::incrementSignalSafe(ProfileEvents::QueryProfilerErrors);
-        }
-        asynchronous_stack_unwinding = false;
 #endif
 
         if (stack_trace)

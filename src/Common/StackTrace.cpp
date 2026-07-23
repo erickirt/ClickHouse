@@ -35,6 +35,10 @@
 /// Which will be used for stack unwinding on Mac.
 /// Read: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/backtrace.3.html
 #include <execinfo.h>
+/// `_Unwind_Backtrace` (the C++ exception unwinder) is CFI-based, unlike `backtrace()`/
+/// `__thread_stack_pcs` which walks the frame-pointer chain. It is used for synchronous captures
+/// so the walk stops at boost::context fiber boundaries instead of running off the stack.
+#include <unwind.h>
 #endif
 
 #pragma clang diagnostic push
@@ -527,35 +531,51 @@ StackTrace::StackTrace(const ucontext_t & signal_context)
     /// `tryCapture()` (a SIGUSR1/SIGUSR2 storm fighting TSan over libunwind's
     /// internal `dl_iterate_phdr` lock) does not apply here: crash signals
     /// fire synchronously, exactly once, on the thread that crashed.
+    /// Recover from a fault while unwinding an *interrupted* thread's stack instead of crashing the
+    /// server: the frame chain can be malformed (on macOS backtrace() runs off boost::context fiber
+    /// stacks, issue #111579; libunwind can fault on a torn-down stack). The fault raises SIGSEGV/
+    /// SIGBUS and SignalHandlers.cpp siglongjmps back here (guarded by `asynchronous_stack_unwinding`).
+    /// Centralized here so every ucontext capture (query profiler, system.stack_trace, and the crash
+    /// handler) is protected without each caller setting this up by hand.
+    asynchronous_stack_unwinding = true;
+    if (0 == sigsetjmp(asynchronous_stack_unwinding_signal_jump_buffer, 1))
+    {
 #if defined(OS_DARWIN)
-    size = backtrace(frame_pointers.data(), FRAMEPOINTER_CAPACITY);
+        size = backtrace(frame_pointers.data(), FRAMEPOINTER_CAPACITY);
 #else
-    size = unw_backtrace(frame_pointers.data(), FRAMEPOINTER_CAPACITY);
+        size = unw_backtrace(frame_pointers.data(), FRAMEPOINTER_CAPACITY);
 #endif
-    __msan_unpoison(frame_pointers.data(), size * sizeof(frame_pointers[0]));
+        __msan_unpoison(frame_pointers.data(), size * sizeof(frame_pointers[0]));
 
-    void * caller_address = getCallerAddress(signal_context);
+        void * caller_address = getCallerAddress(signal_context);
 
-    if (size == 0 && caller_address)
-    {
-        frame_pointers[0] = caller_address;
-        size = 1;
-    }
-    else
-    {
-        /// Skip excessive stack frames that we have created while finding stack trace.
-        for (size_t i = 0; i < size; ++i)
+        if (size == 0 && caller_address)
         {
-            if (frame_pointers[i] == caller_address ||
-                /// This compensates for a hack in libunwind, see the "+ 1" in
-                /// UnwindCursor<A, R>::stepThroughSigReturn.
-                frame_pointers[i] == reinterpret_cast<void *>(reinterpret_cast<char *>(caller_address) + 1))
+            frame_pointers[0] = caller_address;
+            size = 1;
+        }
+        else
+        {
+            /// Skip excessive stack frames that we have created while finding stack trace.
+            for (size_t i = 0; i < size; ++i)
             {
-                offset = i;
-                break;
+                if (frame_pointers[i] == caller_address ||
+                    /// This compensates for a hack in libunwind, see the "+ 1" in
+                    /// UnwindCursor<A, R>::stepThroughSigReturn.
+                    frame_pointers[i] == reinterpret_cast<void *>(reinterpret_cast<char *>(caller_address) + 1))
+                {
+                    offset = i;
+                    break;
+                }
             }
         }
     }
+    else
+    {
+        /// Faulted mid-unwind; drop the capture.
+        size = 0;
+    }
+    asynchronous_stack_unwinding = false;
 }
 
 StackTrace::StackTrace(FramePointers frame_pointers_, size_t size_, size_t offset_)
@@ -564,10 +584,34 @@ StackTrace::StackTrace(FramePointers frame_pointers_, size_t size_, size_t offse
     , frame_pointers(std::move(frame_pointers_))
 {}
 
+#if defined(OS_DARWIN)
+/// CFI-based unwind for synchronous captures (memory profiler, exception stack capture, etc.).
+/// `backtrace()`/`__thread_stack_pcs` walks the frame-pointer chain and runs off the top of a
+/// boost::context fiber stack into unmapped memory -> SIGSEGV (issue #111579). `_Unwind_Backtrace`
+/// follows CFI and stops at `make_fcontext`'s boundary. Safe here because these captures are
+/// synchronous; the async-signal path (query profiler / system.stack_trace) keeps `backtrace()`.
+static size_t captureViaCFI(void ** frames, size_t capacity)
+{
+    struct Cursor { void ** frames; size_t size; size_t capacity; } cursor{frames, 0, capacity};
+    _Unwind_Backtrace(
+        [](_Unwind_Context * context, void * arg) -> _Unwind_Reason_Code
+        {
+            auto & c = *static_cast<Cursor *>(arg);
+            if (c.size >= c.capacity)
+                return _URC_END_OF_STACK;
+            if (uintptr_t ip = _Unwind_GetIP(context))
+                c.frames[c.size++] = reinterpret_cast<void *>(ip);
+            return _URC_NO_REASON;
+        },
+        &cursor);
+    return cursor.size;
+}
+#endif
+
 void StackTrace::tryCapture()
 {
 #if defined(OS_DARWIN)
-    size = backtrace(frame_pointers.data(), FRAMEPOINTER_CAPACITY);
+    size = captureViaCFI(frame_pointers.data(), FRAMEPOINTER_CAPACITY);
 #elif defined(THREAD_SANITIZER)
     /// Under TSan, use abseil's frame-pointer-based unwinding instead of libunwind.
     /// libunwind's async stack unwinding races with TSan's own concurrent
