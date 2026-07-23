@@ -365,32 +365,38 @@ def main():
 
         step(name="Validate Recovery Ref", command=_require_recovery_ref)
 
-    # A recovery / rerun of an already-published patch release must still land its
-    # changelog PR if it went missing - e.g. a previous PR was closed unmerged or
-    # a failed run never opened one. Recreate it when there is neither an open nor
-    # a merged PR for the changelog branch (a merged PR means the changelog is
-    # already in master, so there is nothing to redo). only-repo/only-docker are
-    # targeted artifact re-publish recoveries and must not open PRs or run
-    # changelog.py, so they are excluded. This lets the create-changelog / merge
-    # steps below, otherwise gated on create_new_release, run for a plain rerun.
-    recreate_changelog_pr = False
-    if (
-        ok
-        and args.release_type == "patch"
-        and not create_new_release
-        and not args.only_repo
-        and not args.only_docker
-        and not args.dry_run
-    ):
-        with open(RELEASE_INFO_FILE) as f:
-            _tag = json.load(f)["release_tag"]
-        existing = GH.get_pr_url_by_branch(
-            branch=f"auto/{_tag}", repo="ClickHouse/ClickHouse"
-        )
-        recreate_changelog_pr = not existing
-        print(
-            f"ChangeLog PR for auto/{_tag}: "
-            + (f"exists [{existing}]" if existing else "missing — will recreate")
+    # The release opens exactly one PR against master - the changelog PR for a
+    # patch, the version-bump PR for a new release. Ensure it exists and is
+    # merged, idempotently: create it if absent, merge it if open, skip if it is
+    # already merged. This converges a fresh release and a recovery / rerun after
+    # a failed merge through the same path. only-repo/only-docker are targeted
+    # artifact re-publish recoveries and never touch this PR.
+    if args.dry_run:
+        # No gh reads on dry-run (it may be a local run without gh auth): fall
+        # back to the fresh-release signal so the generation is still previewed.
+        release_pr_absent = create_new_release
+        release_pr_needs_merge = create_new_release
+    else:
+        release_pr_branch = None
+        release_pr_state = ""  # "MERGED" | "OPEN" | ""
+        if ok and not args.only_repo and not args.only_docker:
+            with open(RELEASE_INFO_FILE) as f:
+                _info = json.load(f)
+            release_pr_branch = (
+                f"auto/{_info['release_tag']}"
+                if args.release_type == "patch"
+                else f"bump_version_{_info['version']}"
+            )
+            release_pr_state = GH.get_pr_state_by_branch(
+                release_pr_branch, "ClickHouse/ClickHouse"
+            )
+            print(
+                f"Release PR branch [{release_pr_branch}] state: "
+                + (release_pr_state or "absent — will create")
+            )
+        release_pr_absent = release_pr_branch is not None and release_pr_state == ""
+        release_pr_needs_merge = (
+            release_pr_branch is not None and release_pr_state != "MERGED"
         )
 
     if args.release_type == "patch" and not args.only_docker:
@@ -432,7 +438,7 @@ def main():
     # branch tip as the just-released version, recovers the existing release, and
     # never refuses a rerun as "out-of-order" or mints a release below the tip —
     # all without scanning git tags. See the deferred step near the end of main.
-    if create_new_release and args.release_type == "new":
+    if args.release_type == "new" and release_pr_absent:
         step(
             name="Bump CH Version and Update Contributors' List",
             command=[
@@ -442,11 +448,7 @@ def main():
             workdir=REPO_PATH,
         )
 
-    if (
-        ok
-        and args.release_type == "patch"
-        and (create_new_release or recreate_changelog_pr)
-    ):
+    if ok and args.release_type == "patch" and release_pr_absent:
         with open(RELEASE_INFO_FILE) as f:
             release_tag = json.load(f)["release_tag"]
         uid = os.getuid()
@@ -482,12 +484,7 @@ def main():
             workdir=REPO_PATH,
         )
 
-    if (
-        ok
-        and args.release_type == "patch"
-        and not args.dry_run
-        and (create_new_release or recreate_changelog_pr)
-    ):
+    if ok and args.release_type == "patch" and not args.dry_run and release_pr_absent:
         with open(RELEASE_INFO_FILE) as f:
             release_tag = json.load(f)["release_tag"]
 
@@ -844,11 +841,10 @@ def main():
     # False — so if anything failed, the Slack post below reports the failing
     # step instead of merging.
     #
-    # Run this whenever the release PR still needs merging, not only on a fresh
-    # `create_new_release` run: a recovery / rerun after a failed merge leaves the
-    # changelog (or version-bump) PR open, and merge_prs must land it. merge_prs
-    # looks the PR up by branch and is a no-op when it is absent or already
-    # merged, so running it unconditionally is safe.
+    # Merge the release PR (just created above, or left open by a failed prior
+    # run). Skipped only when it is already merged - the "merged -> continue"
+    # branch of the algorithm. merge_prs looks the PR up by branch and enqueues
+    # it (best-effort); it is a no-op if the lookup finds nothing.
     def merge_created_prs():
         # Imported lazily so the module-level boto3 dependency of create_release
         # is only needed on the release machine, not at praktika config time.
@@ -863,11 +859,12 @@ def main():
             release_info.update_release_info(dry_run=args.dry_run)
             release_info.merge_prs(dry_run=args.dry_run)
 
-    step(
-        name="Update Release Info and Merge Created PRs",
-        command=merge_created_prs,
-        workdir=REPO_PATH,
-    )
+    if release_pr_needs_merge:
+        step(
+            name="Update Release Info and Merge Created PRs",
+            command=merge_created_prs,
+            workdir=REPO_PATH,
+        )
 
     # Deferred patch version bump — the LAST release mutation. Bumping the branch
     # version file here (rather than right after the tag push) keeps the branch
