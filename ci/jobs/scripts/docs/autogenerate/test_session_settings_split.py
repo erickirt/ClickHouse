@@ -405,6 +405,13 @@ def main():
             assert "dark:border-white/10 dark:bg-transparent" in explorer
             assert "overflow-auto" not in explorer
             assert "maxHeight" not in explorer
+            assert 'aria-label="Search settings"' in explorer
+            assert 'placeholder="Search settings, for example %materialized%"' in explorer
+            assert 'normalizedSearch.includes("%")' in explorer
+            assert 'normalizedSearch.replaceAll("%", "").length > 0' in explorer
+            assert "const filteredEntries = isSearching" in explorer
+            assert "const isOpen = isSearching || expandedGroups.has(key)" in explorer
+            assert "No matching settings" in explorer
             assert f'const marker = "{family["base_route"]}";' in explorer
             assert (
                 f'"href":"{family["base_route"]}/filesystem/cache'

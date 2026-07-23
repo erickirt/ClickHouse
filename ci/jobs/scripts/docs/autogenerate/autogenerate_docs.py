@@ -1071,6 +1071,52 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
   }, []);
 
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
+  const [searchTerm, setSearchTerm] = useState("");
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const isSearching = normalizedSearch.replaceAll("%", "").length > 0;
+
+  const matchesSearch = (value) => {
+    const candidate = value.toLowerCase();
+    if (!normalizedSearch) return true;
+    if (!normalizedSearch.includes("%")) {
+      return candidate.includes(normalizedSearch);
+    }
+
+    const parts = normalizedSearch.split("%");
+    let position = 0;
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      if (!part) continue;
+      const matchPosition = candidate.indexOf(part, position);
+      if (matchPosition < 0) return false;
+      if (index === 0 && !normalizedSearch.startsWith("%") && matchPosition !== 0) {
+        return false;
+      }
+      position = matchPosition + part.length;
+    }
+
+    const lastPart = parts[parts.length - 1];
+    return normalizedSearch.endsWith("%") || !lastPart || position === candidate.length;
+  };
+
+  const filterEntry = (entry) => {
+    const settings = entry.settings.filter((setting) => matchesSearch(setting.name));
+    const children = entry.children.map(filterEntry).filter(Boolean);
+    const count = settings.length + children.reduce(
+      (total, child) => total + child.count,
+      0,
+    );
+    if (!count) return null;
+    return { ...entry, count, settings, children };
+  };
+
+  const filteredEntries = isSearching
+    ? entries.map(filterEntry).filter(Boolean)
+    : entries;
+  const matchingCount = filteredEntries.reduce(
+    (total, entry) => total + entry.count,
+    0,
+  );
 
   const toggleGroup = (key) => {
     setExpandedGroups((current) => {
@@ -1098,7 +1144,7 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
 
   const renderGroup = (entry, continuations = [], isLast = false, path = []) => {
     const key = [...path, entry.label].join("/");
-    const isOpen = expandedGroups.has(key);
+    const isOpen = isSearching || expandedGroups.has(key);
     const items = [
       ...entry.settings.map((setting) => ({ type: "setting", value: setting })),
       ...entry.children.map((child) => ({ type: "group", value: child })),
@@ -1110,6 +1156,7 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
         <button
           type="button"
           aria-expanded={isOpen}
+          disabled={isSearching}
           onClick={() => toggleGroup(key)}
           className="flex min-w-max items-baseline whitespace-nowrap text-left"
           style={{
@@ -1117,7 +1164,7 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
             background: "transparent",
             border: 0,
             color: "inherit",
-            cursor: "pointer",
+            cursor: isSearching ? "default" : "pointer",
             font: "inherit",
             lineHeight: "inherit",
             padding: 0,
@@ -1159,15 +1206,31 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
   };
 
   return (
-    <div
-      className="not-prose my-6 w-full overflow-x-auto rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 font-mono text-sm leading-6 dark:border-white/10 dark:bg-transparent"
-    >
-      <div className="min-w-max font-semibold">__EXPLORER_ROOT__</div>
-      {entries.map((entry, index) => renderGroup(
-        entry,
-        [],
-        index === entries.length - 1,
-      ))}
+    <div className="not-prose my-6 w-full">
+      <input
+        aria-label="Search settings"
+        type="search"
+        value={searchTerm}
+        onChange={(event) => setSearchTerm(event.target.value)}
+        placeholder="Search settings, for example %materialized%"
+        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-500 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 dark:border-white/10 dark:bg-transparent dark:text-white dark:placeholder:text-gray-500"
+      />
+      <div className="mt-2 flex items-center justify-between gap-4 text-xs text-gray-500 dark:text-gray-400">
+        <span>Use % as a wildcard.</span>
+        {isSearching && (
+          <span>{matchingCount} matching {matchingCount === 1 ? "setting" : "settings"}</span>
+        )}
+      </div>
+      <div className="mt-3 w-full overflow-x-auto rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 font-mono text-sm leading-6 dark:border-white/10 dark:bg-transparent">
+        <div className="min-w-max font-semibold">__EXPLORER_ROOT__</div>
+        {filteredEntries.length > 0 ? filteredEntries.map((entry, index) => renderGroup(
+          entry,
+          [],
+          index === filteredEntries.length - 1,
+        )) : (
+          <div className="py-2 text-gray-500 dark:text-gray-400">No matching settings</div>
+        )}
+      </div>
     </div>
   );
 };
