@@ -402,6 +402,7 @@ def main():
                 "  const [anchorRoutes] = useState(() => ("
             ) > component_start
             assert "w-full overflow-x-auto" in explorer
+            assert "dark:border-white/10 dark:bg-transparent" in explorer
             assert "overflow-auto" not in explorer
             assert "maxHeight" not in explorer
             assert f'const marker = "{family["base_route"]}";' in explorer

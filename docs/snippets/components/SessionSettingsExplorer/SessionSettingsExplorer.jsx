@@ -139,7 +139,7 @@ const SessionSettingsExplorer = () => {
 
   return (
     <div
-      className="not-prose my-6 w-full overflow-x-auto rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 font-mono text-sm leading-6 dark:border-gray-800 dark:bg-gray-950/40"
+      className="not-prose my-6 w-full overflow-x-auto rounded-xl border border-gray-200 bg-gray-50/50 px-4 py-3 font-mono text-sm leading-6 dark:border-white/10 dark:bg-transparent"
     >
       <div className="min-w-max font-semibold">/session-settings</div>
       {entries.map((entry, index) => renderGroup(
