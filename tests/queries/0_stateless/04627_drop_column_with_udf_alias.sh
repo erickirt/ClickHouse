@@ -18,7 +18,7 @@ CREATE TABLE event_test
 (
     id UInt64,
     event String,
-    x__event String ALIAS ${UDF}(event)
+    x__event Array(UInt64) ALIAS ${UDF}(event)
 )
 ENGINE = MergeTree
 ORDER BY id;
