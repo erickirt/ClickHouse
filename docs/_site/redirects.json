@@ -4685,10 +4685,6 @@
     "destination": "/integrations/language-clients/js/index"
   },
   {
-    "source": "/integrations/language-clients/python/driver-api",
-    "destination": "/integrations/language-clients/python/index"
-  },
-  {
     "source": "/integrations/language-clients/python/inserts",
     "destination": "/integrations/language-clients/python/index"
   },
@@ -20293,10 +20289,6 @@
     "destination": "/ko/integrations/language-clients/js"
   },
   {
-    "source": "/ko/integrations/language-clients/python/driver-api",
-    "destination": "/ko/integrations/language-clients/python"
-  },
-  {
     "source": "/ko/integrations/language-clients/python/inserts",
     "destination": "/ko/integrations/language-clients/python"
   },
@@ -32411,10 +32403,6 @@
   {
     "source": "/ru/integrations/language-clients/javascript",
     "destination": "/ru/integrations/language-clients/js"
-  },
-  {
-    "source": "/ru/integrations/language-clients/python/driver-api",
-    "destination": "/ru/integrations/language-clients/python"
   },
   {
     "source": "/ru/integrations/language-clients/python/inserts",
@@ -45979,10 +45967,6 @@
   {
     "source": "/zh/integrations/language-clients/javascript",
     "destination": "/zh/integrations/language-clients/js"
-  },
-  {
-    "source": "/zh/integrations/language-clients/python/driver-api",
-    "destination": "/zh/integrations/language-clients/python"
   },
   {
     "source": "/zh/integrations/language-clients/python/inserts",
