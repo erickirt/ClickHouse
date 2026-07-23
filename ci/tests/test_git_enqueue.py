@@ -88,6 +88,38 @@ def test_enqueue_real_failure_returns_false(monkeypatch):
     assert Git.enqueue_pull_request(7, "ClickHouse/ClickHouse") is False
 
 
+def test_enqueue_retries_until_check_completes(monkeypatch):
+    """A required check pending on the first attempts, then the enqueue succeeds:
+    retry must wait it out and return True without sleeping against the clock."""
+    calls = {"n": 0}
+
+    def fake_get_output(command, *_a, **_k):
+        if "--json id" in command:
+            return "PR_node"
+        return "QUEUED"
+
+    def fake_get_res(command, *_a, **_k):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return (1, "", 'Required status check "CH Inc sync" is pending.')
+        return (0, "", "")
+
+    monkeypatch.setattr(GIT_MOD.Shell, "get_output", staticmethod(fake_get_output))
+    monkeypatch.setattr(GIT_MOD.Shell, "get_res_stdout_stderr", staticmethod(fake_get_res))
+    monkeypatch.setattr(GIT_MOD.time, "sleep", lambda *_a, **_k: None)
+    assert Git.enqueue_pull_request(7, "ClickHouse/ClickHouse", retries=5, delay=1) is True
+    assert calls["n"] == 3
+
+
+def test_enqueue_exhausts_retries_returns_false(monkeypatch):
+    _install_fake_shell(
+        monkeypatch, enqueue=(1, "", 'Required status check "CH Inc sync" is pending.')
+    )
+    assert (
+        Git.enqueue_pull_request(7, "ClickHouse/ClickHouse", retries=3, delay=1) is False
+    )
+
+
 def test_enqueue_missing_node_id_returns_false(monkeypatch):
     _install_fake_shell(monkeypatch, node_id="")
     assert Git.enqueue_pull_request(7, "ClickHouse/ClickHouse") is False

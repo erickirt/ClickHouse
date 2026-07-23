@@ -148,6 +148,8 @@ class Git:
         repo: str,
         dry_run: bool = False,
         verbose: bool = True,
+        retries: int = 1,
+        delay: int = 60,
     ) -> bool:
         """Add PR #`pr` in `repo` to the merge queue via `enqueuePullRequest`.
 
@@ -161,9 +163,15 @@ class Git:
         clicked on github.com, or a previous run already enqueued it). That is the
         desired end state, so it is treated as success rather than a failure.
 
-        Returns whether the PR is in the queue. A normal enqueue failure returns
-        `False` (with the real `gh` output surfaced) rather than raising, so the
-        caller decides how to react.
+        A PR is only accepted once its required status checks have completed, so
+        while a required check (e.g. `CH Inc sync`) is still expected/pending the
+        mutation is refused with UNPROCESSABLE. Retry up to `retries` times with
+        `delay` seconds between attempts to wait that out; the same delay covers a
+        transient `mergeStateStatus == UNKNOWN` right after a push.
+
+        Returns whether the PR is in the queue. A persistent enqueue failure
+        returns `False` (with the real `gh` output surfaced) rather than raising,
+        so the caller decides how to react.
         """
         if dry_run:
             print(f"Dry-run, would enqueue PR #{pr} in {repo} to the merge queue")
@@ -182,13 +190,26 @@ class Git:
             "{mergeQueueEntry{position state}}}' "
             f"-f id={pr_node_id}"
         )
-        returncode, stdout, stderr = Shell.get_res_stdout_stderr(
-            enqueue_cmd, verbose=verbose
-        )
-        already_queued = "already in the queue" in (stdout + stderr).lower()
-        if returncode != 0 and not already_queued:
-            # Surface the real gh output so auth/permission/validation/rate-limit
-            # failures stay diagnosable.
+        for attempt in range(1, retries + 1):
+            returncode, stdout, stderr = Shell.get_res_stdout_stderr(
+                enqueue_cmd, verbose=verbose
+            )
+            already_queued = "already in the queue" in (stdout + stderr).lower()
+            if returncode == 0 or already_queued:
+                break
+            if attempt < retries:
+                # A required check is likely still expected/pending, or GitHub is
+                # still computing mergeability; wait and retry.
+                reason = (stderr or stdout).strip().splitlines()
+                print(
+                    f"Enqueue attempt {attempt}/{retries} for PR #{pr} failed"
+                    f"{' [' + reason[-1] + ']' if reason else ''};"
+                    f" retrying in {delay}s"
+                )
+                time.sleep(delay)
+        else:
+            # Every attempt failed. Surface the real gh output so
+            # auth/permission/validation/rate-limit failures stay diagnosable.
             if stdout:
                 print(stdout)
             if stderr:
@@ -197,7 +218,7 @@ class Git:
                 f"ERROR: Failed to add PR #{pr} to the merge queue. "
                 f"This often happens when mergeStateStatus is UNKNOWN "
                 f"(GitHub is still computing mergeability after a recent push) "
-                f"or the PR is not yet eligible (failing required checks, "
+                f"or the PR is not yet eligible (failing/pending required checks, "
                 f"missing approvals, out of date with base). "
                 f"Retry manually:\n  {enqueue_cmd}"
             )
