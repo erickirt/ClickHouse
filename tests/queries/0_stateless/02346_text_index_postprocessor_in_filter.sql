@@ -30,6 +30,22 @@ ORDER BY id;
 
 INSERT INTO tab_notin VALUES (1, 'the quick brown fox'), (2, 'a fox is here'), (3, 'is the end');
 
+SELECT 'if(token IN (tuple)): listed stop words retained, non-stop words dropped';
+
+CREATE TABLE tab_in_reversed (
+  id UInt32,
+  s String,
+  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s IN ('the', 'a', 'is'), '', s))
+)
+ENGINE = MergeTree
+ORDER BY id;
+
+INSERT INTO tab_in_reversed VALUES (1, 'the quick brown fox'), (2, 'a fox is here'), (3, 'is the end');
+
+SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_in_reversed, idx);
+SELECT count() FROM tab_in_reversed WHERE hasToken(s, 'fox');
+SELECT count() FROM tab_in_reversed WHERE hasToken(s, 'end');
+
 SELECT arrayStringConcat(arraySort(groupArray(token)), ' ') FROM mergeTreeTextIndex(currentDatabase(), tab_notin, idx);
 
 SELECT 'if(token IN (array)): array right-hand side, same as tuple';
@@ -90,6 +106,7 @@ SELECT count() FROM tab_materialized WHERE hasToken(s, 'the');
 
 DROP TABLE tab_in;
 DROP TABLE tab_notin;
+DROP TABLE tab_in_reversed;
 DROP TABLE tab_array;
 DROP TABLE tab_multiif;
 DROP TABLE tab_fixed;

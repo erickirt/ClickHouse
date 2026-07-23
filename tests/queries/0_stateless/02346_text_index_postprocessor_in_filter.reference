@@ -3,6 +3,10 @@ brown end fox here quick
 2
 1
 if(token NOT IN (keep-set)): only the keep-set survives
+if(token IN (tuple)): listed stop words retained, non-stop words dropped
+brown end fox here quick
+2
+1
 fox the
 if(token IN (array)): array right-hand side, same as tuple
 brown end fox here quick
