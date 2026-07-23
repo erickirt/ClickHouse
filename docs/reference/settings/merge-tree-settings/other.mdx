@@ -19,6 +19,12 @@ These settings are available in [system.merge_tree_settings](/reference/system-t
 
 Initial size of an adaptive write buffer
 
+## add_implicit_sign_column_constraint_for_collapsing_engine {#add_implicit_sign_column_constraint_for_collapsing_engine}
+<SettingsInfoBlock type="Bool" default_value="0" />
+
+If true, adds an implicit constraint for the `sign` column of a CollapsingMergeTree
+or VersionedCollapsingMergeTree table to allow only valid values (`1` and `-1`).
+
 ## alter_column_secondary_index_mode {#alter_column_secondary_index_mode}
 <SettingsInfoBlock type="AlterColumnSecondaryIndexMode" default_value="rebuild" />
 <VersionHistory rows={[{"id": "row-1","items": [{"label": "25.12"},{"label": "rebuild"},{"label": "Change the behaviour to allow ALTER `column` when they have dependent secondary indices"}]}]}/>
@@ -182,6 +188,10 @@ Force read-through filesystem cache for merges
 
 Retry period for table initialization, in seconds.
 
+## kill_threads {#kill_threads}
+<SettingsInfoBlock type="UInt64" default_value="128" />
+Obsolete setting, does nothing.
+
 ## lightweight_mutation_projection_mode {#lightweight_mutation_projection_mode}
 <SettingsInfoBlock type="LightweightMutationProjectionMode" default_value="throw" />
 
@@ -245,7 +255,7 @@ Possible values:
 - `0` (disable deduplication).
 
 A deduplication mechanism is used, similar to replicated tables (see
-[replicated_deduplication_window](/reference/settings/merge-tree-settings/replicated/deduplication#replicated_deduplication_window) setting): the deduplication
+[replicated_deduplication_window](/reference/settings/merge-tree-settings/replicated-deduplication-window#replicated_deduplication_window) setting): the deduplication
 hash sum covers the whole inserted block. The hash sums are written to
 a local file on a disk rather than to ClickHouse Keeper.
 
@@ -268,6 +278,19 @@ Possible values:
 - basic — Use the standard serialization for `Nullable(T)`.
 
 - allow_sparse — Permit `Nullable(T)` to use sparse encoding.
+
+## object_serialization_version {#object_serialization_version}
+<SettingsInfoBlock type="MergeTreeObjectSerializationVersion" default_value="v3" />
+<VersionHistory rows={[{"id": "row-1","items": [{"label": "25.8"},{"label": "v2"},{"label": "Add a setting to control JSON serialization versions"}]}, {"id": "row-2","items": [{"label": "25.12"},{"label": "v3"},{"label": "Enable v3 serialization version for JSON by default to use advanced shared data serialization"}]}]}/>
+
+Serialization version for JSON data type. Required for compatibility.
+
+Possible values:
+- `v1`
+- `v2`
+- `v3`
+
+Only version `v3` supports changing the shared data serialization version.
 
 ## old_parts_lifetime {#old_parts_lifetime}
 <SettingsInfoBlock type="Seconds" default_value="480" />
@@ -399,6 +422,16 @@ with `add_minmax_index_for_numeric_columns`).
 The on-disk format is self-describing: readers detect `skp_idx.packed` and serve packed
 substreams from inside it transparently. Changing this setting affects newly written parts
 only; existing parts retain whatever layout they had at write time.
+
+## part_minmax_index_columns {#part_minmax_index_columns}
+<SettingsInfoBlock type="MergeTreePartMinMaxIndexColumns" default_value="partition_key_only" />
+<VersionHistory rows={[{"id": "row-1","items": [{"label": "26.5"},{"label": "partition_key_only"},{"label": "New setting."}]}]}/>
+
+Selects which columns the per-part min-max index covers. Each value enables an additional group of columns on top of the previous one.
+
+Possible values:
+- `partition_key_only` — only the partition-key columns are tracked.
+- `with_block_number_offset` — partition-key columns plus the persisted `_block_number` and `_block_offset` virtual columns. Enables part-level pruning by these columns.
 
 ## propagate_types_serialization_versions_to_nested_types {#propagate_types_serialization_versions_to_nested_types}
 <SettingsInfoBlock type="Bool" default_value="1" />
@@ -532,6 +565,16 @@ results in large amount of requests to zookeeper in large-scale clusters
 
 If the file name for column is too long (more than 'max_file_name_length'
 bytes) replace it to SipHash128
+
+## replicated_can_become_leader {#replicated_can_become_leader}
+<SettingsInfoBlock type="Bool" default_value="1" />
+
+If true, replicated tables replicas on this node will try to acquire
+leadership.
+
+Possible values:
+- `true`
+- `false`
 
 ## search_orphaned_parts_disks {#search_orphaned_parts_disks}
 <SettingsInfoBlock type="SearchOrphanedPartsDisks" default_value="any" />

@@ -89,7 +89,7 @@ Maximum number of Paimon snapshots to consume per incremental read. 0 means no l
 <VersionHistory rows={[{"id": "row-1","items": [{"label": "24.1"},{"label": "0"},{"label": "Separate max_execution_time and max_estimated_execution_time"}]}]}/>
 
 Maximum query estimate execution time in seconds. Checked on every data block
-when [`timeout_before_checking_execution_speed`](/reference/settings/session-settings/timeout#timeout_before_checking_execution_speed)
+when [`timeout_before_checking_execution_speed`](/reference/settings/session-settings/other#timeout_before_checking_execution_speed)
 expires.
 
 ## max_expanded_ast_elements {#max_expanded_ast_elements}
@@ -170,7 +170,7 @@ A query may be processed faster if it is executed on several servers in parallel
 - The sampling key is an expression that is expensive to calculate.
 - The cluster latency distribution has a long tail, so that querying more servers increases the query overall latency.
 
-### Parallel processing using [parallel_replicas_custom_key](/reference/settings/session-settings/parallel/replicas#parallel_replicas_custom_key)
+### Parallel processing using [parallel_replicas_custom_key](/reference/settings/session-settings/parallel-replicas#parallel_replicas_custom_key)
 
 This setting is useful for any replicated table.
 

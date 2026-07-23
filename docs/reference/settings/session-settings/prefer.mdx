@@ -98,11 +98,11 @@ Enables/disables preferable using the localhost replica when processing distribu
 Possible values:
 
 - 1 — ClickHouse always sends a query to the localhost replica if it exists.
-- 0 — ClickHouse uses the balancing strategy specified by the [load_balancing](/reference/settings/session-settings/load/balancing#load_balancing) setting.
+- 0 — ClickHouse uses the balancing strategy specified by the [load_balancing](/reference/settings/session-settings/load-balancing#load_balancing) setting.
 
 <Note>
-Disable this setting if you use [max_parallel_replicas](/reference/settings/session-settings/max#max_parallel_replicas) without [parallel_replicas_custom_key](/reference/settings/session-settings/parallel/replicas#parallel_replicas_custom_key).
-If [parallel_replicas_custom_key](/reference/settings/session-settings/parallel/replicas#parallel_replicas_custom_key) is set, disable this setting only if it's used on a cluster with multiple shards containing multiple replicas.
+Disable this setting if you use [max_parallel_replicas](/reference/settings/session-settings/max#max_parallel_replicas) without [parallel_replicas_custom_key](/reference/settings/session-settings/parallel-replicas#parallel_replicas_custom_key).
+If [parallel_replicas_custom_key](/reference/settings/session-settings/parallel-replicas#parallel_replicas_custom_key) is set, disable this setting only if it's used on a cluster with multiple shards containing multiple replicas.
 If it's used on a cluster with a single shard and multiple replicas, disabling this setting will have negative effects.
 </Note>
 

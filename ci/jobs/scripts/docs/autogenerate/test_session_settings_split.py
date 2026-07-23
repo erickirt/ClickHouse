@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused tests for the generated session-settings page hierarchy."""
+"""Focused tests for the generated flat settings-page hierarchy."""
 
 import importlib.util
 import json
@@ -76,7 +76,7 @@ def main():
     mod = load_module()
     mod.SESSION_SETTINGS_MAX_PER_PAGE = 20
     mod.SESSION_SETTINGS_MAX_CHARS_PER_PAGE = 100_000
-    mod.SESSION_SETTINGS_SECOND_LEVEL_MIN = 2
+    mod.SESSION_SETTINGS_PREFIX_GROUP_MIN = 2
 
     names = [
         "filesystem_cache_alpha", "filesystem_cache_beta",
@@ -149,12 +149,11 @@ def main():
         expected_paths = {
             dest,
             docs / "snippets/components/SessionSettingsExplorer/SessionSettingsExplorer.jsx",
-            docs / "reference/settings/session-settings/filesystem.mdx",
-            docs / "reference/settings/session-settings/filesystem/cache.mdx",
-            docs / "reference/settings/session-settings/filesystem/prefetch.mdx",
+            docs / "reference/settings/session-settings/filesystem-cache.mdx",
+            docs / "reference/settings/session-settings/filesystem-prefetch.mdx",
             docs / "reference/settings/session-settings/force.mdx",
-            docs / "reference/settings/session-settings/force/optimize.mdx",
-            docs / "reference/settings/session-settings/page/cache.mdx",
+            docs / "reference/settings/session-settings/force-optimize.mdx",
+            docs / "reference/settings/session-settings/page-cache.mdx",
             docs / "reference/settings/session-settings/other.mdx",
             docs / "reference/settings/session-settings/navigation.json",
             manifest,
@@ -170,33 +169,35 @@ def main():
                 generated_names.update(setting_names(mod, content))
         assert generated_names == set(names), (generated_names, names)
         cache_page = by_path[
-            docs / "reference/settings/session-settings/filesystem/cache.mdx"]
+            docs / "reference/settings/session-settings/filesystem-cache.mdx"]
         assert "](/reference/settings/session-settings/force#force_aggregate_partitions_independently)" in cache_page
         assert "](/reference/settings/session-settings/force#force_aggregate_partitions_independently-example)" in cache_page
-        assert "## filesystem_unmatched" in by_path[
-            docs / "reference/settings/session-settings/filesystem.mdx"]
         assert "## force_data_skipping_indices" in by_path[
             docs / "reference/settings/session-settings/force.mdx"]
         assert "## force_optimize_projection" in by_path[
-            docs / "reference/settings/session-settings/force/optimize.mdx"]
+            docs / "reference/settings/session-settings/force-optimize.mdx"]
         page_cache = by_path[
-            docs / "reference/settings/session-settings/page/cache.mdx"]
+            docs / "reference/settings/session-settings/page-cache.mdx"]
         assert "title: 'page_cache_* session settings'" in page_cache
         assert "## page_cache_alpha" in page_cache
         assert docs / "reference/settings/session-settings/page.mdx" not in by_path
         assert docs / "reference/settings/session-settings/retired.mdx" not in by_path
         assert "## standalone" in by_path[
             docs / "reference/settings/session-settings/other.mdx"]
-        assert "## filesystem_unmatched" not in by_path[
+        assert "## filesystem_unmatched" in by_path[
             docs / "reference/settings/session-settings/other.mdx"]
+        assert "## filesystem_unmatched" not in by_path[
+            docs / "reference/settings/session-settings/filesystem-cache.mdx"]
         for name in names:
             assert f'<a id="{name}" href="' not in by_path[dest]
         assert "SessionSettingsRedirect" not in by_path[dest]
         assert "SessionSettingsExplorer" in by_path[dest]
         explorer = by_path[
             docs / "snippets/components/SessionSettingsExplorer/SessionSettingsExplorer.jsx"]
-        assert '"label":"filesystem_*"' in explorer
+        assert '"label":"filesystem_*"' not in explorer
         assert '"label":"filesystem_cache_*"' in explorer
+        assert '"label":"filesystem_prefetch_*"' in explorer
+        assert '"label":"force_optimize_*"' in explorer
         assert '"label":"page_cache_*"' in explorer
         assert '"label":"page_*"' not in explorer
         assert 'aria-expanded={isOpen}' in explorer
@@ -218,9 +219,9 @@ def main():
         assert "const [anchorRoutes] = useState(() => (" in explorer
         assert 'canonicalAnchor(decodedHash.split("-", 1)[0])' in explorer
         assert "window.location.replace(" in explorer
-        assert '"openssl":"/reference/settings/session-settings/filesystem/cache"' in explorer
+        assert '"openssl":"/reference/settings/session-settings/filesystem-cache"' in explorer
         assert (
-            '"href":"/reference/settings/session-settings/filesystem/cache#filesystem_cache_alpha"'
+            '"href":"/reference/settings/session-settings/filesystem-cache#filesystem_cache_alpha"'
             in explorer)
         assert "## All session settings" not in by_path[dest]
         assert "### A" not in by_path[dest]
@@ -228,55 +229,50 @@ def main():
             docs / "reference/settings/session-settings/navigation.json"])
         assert navigation["root"] == "reference/settings/session-settings"
         assert navigation["directory"] == "none"
-        assert navigation["pages"][0]["group"] == "filesystem_*"
-        assert "root" not in navigation["pages"][0]
-        assert navigation["pages"][0]["pages"][0] == \
-            "reference/settings/session-settings/filesystem"
-        assert navigation["pages"][1]["group"] == "force_*"
-        assert "root" not in navigation["pages"][1]
-        assert navigation["pages"][1]["pages"][0] == \
-            "reference/settings/session-settings/force"
-        assert "reference/settings/session-settings/page/cache" in navigation["pages"]
-        assert not any(
-            isinstance(page, dict) and page.get("group") == "page_*"
-            for page in navigation["pages"])
+        assert navigation["pages"][:5] == [
+            "reference/settings/session-settings/filesystem-cache",
+            "reference/settings/session-settings/filesystem-prefetch",
+            "reference/settings/session-settings/force",
+            "reference/settings/session-settings/force-optimize",
+            "reference/settings/session-settings/page-cache",
+        ]
+        assert all(isinstance(page, str) for page in navigation["pages"])
 
         generated_manifest = json.loads(by_path[manifest])
         assert generated_manifest["settings"] == len(names)
         assert generated_manifest["anchorRoutes"]["filesystem_cache_alpha"] == \
-            "/reference/settings/session-settings/filesystem/cache"
+            "/reference/settings/session-settings/filesystem-cache"
         assert generated_manifest["anchorRoutes"]["openssl"] == \
-            "/reference/settings/session-settings/filesystem/cache"
+            "/reference/settings/session-settings/filesystem-cache"
         assert generated_manifest["anchorRoutes"][
             "parallel-processing-using-sample-key"
-        ] == "/reference/settings/session-settings/filesystem/cache"
+        ] == "/reference/settings/session-settings/filesystem-cache"
         assert generated_manifest["anchorRoutes"][
             "resize-node-inputs/outputs"
-        ] == "/reference/settings/session-settings/filesystem/cache"
+        ] == "/reference/settings/session-settings/filesystem-cache"
         assert "not-a-rendered-heading" not in generated_manifest["anchorRoutes"]
         assert generated_manifest["anchorRoutes"]["page_cache_alpha"] == \
-            "/reference/settings/session-settings/page/cache"
-        assert "](/reference/settings/session-settings/filesystem/cache#openssl)" in cache_page
-        assert generated_manifest["limits"]["maximumPrefixDepth"] == 2
+            "/reference/settings/session-settings/page-cache"
+        assert "](/reference/settings/session-settings/filesystem-cache#openssl)" in cache_page
+        assert generated_manifest["limits"]["minimumPrefixGroup"] == 2
+        assert generated_manifest["limits"]["maximumPageDepth"] == 1
         assert "legacyPages" not in generated_manifest
         assert all(
             page["settings"] <= mod.SESSION_SETTINGS_MAX_PER_PAGE
             for page in generated_manifest["pageStats"])
-        assert [
-            page["path"]
-            for page in generated_manifest["pageStats"]
+        assert not [
+            page for page in generated_manifest["pageStats"]
             if page["settings"] == 1
-        ] == [
-            "/reference/settings/session-settings/filesystem",
-            "/reference/settings/session-settings/other",
         ]
         assert all(
             page["settings"] > 0
             for page in generated_manifest["pageStats"])
         assert any(
-            route["prefix"] == "filesystem"
-            and route["target"] == "/reference/settings/session-settings/filesystem"
+            route["prefix"] == "filesystem_cache"
+            and route["target"] == "/reference/settings/session-settings/filesystem-cache"
             for route in generated_manifest["routes"])
+        assert generated_manifest["anchorRoutes"]["filesystem_unmatched"] == \
+            "/reference/settings/session-settings/other"
         assert all(
             page["label"].endswith("_*")
             for page in generated_manifest["pageStats"]
@@ -304,18 +300,50 @@ def main():
                 "child setting two",
             ),
         ])
-        timeout_parent = next(
-            page for page in regrouped if page.label == "timeout_*"
+        timeout_page = next(
+            page for page in regrouped
+            if page.label == "timeout_overflow_mode_*"
         )
-        assert [section.name for section in timeout_parent.sections] == [
+        assert [section.name for section in timeout_page.sections] == [
+            "timeout_overflow_mode",
+            "timeout_overflow_mode_only",
+        ]
+        assert not timeout_page.children
+        timeout_other = next(page for page in regrouped if page.label == "Other")
+        assert [section.name for section in timeout_other.sections] == [
             "timeout_before_checking_execution_speed"
         ]
-        assert [child.label for child in timeout_parent.children] == [
-            "timeout_overflow_*"
+
+        representative_pages = mod.group_session_settings([
+            mod.SettingSection(
+                name,
+                name,
+                name,
+            )
+            for name in [
+                "short_circuit_function_evaluation",
+                "short_circuit_function_evaluation_for_nulls",
+                "short_circuit_function_evaluation_for_nulls_threshold",
+                "stream_flush_interval_ms",
+                "stream_like_engine_allow_direct_select",
+                "stream_like_engine_insert_queue",
+                "stream_poll_timeout_ms",
+            ]
+        ])
+        assert [page.label for page in representative_pages] == [
+            "short_circuit_function_evaluation_*",
+            "stream_*",
+            "stream_like_*",
         ]
+        assert [page.route for page in representative_pages] == [
+            "/reference/settings/session-settings/short-circuit-function-evaluation",
+            "/reference/settings/session-settings/stream",
+            "/reference/settings/session-settings/stream-like",
+        ]
+        assert all(not page.children for page in representative_pages)
 
         assert all(
-            len(page["path"].removeprefix(mod.SESSION_SETTINGS_BASE_ROUTE).strip("/").split("/")) <= 2
+            len(page["path"].removeprefix(mod.SESSION_SETTINGS_BASE_ROUTE).strip("/").split("/")) == 1
             for page in generated_manifest["pageStats"])
 
     with tempfile.TemporaryDirectory() as temp:
@@ -423,7 +451,7 @@ def main():
             assert "No matching settings" in explorer
             assert f'const marker = "{family["base_route"]}";' in explorer
             assert (
-                f'"href":"{family["base_route"]}/filesystem/cache'
+                f'"href":"{family["base_route"]}/filesystem-cache'
                 '#filesystem_cache_alpha"'
             ) in explorer
 
@@ -437,7 +465,7 @@ def main():
             manifest = json.loads(by_path[manifest_path])
             assert manifest["settings"] == len(family_names)
             assert manifest["anchorRoutes"]["filesystem_cache_alpha"] == \
-                family["base_route"] + "/filesystem/cache"
+                family["base_route"] + "/filesystem-cache"
             generated_names = set()
             for path, page in by_path.items():
                 if path.suffix == ".mdx" and path != dest:
@@ -448,13 +476,13 @@ def main():
             assert generated_names == set(family_names)
 
             cache_path = docs / (
-                family["base_route"].lstrip("/") + "/filesystem/cache.mdx")
+                family["base_route"].lstrip("/") + "/filesystem-cache.mdx")
             assert (
                 f"title: 'filesystem_cache_* {family['detail_title_suffix']}'"
                 in by_path[cache_path]
             )
 
-    print("OK: two-level settings prefixes preserve coverage and top-level fragment routing")
+    print("OK: flat settings prefixes preserve coverage and top-level fragment routing")
     return 0
 
 

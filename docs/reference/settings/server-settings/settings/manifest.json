@@ -1,15 +1,15 @@
 {
-  "version": 5,
+  "version": 6,
   "settings": 520,
   "anchorRoutes": {
     "abort_on_logical_error": "/reference/settings/server-settings/settings/other",
-    "access_control_improvements": "/reference/settings/server-settings/settings/access/control",
-    "access_control_path": "/reference/settings/server-settings/settings/access/control",
-    "aggregate_function_group_array_action_when_limit_is_reached": "/reference/settings/server-settings/settings/aggregate/function",
-    "aggregate_function_group_array_max_element_size": "/reference/settings/server-settings/settings/aggregate/function",
-    "allow_experimental_executable_udf_drivers": "/reference/settings/server-settings/settings/allow/experimental",
-    "allow_experimental_webassembly_udf": "/reference/settings/server-settings/settings/allow/experimental",
-    "allow_experimental_webterminal": "/reference/settings/server-settings/settings/allow/experimental",
+    "access_control_improvements": "/reference/settings/server-settings/settings/access-control",
+    "access_control_path": "/reference/settings/server-settings/settings/access-control",
+    "aggregate_function_group_array_action_when_limit_is_reached": "/reference/settings/server-settings/settings/aggregate-function",
+    "aggregate_function_group_array_max_element_size": "/reference/settings/server-settings/settings/aggregate-function",
+    "allow_experimental_executable_udf_drivers": "/reference/settings/server-settings/settings/allow-experimental",
+    "allow_experimental_webassembly_udf": "/reference/settings/server-settings/settings/allow-experimental",
+    "allow_experimental_webterminal": "/reference/settings/server-settings/settings/allow-experimental",
     "allow_feature_tier": "/reference/settings/server-settings/settings/allow",
     "allow_impersonate_user": "/reference/settings/server-settings/settings/allow",
     "allow_implicit_no_password": "/reference/settings/server-settings/settings/allow",
@@ -17,30 +17,30 @@
     "allow_plaintext_password": "/reference/settings/server-settings/settings/allow",
     "allow_use_jemalloc_memory": "/reference/settings/server-settings/settings/allow",
     "allowed_disks_for_table_engines": "/reference/settings/server-settings/settings/other",
-    "async_insert_queue_flush_on_shutdown": "/reference/settings/server-settings/settings/async/insert",
-    "async_insert_threads": "/reference/settings/server-settings/settings/async/insert",
-    "async_load_databases": "/reference/settings/server-settings/settings/async/load",
-    "async_load_system_database": "/reference/settings/server-settings/settings/async/load",
+    "async_insert_queue_flush_on_shutdown": "/reference/settings/server-settings/settings/async-insert",
+    "async_insert_threads": "/reference/settings/server-settings/settings/async-insert",
+    "async_load_databases": "/reference/settings/server-settings/settings/async-load",
+    "async_load_system_database": "/reference/settings/server-settings/settings/async-load",
     "asynchronous_heavy_metrics_update_period_s": "/reference/settings/server-settings/settings/asynchronous",
     "asynchronous_insert_log": "/reference/settings/server-settings/settings/asynchronous",
     "asynchronous_metric_log": "/reference/settings/server-settings/settings/asynchronous",
-    "asynchronous_metrics_enable_heavy_metrics": "/reference/settings/server-settings/settings/asynchronous/metrics",
-    "asynchronous_metrics_keeper_metrics_only": "/reference/settings/server-settings/settings/asynchronous/metrics",
-    "asynchronous_metrics_update_period_s": "/reference/settings/server-settings/settings/asynchronous/metrics",
+    "asynchronous_metrics_enable_heavy_metrics": "/reference/settings/server-settings/settings/asynchronous-metrics",
+    "asynchronous_metrics_keeper_metrics_only": "/reference/settings/server-settings/settings/asynchronous-metrics",
+    "asynchronous_metrics_update_period_s": "/reference/settings/server-settings/settings/asynchronous-metrics",
     "auth_use_forwarded_address": "/reference/settings/server-settings/settings/other",
     "background_buffer_flush_schedule_pool_size": "/reference/settings/server-settings/settings/background",
     "background_common_pool_size": "/reference/settings/server-settings/settings/background",
     "background_distributed_schedule_pool_size": "/reference/settings/server-settings/settings/background",
     "background_fetches_pool_size": "/reference/settings/server-settings/settings/background",
-    "background_merges_mutations_concurrency_ratio": "/reference/settings/server-settings/settings/background/merges",
-    "background_merges_mutations_scheduling_policy": "/reference/settings/server-settings/settings/background/merges",
+    "background_merges_mutations_concurrency_ratio": "/reference/settings/server-settings/settings/background-merges",
+    "background_merges_mutations_scheduling_policy": "/reference/settings/server-settings/settings/background-merges",
     "background_message_broker_schedule_pool_size": "/reference/settings/server-settings/settings/background",
     "background_move_pool_size": "/reference/settings/server-settings/settings/background",
     "background_pool_size": "/reference/settings/server-settings/settings/background",
-    "background_schedule_pool_initial_size": "/reference/settings/server-settings/settings/background/schedule",
-    "background_schedule_pool_log": "/reference/settings/server-settings/settings/background/schedule",
-    "background_schedule_pool_max_parallel_tasks_per_type_ratio": "/reference/settings/server-settings/settings/background/schedule",
-    "background_schedule_pool_size": "/reference/settings/server-settings/settings/background/schedule",
+    "background_schedule_pool_initial_size": "/reference/settings/server-settings/settings/background-schedule",
+    "background_schedule_pool_log": "/reference/settings/server-settings/settings/background-schedule",
+    "background_schedule_pool_max_parallel_tasks_per_type_ratio": "/reference/settings/server-settings/settings/background-schedule",
+    "background_schedule_pool_size": "/reference/settings/server-settings/settings/background-schedule",
     "background_streaming_schedule_pool_size": "/reference/settings/server-settings/settings/background",
     "backup_log": "/reference/settings/server-settings/settings/backup",
     "backup_threads": "/reference/settings/server-settings/settings/backup",
@@ -52,38 +52,38 @@
     "cache_size_to_ram_max_ratio": "/reference/settings/server-settings/settings/other",
     "cannot_allocate_thread_fault_injection_probability": "/reference/settings/server-settings/settings/other",
     "cgroups_memory_usage_observer_wait_time": "/reference/settings/server-settings/settings/other",
-    "compiled_expression_cache_elements_size": "/reference/settings/server-settings/settings/compiled/expression",
-    "compiled_expression_cache_size": "/reference/settings/server-settings/settings/compiled/expression",
+    "compiled_expression_cache_elements_size": "/reference/settings/server-settings/settings/compiled-expression",
+    "compiled_expression_cache_size": "/reference/settings/server-settings/settings/compiled-expression",
     "compression": "/reference/settings/server-settings/settings/other",
-    "concurrent_threads_lazy_allocation": "/reference/settings/server-settings/settings/concurrent/threads",
-    "concurrent_threads_scheduler": "/reference/settings/server-settings/settings/concurrent/threads",
-    "concurrent_threads_soft_limit_num": "/reference/settings/server-settings/settings/concurrent/threads",
-    "concurrent_threads_soft_limit_ratio_to_cores": "/reference/settings/server-settings/settings/concurrent/threads",
+    "concurrent_threads_lazy_allocation": "/reference/settings/server-settings/settings/concurrent-threads",
+    "concurrent_threads_scheduler": "/reference/settings/server-settings/settings/concurrent-threads",
+    "concurrent_threads_soft_limit_num": "/reference/settings/server-settings/settings/concurrent-threads",
+    "concurrent_threads_soft_limit_ratio_to_cores": "/reference/settings/server-settings/settings/concurrent-threads",
     "config-file": "/reference/settings/server-settings/settings/other",
     "config_reload_interval_ms": "/reference/settings/server-settings/settings/other",
     "configuration-of-disks": "/reference/settings/server-settings/settings/storage",
     "configuration-of-policies": "/reference/settings/server-settings/settings/storage",
     "core_dump": "/reference/settings/server-settings/settings/other",
-    "cpu_slot_preemption": "/reference/settings/server-settings/settings/cpu/slot",
-    "cpu_slot_preemption_timeout_ms": "/reference/settings/server-settings/settings/cpu/slot",
-    "cpu_slot_quantum_ns": "/reference/settings/server-settings/settings/cpu/slot",
+    "cpu_slot_preemption": "/reference/settings/server-settings/settings/cpu-slot",
+    "cpu_slot_preemption_timeout_ms": "/reference/settings/server-settings/settings/cpu-slot",
+    "cpu_slot_quantum_ns": "/reference/settings/server-settings/settings/cpu-slot",
     "crash_log": "/reference/settings/server-settings/settings/other",
     "custom_cached_disks_base_directory": "/reference/settings/server-settings/settings/custom",
     "custom_settings_prefixes": "/reference/settings/server-settings/settings/custom",
-    "database_atomic_delay_before_drop_table_sec": "/reference/settings/server-settings/settings/database",
-    "database_catalog_drop_error_cooldown_sec": "/reference/settings/server-settings/settings/database/catalog",
-    "database_catalog_drop_table_concurrency": "/reference/settings/server-settings/settings/database/catalog",
-    "database_catalog_unused_dir_cleanup_period_sec": "/reference/settings/server-settings/settings/database/catalog",
-    "database_catalog_unused_dir_hide_timeout_sec": "/reference/settings/server-settings/settings/database/catalog",
-    "database_catalog_unused_dir_rm_timeout_sec": "/reference/settings/server-settings/settings/database/catalog",
-    "database_replicated_allow_detach_permanently": "/reference/settings/server-settings/settings/database/replicated",
-    "database_replicated_drop_broken_tables": "/reference/settings/server-settings/settings/database/replicated",
+    "database_atomic_delay_before_drop_table_sec": "/reference/settings/server-settings/settings/other",
+    "database_catalog_drop_error_cooldown_sec": "/reference/settings/server-settings/settings/database-catalog",
+    "database_catalog_drop_table_concurrency": "/reference/settings/server-settings/settings/database-catalog",
+    "database_catalog_unused_dir_cleanup_period_sec": "/reference/settings/server-settings/settings/database-catalog",
+    "database_catalog_unused_dir_hide_timeout_sec": "/reference/settings/server-settings/settings/database-catalog",
+    "database_catalog_unused_dir_rm_timeout_sec": "/reference/settings/server-settings/settings/database-catalog",
+    "database_replicated_allow_detach_permanently": "/reference/settings/server-settings/settings/database-replicated",
+    "database_replicated_drop_broken_tables": "/reference/settings/server-settings/settings/database-replicated",
     "dead_letter_queue": "/reference/settings/server-settings/settings/other",
     "default_database": "/reference/settings/server-settings/settings/default",
     "default_password_type": "/reference/settings/server-settings/settings/default",
     "default_profile": "/reference/settings/server-settings/settings/default",
-    "default_replica_name": "/reference/settings/server-settings/settings/default/replica",
-    "default_replica_path": "/reference/settings/server-settings/settings/default/replica",
+    "default_replica_name": "/reference/settings/server-settings/settings/default-replica",
+    "default_replica_path": "/reference/settings/server-settings/settings/default-replica",
     "default_session_timeout": "/reference/settings/server-settings/settings/default",
     "dictionaries_config": "/reference/settings/server-settings/settings/dictionaries",
     "dictionaries_lazy_load": "/reference/settings/server-settings/settings/dictionaries",
@@ -92,18 +92,18 @@
     "disable_insertion_and_mutation": "/reference/settings/server-settings/settings/disable",
     "disable_internal_dns_cache": "/reference/settings/server-settings/settings/disable",
     "disable_tunneling_for_https_requests_over_http_proxy": "/reference/settings/server-settings/settings/disable",
-    "disk_connections_hard_limit": "/reference/settings/server-settings/settings/disk/connections",
-    "disk_connections_rcvbuf": "/reference/settings/server-settings/settings/disk/connections",
-    "disk_connections_sndbuf": "/reference/settings/server-settings/settings/disk/connections",
-    "disk_connections_soft_limit": "/reference/settings/server-settings/settings/disk/connections",
-    "disk_connections_store_limit": "/reference/settings/server-settings/settings/disk/connections",
-    "disk_connections_warn_limit": "/reference/settings/server-settings/settings/disk/connections",
-    "disk_transaction_wait_for_blob_removal": "/reference/settings/server-settings/settings/disk",
+    "disk_connections_hard_limit": "/reference/settings/server-settings/settings/disk-connections",
+    "disk_connections_rcvbuf": "/reference/settings/server-settings/settings/disk-connections",
+    "disk_connections_sndbuf": "/reference/settings/server-settings/settings/disk-connections",
+    "disk_connections_soft_limit": "/reference/settings/server-settings/settings/disk-connections",
+    "disk_connections_store_limit": "/reference/settings/server-settings/settings/disk-connections",
+    "disk_connections_warn_limit": "/reference/settings/server-settings/settings/disk-connections",
+    "disk_transaction_wait_for_blob_removal": "/reference/settings/server-settings/settings/other",
     "display_secrets_in_show_and_select": "/reference/settings/server-settings/settings/other",
-    "distributed_cache_apply_throttling_settings_from_client": "/reference/settings/server-settings/settings/distributed/cache",
-    "distributed_cache_keep_up_free_connections_ratio": "/reference/settings/server-settings/settings/distributed/cache",
-    "distributed_cache_write_pool_size": "/reference/settings/server-settings/settings/distributed/cache",
-    "distributed_ddl": "/reference/settings/server-settings/settings/distributed/ddl",
+    "distributed_cache_apply_throttling_settings_from_client": "/reference/settings/server-settings/settings/distributed-cache",
+    "distributed_cache_keep_up_free_connections_ratio": "/reference/settings/server-settings/settings/distributed-cache",
+    "distributed_cache_write_pool_size": "/reference/settings/server-settings/settings/distributed-cache",
+    "distributed_ddl": "/reference/settings/server-settings/settings/distributed-ddl",
     "distributed_ddl.cleanup_delay_period": "/reference/settings/server-settings/settings/distributed",
     "distributed_ddl.max_tasks_in_queue": "/reference/settings/server-settings/settings/distributed",
     "distributed_ddl.path": "/reference/settings/server-settings/settings/distributed",
@@ -111,85 +111,85 @@
     "distributed_ddl.profile": "/reference/settings/server-settings/settings/distributed",
     "distributed_ddl.replicas_path": "/reference/settings/server-settings/settings/distributed",
     "distributed_ddl.task_max_lifetime": "/reference/settings/server-settings/settings/distributed",
-    "distributed_ddl_use_initial_user_and_roles": "/reference/settings/server-settings/settings/distributed/ddl",
-    "dns_allow_resolve_names_to_ipv4": "/reference/settings/server-settings/settings/dns/allow",
-    "dns_allow_resolve_names_to_ipv6": "/reference/settings/server-settings/settings/dns/allow",
-    "dns_cache_max_entries": "/reference/settings/server-settings/settings/dns/cache",
-    "dns_cache_update_period": "/reference/settings/server-settings/settings/dns/cache",
-    "dns_max_consecutive_failures": "/reference/settings/server-settings/settings/dns",
-    "drop_distributed_cache_pool_size": "/reference/settings/server-settings/settings/drop/distributed",
-    "drop_distributed_cache_queue_size": "/reference/settings/server-settings/settings/drop/distributed",
+    "distributed_ddl_use_initial_user_and_roles": "/reference/settings/server-settings/settings/distributed-ddl",
+    "dns_allow_resolve_names_to_ipv4": "/reference/settings/server-settings/settings/dns-allow",
+    "dns_allow_resolve_names_to_ipv6": "/reference/settings/server-settings/settings/dns-allow",
+    "dns_cache_max_entries": "/reference/settings/server-settings/settings/dns-cache",
+    "dns_cache_update_period": "/reference/settings/server-settings/settings/dns-cache",
+    "dns_max_consecutive_failures": "/reference/settings/server-settings/settings/other",
+    "drop_distributed_cache_pool_size": "/reference/settings/server-settings/settings/drop-distributed",
+    "drop_distributed_cache_queue_size": "/reference/settings/server-settings/settings/drop-distributed",
     "dynamic_user_defined_executable_functions_path": "/reference/settings/server-settings/settings/other",
     "enable_azure_sdk_logging": "/reference/settings/server-settings/settings/enable",
     "enable_webterminal": "/reference/settings/server-settings/settings/enable",
-    "encryption": "/reference/settings/server-settings/settings/encryption",
-    "encryption_header_cache_policy": "/reference/settings/server-settings/settings/encryption/header",
-    "encryption_header_cache_size": "/reference/settings/server-settings/settings/encryption/header",
-    "encryption_header_cache_size_ratio": "/reference/settings/server-settings/settings/encryption/header",
+    "encryption": "/reference/settings/server-settings/settings/other",
+    "encryption_header_cache_policy": "/reference/settings/server-settings/settings/encryption-header",
+    "encryption_header_cache_size": "/reference/settings/server-settings/settings/encryption-header",
+    "encryption_header_cache_size_ratio": "/reference/settings/server-settings/settings/encryption-header",
     "enforce_keeper_component_tracking": "/reference/settings/server-settings/settings/other",
     "error_log": "/reference/settings/server-settings/settings/other",
     "filesystem_caches_path": "/reference/settings/server-settings/settings/other",
     "format_parsing_thread_pool_queue_size": "/reference/settings/server-settings/settings/format",
     "format_schema_path": "/reference/settings/server-settings/settings/format",
-    "global_profiler_cpu_time_period_ns": "/reference/settings/server-settings/settings/global/profiler",
-    "global_profiler_real_time_period_ns": "/reference/settings/server-settings/settings/global/profiler",
+    "global_profiler_cpu_time_period_ns": "/reference/settings/server-settings/settings/global-profiler",
+    "global_profiler_real_time_period_ns": "/reference/settings/server-settings/settings/global-profiler",
     "google_protos_path": "/reference/settings/server-settings/settings/other",
     "graphite": "/reference/settings/server-settings/settings/graphite",
     "graphite_rollup": "/reference/settings/server-settings/settings/graphite",
     "handshake_timeout_milliseconds": "/reference/settings/server-settings/settings/other",
     "hdfs.libhdfs3_conf": "/reference/settings/server-settings/settings/other",
     "hsts_max_age": "/reference/settings/server-settings/settings/other",
-    "http_connections_hard_limit": "/reference/settings/server-settings/settings/http/connections",
-    "http_connections_rcvbuf": "/reference/settings/server-settings/settings/http/connections",
-    "http_connections_sndbuf": "/reference/settings/server-settings/settings/http/connections",
-    "http_connections_soft_limit": "/reference/settings/server-settings/settings/http/connections",
-    "http_connections_store_limit": "/reference/settings/server-settings/settings/http/connections",
-    "http_connections_warn_limit": "/reference/settings/server-settings/settings/http/connections",
+    "http_connections_hard_limit": "/reference/settings/server-settings/settings/http-connections",
+    "http_connections_rcvbuf": "/reference/settings/server-settings/settings/http-connections",
+    "http_connections_sndbuf": "/reference/settings/server-settings/settings/http-connections",
+    "http_connections_soft_limit": "/reference/settings/server-settings/settings/http-connections",
+    "http_connections_store_limit": "/reference/settings/server-settings/settings/http-connections",
+    "http_connections_warn_limit": "/reference/settings/server-settings/settings/http-connections",
     "http_handlers": "/reference/settings/server-settings/settings/http",
     "http_options_response": "/reference/settings/server-settings/settings/http",
     "http_server_default_response": "/reference/settings/server-settings/settings/http",
-    "iceberg_background_schedule_pool_size": "/reference/settings/server-settings/settings/iceberg",
-    "iceberg_catalog_threadpool_pool_size": "/reference/settings/server-settings/settings/iceberg/catalog",
-    "iceberg_catalog_threadpool_queue_size": "/reference/settings/server-settings/settings/iceberg/catalog",
-    "iceberg_compaction_threadpool_pool_size": "/reference/settings/server-settings/settings/iceberg/compaction",
-    "iceberg_compaction_threadpool_queue_size": "/reference/settings/server-settings/settings/iceberg/compaction",
-    "iceberg_metadata_files_cache_max_entries": "/reference/settings/server-settings/settings/iceberg/metadata",
-    "iceberg_metadata_files_cache_policy": "/reference/settings/server-settings/settings/iceberg/metadata",
-    "iceberg_metadata_files_cache_size": "/reference/settings/server-settings/settings/iceberg/metadata",
-    "iceberg_metadata_files_cache_size_ratio": "/reference/settings/server-settings/settings/iceberg/metadata",
-    "iceberg_scheduler_compaction_threadpool_pool_size": "/reference/settings/server-settings/settings/iceberg/scheduler",
-    "iceberg_scheduler_compaction_threadpool_queue_size": "/reference/settings/server-settings/settings/iceberg/scheduler",
+    "iceberg_background_schedule_pool_size": "/reference/settings/server-settings/settings/other",
+    "iceberg_catalog_threadpool_pool_size": "/reference/settings/server-settings/settings/iceberg-catalog",
+    "iceberg_catalog_threadpool_queue_size": "/reference/settings/server-settings/settings/iceberg-catalog",
+    "iceberg_compaction_threadpool_pool_size": "/reference/settings/server-settings/settings/iceberg-compaction",
+    "iceberg_compaction_threadpool_queue_size": "/reference/settings/server-settings/settings/iceberg-compaction",
+    "iceberg_metadata_files_cache_max_entries": "/reference/settings/server-settings/settings/iceberg-metadata",
+    "iceberg_metadata_files_cache_policy": "/reference/settings/server-settings/settings/iceberg-metadata",
+    "iceberg_metadata_files_cache_size": "/reference/settings/server-settings/settings/iceberg-metadata",
+    "iceberg_metadata_files_cache_size_ratio": "/reference/settings/server-settings/settings/iceberg-metadata",
+    "iceberg_scheduler_compaction_threadpool_pool_size": "/reference/settings/server-settings/settings/iceberg-scheduler",
+    "iceberg_scheduler_compaction_threadpool_queue_size": "/reference/settings/server-settings/settings/iceberg-scheduler",
     "ignore_empty_sql_security_in_create_view_query": "/reference/settings/server-settings/settings/other",
     "include_from": "/reference/settings/server-settings/settings/other",
-    "index_mark_cache_policy": "/reference/settings/server-settings/settings/index/mark",
-    "index_mark_cache_prewarm_ratio": "/reference/settings/server-settings/settings/index/mark",
-    "index_mark_cache_size": "/reference/settings/server-settings/settings/index/mark",
-    "index_mark_cache_size_ratio": "/reference/settings/server-settings/settings/index/mark",
-    "index_uncompressed_cache_policy": "/reference/settings/server-settings/settings/index/uncompressed",
-    "index_uncompressed_cache_size": "/reference/settings/server-settings/settings/index/uncompressed",
-    "index_uncompressed_cache_size_ratio": "/reference/settings/server-settings/settings/index/uncompressed",
+    "index_mark_cache_policy": "/reference/settings/server-settings/settings/index-mark",
+    "index_mark_cache_prewarm_ratio": "/reference/settings/server-settings/settings/index-mark",
+    "index_mark_cache_size": "/reference/settings/server-settings/settings/index-mark",
+    "index_mark_cache_size_ratio": "/reference/settings/server-settings/settings/index-mark",
+    "index_uncompressed_cache_policy": "/reference/settings/server-settings/settings/index-uncompressed",
+    "index_uncompressed_cache_size": "/reference/settings/server-settings/settings/index-uncompressed",
+    "index_uncompressed_cache_size_ratio": "/reference/settings/server-settings/settings/index-uncompressed",
     "insert_deduplication_version": "/reference/settings/server-settings/settings/other",
-    "interserver_http_credentials": "/reference/settings/server-settings/settings/interserver/http",
-    "interserver_http_host": "/reference/settings/server-settings/settings/interserver/http",
-    "interserver_http_port": "/reference/settings/server-settings/settings/interserver/http",
-    "interserver_https_host": "/reference/settings/server-settings/settings/interserver/https",
-    "interserver_https_port": "/reference/settings/server-settings/settings/interserver/https",
+    "interserver_http_credentials": "/reference/settings/server-settings/settings/interserver-http",
+    "interserver_http_host": "/reference/settings/server-settings/settings/interserver-http",
+    "interserver_http_port": "/reference/settings/server-settings/settings/interserver-http",
+    "interserver_https_host": "/reference/settings/server-settings/settings/interserver-https",
+    "interserver_https_port": "/reference/settings/server-settings/settings/interserver-https",
     "interserver_listen_host": "/reference/settings/server-settings/settings/interserver",
     "interserver_tables_status_require_auth": "/reference/settings/server-settings/settings/interserver",
     "io_thread_pool_queue_size": "/reference/settings/server-settings/settings/other",
     "jemalloc_collect_global_profile_samples_in_trace_log": "/reference/settings/server-settings/settings/jemalloc",
-    "jemalloc_enable_background_threads": "/reference/settings/server-settings/settings/jemalloc/enable",
-    "jemalloc_enable_global_profiler": "/reference/settings/server-settings/settings/jemalloc/enable",
-    "jemalloc_flush_profile_interval_bytes": "/reference/settings/server-settings/settings/jemalloc/flush",
-    "jemalloc_flush_profile_on_memory_exceeded": "/reference/settings/server-settings/settings/jemalloc/flush",
-    "jemalloc_flush_profile_on_memory_exceeded_interval": "/reference/settings/server-settings/settings/jemalloc/flush",
+    "jemalloc_enable_background_threads": "/reference/settings/server-settings/settings/jemalloc-enable",
+    "jemalloc_enable_global_profiler": "/reference/settings/server-settings/settings/jemalloc-enable",
+    "jemalloc_flush_profile_interval_bytes": "/reference/settings/server-settings/settings/jemalloc-flush",
+    "jemalloc_flush_profile_on_memory_exceeded": "/reference/settings/server-settings/settings/jemalloc-flush",
+    "jemalloc_flush_profile_on_memory_exceeded_interval": "/reference/settings/server-settings/settings/jemalloc-flush",
     "jemalloc_max_background_threads_num": "/reference/settings/server-settings/settings/jemalloc",
     "jemalloc_profiler_sampling_rate": "/reference/settings/server-settings/settings/jemalloc",
     "keep_alive_timeout": "/reference/settings/server-settings/settings/other",
     "keeper_hosts": "/reference/settings/server-settings/settings/keeper",
     "keeper_multiread_batch_size": "/reference/settings/server-settings/settings/keeper",
-    "keeper_server.socket_receive_timeout_sec": "/reference/settings/server-settings/settings/keeper/server-socket",
-    "keeper_server.socket_send_timeout_sec": "/reference/settings/server-settings/settings/keeper/server-socket",
+    "keeper_server.socket_receive_timeout_sec": "/reference/settings/server-settings/settings/keeper-server-socket",
+    "keeper_server.socket_send_timeout_sec": "/reference/settings/server-settings/settings/keeper-server-socket",
     "ldap_servers": "/reference/settings/server-settings/settings/other",
     "license_file": "/reference/settings/server-settings/settings/license",
     "license_public_key_for_testing": "/reference/settings/server-settings/settings/license",
@@ -197,8 +197,8 @@
     "listen_host": "/reference/settings/server-settings/settings/listen",
     "listen_reuse_port": "/reference/settings/server-settings/settings/listen",
     "listen_try": "/reference/settings/server-settings/settings/listen",
-    "load_marks_threadpool_pool_size": "/reference/settings/server-settings/settings/load/marks",
-    "load_marks_threadpool_queue_size": "/reference/settings/server-settings/settings/load/marks",
+    "load_marks_threadpool_pool_size": "/reference/settings/server-settings/settings/load-marks",
+    "load_marks_threadpool_queue_size": "/reference/settings/server-settings/settings/load-marks",
     "logger": "/reference/settings/server-settings/settings/other",
     "logger.async": "/reference/settings/server-settings/settings/logger-async",
     "logger.async_queye_max_size": "/reference/settings/server-settings/settings/logger-async",
@@ -217,105 +217,105 @@
     "logger.syslog_level": "/reference/settings/server-settings/settings/other",
     "logger.use_syslog": "/reference/settings/server-settings/settings/other",
     "macros": "/reference/settings/server-settings/settings/other",
-    "mark_cache_policy": "/reference/settings/server-settings/settings/mark/cache",
-    "mark_cache_prewarm_ratio": "/reference/settings/server-settings/settings/mark/cache",
-    "mark_cache_size": "/reference/settings/server-settings/settings/mark/cache",
-    "mark_cache_size_ratio": "/reference/settings/server-settings/settings/mark/cache",
+    "mark_cache_policy": "/reference/settings/server-settings/settings/mark-cache",
+    "mark_cache_prewarm_ratio": "/reference/settings/server-settings/settings/mark-cache",
+    "mark_cache_size": "/reference/settings/server-settings/settings/mark-cache",
+    "mark_cache_size_ratio": "/reference/settings/server-settings/settings/mark-cache",
     "max_active_parts_loading_thread_pool_size": "/reference/settings/server-settings/settings/max",
     "max_authentication_methods_per_user": "/reference/settings/server-settings/settings/max",
     "max_backup_bandwidth_for_server": "/reference/settings/server-settings/settings/max",
-    "max_backups_io_thread_pool_free_size": "/reference/settings/server-settings/settings/max/backups",
-    "max_backups_io_thread_pool_size": "/reference/settings/server-settings/settings/max/backups",
+    "max_backups_io_thread_pool_free_size": "/reference/settings/server-settings/settings/max-backups",
+    "max_backups_io_thread_pool_size": "/reference/settings/server-settings/settings/max-backups",
     "max_build_vector_similarity_index_thread_pool_size": "/reference/settings/server-settings/settings/max",
-    "max_concurrent_insert_queries": "/reference/settings/server-settings/settings/max/concurrent",
-    "max_concurrent_queries": "/reference/settings/server-settings/settings/max/concurrent",
-    "max_concurrent_select_queries": "/reference/settings/server-settings/settings/max/concurrent",
+    "max_concurrent_insert_queries": "/reference/settings/server-settings/settings/max-concurrent",
+    "max_concurrent_queries": "/reference/settings/server-settings/settings/max-concurrent",
+    "max_concurrent_select_queries": "/reference/settings/server-settings/settings/max-concurrent",
     "max_connections": "/reference/settings/server-settings/settings/max",
-    "max_database_num_to_throw": "/reference/settings/server-settings/settings/max/database",
-    "max_database_num_to_warn": "/reference/settings/server-settings/settings/max/database",
-    "max_database_replicated_create_table_thread_pool_size": "/reference/settings/server-settings/settings/max/database",
-    "max_dictionary_num_to_throw": "/reference/settings/server-settings/settings/max/dictionary",
-    "max_dictionary_num_to_warn": "/reference/settings/server-settings/settings/max/dictionary",
-    "max_distributed_cache_read_bandwidth_for_server": "/reference/settings/server-settings/settings/max/distributed",
-    "max_distributed_cache_write_bandwidth_for_server": "/reference/settings/server-settings/settings/max/distributed",
+    "max_database_num_to_throw": "/reference/settings/server-settings/settings/max-database",
+    "max_database_num_to_warn": "/reference/settings/server-settings/settings/max-database",
+    "max_database_replicated_create_table_thread_pool_size": "/reference/settings/server-settings/settings/max-database",
+    "max_dictionary_num_to_throw": "/reference/settings/server-settings/settings/max-dictionary",
+    "max_dictionary_num_to_warn": "/reference/settings/server-settings/settings/max-dictionary",
+    "max_distributed_cache_read_bandwidth_for_server": "/reference/settings/server-settings/settings/max-distributed",
+    "max_distributed_cache_write_bandwidth_for_server": "/reference/settings/server-settings/settings/max-distributed",
     "max_entries_for_hash_table_stats": "/reference/settings/server-settings/settings/max",
     "max_fetch_partition_thread_pool_size": "/reference/settings/server-settings/settings/max",
-    "max_format_parsing_thread_pool_free_size": "/reference/settings/server-settings/settings/max/format",
-    "max_format_parsing_thread_pool_size": "/reference/settings/server-settings/settings/max/format",
+    "max_format_parsing_thread_pool_free_size": "/reference/settings/server-settings/settings/max-format",
+    "max_format_parsing_thread_pool_size": "/reference/settings/server-settings/settings/max-format",
     "max_held_snapshots": "/reference/settings/server-settings/settings/max",
     "max_http_index_page_size": "/reference/settings/server-settings/settings/max",
-    "max_io_thread_pool_free_size": "/reference/settings/server-settings/settings/max/io",
-    "max_io_thread_pool_size": "/reference/settings/server-settings/settings/max/io",
+    "max_io_thread_pool_free_size": "/reference/settings/server-settings/settings/max-io",
+    "max_io_thread_pool_size": "/reference/settings/server-settings/settings/max-io",
     "max_keep_alive_requests": "/reference/settings/server-settings/settings/max",
-    "max_local_read_bandwidth_for_server": "/reference/settings/server-settings/settings/max/local",
-    "max_local_write_bandwidth_for_server": "/reference/settings/server-settings/settings/max/local",
+    "max_local_read_bandwidth_for_server": "/reference/settings/server-settings/settings/max-local",
+    "max_local_write_bandwidth_for_server": "/reference/settings/server-settings/settings/max-local",
     "max_materialized_views_count_for_table": "/reference/settings/server-settings/settings/max",
     "max_merges_bandwidth_for_server": "/reference/settings/server-settings/settings/max",
     "max_mutations_bandwidth_for_server": "/reference/settings/server-settings/settings/max",
-    "max_named_collection_num_to_throw": "/reference/settings/server-settings/settings/max/named",
-    "max_named_collection_num_to_warn": "/reference/settings/server-settings/settings/max/named",
+    "max_named_collection_num_to_throw": "/reference/settings/server-settings/settings/max-named",
+    "max_named_collection_num_to_warn": "/reference/settings/server-settings/settings/max-named",
     "max_open_files": "/reference/settings/server-settings/settings/max",
     "max_os_cpu_wait_time_ratio_to_drop_connection": "/reference/settings/server-settings/settings/max",
     "max_outdated_parts_loading_thread_pool_size": "/reference/settings/server-settings/settings/max",
     "max_part_num_to_warn": "/reference/settings/server-settings/settings/max",
     "max_partition_size_to_drop": "/reference/settings/server-settings/settings/max",
     "max_parts_cleaning_thread_pool_size": "/reference/settings/server-settings/settings/max",
-    "max_pending_mutations_execution_time_to_warn": "/reference/settings/server-settings/settings/max/pending",
-    "max_pending_mutations_to_warn": "/reference/settings/server-settings/settings/max/pending",
+    "max_pending_mutations_execution_time_to_warn": "/reference/settings/server-settings/settings/max-pending",
+    "max_pending_mutations_to_warn": "/reference/settings/server-settings/settings/max-pending",
     "max_per_cpu_untracked_memory": "/reference/settings/server-settings/settings/max",
-    "max_prefixes_deserialization_thread_pool_free_size": "/reference/settings/server-settings/settings/max/prefixes",
-    "max_prefixes_deserialization_thread_pool_size": "/reference/settings/server-settings/settings/max/prefixes",
-    "max_remote_read_connections": "/reference/settings/server-settings/settings/max/remote",
-    "max_remote_read_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max/remote",
-    "max_remote_write_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max/remote",
-    "max_replicated_fetches_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max/replicated",
-    "max_replicated_sends_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max/replicated",
-    "max_replicated_table_num_to_throw": "/reference/settings/server-settings/settings/max/replicated",
-    "max_server_memory_usage": "/reference/settings/server-settings/settings/max/server",
-    "max_server_memory_usage_to_ram_ratio": "/reference/settings/server-settings/settings/max/server",
+    "max_prefixes_deserialization_thread_pool_free_size": "/reference/settings/server-settings/settings/max-prefixes",
+    "max_prefixes_deserialization_thread_pool_size": "/reference/settings/server-settings/settings/max-prefixes",
+    "max_remote_read_connections": "/reference/settings/server-settings/settings/max-remote",
+    "max_remote_read_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max-remote",
+    "max_remote_write_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max-remote",
+    "max_replicated_fetches_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max-replicated",
+    "max_replicated_sends_network_bandwidth_for_server": "/reference/settings/server-settings/settings/max-replicated",
+    "max_replicated_table_num_to_throw": "/reference/settings/server-settings/settings/max-replicated",
+    "max_server_memory_usage": "/reference/settings/server-settings/settings/max-server-memory-usage",
+    "max_server_memory_usage_to_ram_ratio": "/reference/settings/server-settings/settings/max-server-memory-usage",
     "max_session_timeout": "/reference/settings/server-settings/settings/max",
-    "max_snapshot_commit_thread_pool_free_size": "/reference/settings/server-settings/settings/max/snapshot",
-    "max_snapshot_commit_thread_pool_size": "/reference/settings/server-settings/settings/max/snapshot",
-    "max_table_num_to_throw": "/reference/settings/server-settings/settings/max/table",
-    "max_table_num_to_warn": "/reference/settings/server-settings/settings/max/table",
-    "max_table_size_to_drop": "/reference/settings/server-settings/settings/max/table",
+    "max_snapshot_commit_thread_pool_free_size": "/reference/settings/server-settings/settings/max-snapshot",
+    "max_snapshot_commit_thread_pool_size": "/reference/settings/server-settings/settings/max-snapshot",
+    "max_table_num_to_throw": "/reference/settings/server-settings/settings/max-table",
+    "max_table_num_to_warn": "/reference/settings/server-settings/settings/max-table",
+    "max_table_size_to_drop": "/reference/settings/server-settings/settings/max-table",
     "max_temporary_data_on_disk_size": "/reference/settings/server-settings/settings/max",
-    "max_thread_pool_free_size": "/reference/settings/server-settings/settings/max/thread",
-    "max_thread_pool_size": "/reference/settings/server-settings/settings/max/thread",
+    "max_thread_pool_free_size": "/reference/settings/server-settings/settings/max-thread",
+    "max_thread_pool_size": "/reference/settings/server-settings/settings/max-thread",
     "max_unexpected_parts_loading_thread_pool_size": "/reference/settings/server-settings/settings/max",
-    "max_view_num_to_throw": "/reference/settings/server-settings/settings/max/view",
-    "max_view_num_to_warn": "/reference/settings/server-settings/settings/max/view",
+    "max_view_num_to_throw": "/reference/settings/server-settings/settings/max-view",
+    "max_view_num_to_warn": "/reference/settings/server-settings/settings/max-view",
     "max_waiting_queries": "/reference/settings/server-settings/settings/max",
     "max_zookeeper_pooled_connections": "/reference/settings/server-settings/settings/max",
-    "memory_worker_correct_memory_tracker": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_decay_adjustment_period_ms": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_dynamic_hard_limit": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_period_ms": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_purge_dirty_pages_threshold_ratio": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_purge_total_memory_threshold_ratio": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_rss_speculative_reserve_ratio": "/reference/settings/server-settings/settings/memory/worker",
-    "memory_worker_use_cgroup": "/reference/settings/server-settings/settings/memory/worker",
+    "memory_worker_correct_memory_tracker": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_decay_adjustment_period_ms": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_dynamic_hard_limit": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_period_ms": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_purge_dirty_pages_threshold_ratio": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_purge_total_memory_threshold_ratio": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_rss_speculative_reserve_ratio": "/reference/settings/server-settings/settings/memory-worker",
+    "memory_worker_use_cgroup": "/reference/settings/server-settings/settings/memory-worker",
     "merge_tree": "/reference/settings/server-settings/settings/merge",
     "merge_workload": "/reference/settings/server-settings/settings/merge",
-    "merges_mutations_memory_usage_soft_limit": "/reference/settings/server-settings/settings/merges/mutations",
-    "merges_mutations_memory_usage_to_ram_ratio": "/reference/settings/server-settings/settings/merges/mutations",
+    "merges_mutations_memory_usage_soft_limit": "/reference/settings/server-settings/settings/merges-mutations",
+    "merges_mutations_memory_usage_to_ram_ratio": "/reference/settings/server-settings/settings/merges-mutations",
     "message_queue_disable_insertion": "/reference/settings/server-settings/settings/other",
     "metric_log": "/reference/settings/server-settings/settings/other",
     "min_allocation_size_to_throw_on_memory_limit": "/reference/settings/server-settings/settings/min",
     "min_os_cpu_wait_time_ratio_to_drop_connection": "/reference/settings/server-settings/settings/min",
-    "mlock_executable": "/reference/settings/server-settings/settings/mlock/executable",
-    "mlock_executable_min_total_memory_amount_bytes": "/reference/settings/server-settings/settings/mlock/executable",
+    "mlock_executable": "/reference/settings/server-settings/settings/mlock-executable",
+    "mlock_executable_min_total_memory_amount_bytes": "/reference/settings/server-settings/settings/mlock-executable",
     "mmap_cache_size": "/reference/settings/server-settings/settings/other",
     "mutation_workload": "/reference/settings/server-settings/settings/other",
     "mysql_port": "/reference/settings/server-settings/settings/mysql",
     "mysql_require_secure_transport": "/reference/settings/server-settings/settings/mysql",
-    "oom_canary_enable": "/reference/settings/server-settings/settings/oom/canary",
-    "oom_canary_initial_backoff_seconds": "/reference/settings/server-settings/settings/oom/canary",
-    "oom_canary_max_backoff_seconds": "/reference/settings/server-settings/settings/oom/canary",
-    "oom_canary_max_rapid_relaunches": "/reference/settings/server-settings/settings/oom/canary",
-    "oom_canary_relaunch": "/reference/settings/server-settings/settings/oom/canary",
-    "oom_canary_size": "/reference/settings/server-settings/settings/oom/canary",
-    "oom_score": "/reference/settings/server-settings/settings/oom",
+    "oom_canary_enable": "/reference/settings/server-settings/settings/oom-canary",
+    "oom_canary_initial_backoff_seconds": "/reference/settings/server-settings/settings/oom-canary",
+    "oom_canary_max_backoff_seconds": "/reference/settings/server-settings/settings/oom-canary",
+    "oom_canary_max_rapid_relaunches": "/reference/settings/server-settings/settings/oom-canary",
+    "oom_canary_relaunch": "/reference/settings/server-settings/settings/oom-canary",
+    "oom_canary_size": "/reference/settings/server-settings/settings/oom-canary",
+    "oom_score": "/reference/settings/server-settings/settings/other",
     "openssl": "/reference/settings/server-settings/settings/other",
     "openssl.client.cachesessions": "/reference/settings/server-settings/settings/other",
     "openssl.client.caconfig": "/reference/settings/server-settings/settings/other",
@@ -357,55 +357,55 @@
     "opentelemetry_span_log": "/reference/settings/server-settings/settings/other",
     "os_collect_psi_metrics": "/reference/settings/server-settings/settings/os",
     "os_cpu_busy_time_threshold": "/reference/settings/server-settings/settings/os",
-    "os_threads_nice_value_distributed_cache_tcp_handler": "/reference/settings/server-settings/settings/os/threads",
-    "os_threads_nice_value_merge_mutate": "/reference/settings/server-settings/settings/os/threads",
-    "os_threads_nice_value_zookeeper_client_send_receive": "/reference/settings/server-settings/settings/os/threads",
-    "page_cache_free_memory_ratio": "/reference/settings/server-settings/settings/page/cache",
-    "page_cache_history_window_ms": "/reference/settings/server-settings/settings/page/cache",
-    "page_cache_max_size": "/reference/settings/server-settings/settings/page/cache",
-    "page_cache_min_size": "/reference/settings/server-settings/settings/page/cache",
-    "page_cache_policy": "/reference/settings/server-settings/settings/page/cache",
-    "page_cache_shards": "/reference/settings/server-settings/settings/page/cache",
-    "page_cache_size_ratio": "/reference/settings/server-settings/settings/page/cache",
-    "paimon_metadata_files_cache_max_entries": "/reference/settings/server-settings/settings/paimon/metadata",
-    "paimon_metadata_files_cache_policy": "/reference/settings/server-settings/settings/paimon/metadata",
-    "paimon_metadata_files_cache_size": "/reference/settings/server-settings/settings/paimon/metadata",
-    "paimon_metadata_files_cache_size_ratio": "/reference/settings/server-settings/settings/paimon/metadata",
-    "parquet_metadata_cache_max_entries": "/reference/settings/server-settings/settings/parquet/metadata",
-    "parquet_metadata_cache_policy": "/reference/settings/server-settings/settings/parquet/metadata",
-    "parquet_metadata_cache_size": "/reference/settings/server-settings/settings/parquet/metadata",
-    "parquet_metadata_cache_size_ratio": "/reference/settings/server-settings/settings/parquet/metadata",
+    "os_threads_nice_value_distributed_cache_tcp_handler": "/reference/settings/server-settings/settings/os-threads",
+    "os_threads_nice_value_merge_mutate": "/reference/settings/server-settings/settings/os-threads",
+    "os_threads_nice_value_zookeeper_client_send_receive": "/reference/settings/server-settings/settings/os-threads",
+    "page_cache_free_memory_ratio": "/reference/settings/server-settings/settings/page-cache",
+    "page_cache_history_window_ms": "/reference/settings/server-settings/settings/page-cache",
+    "page_cache_max_size": "/reference/settings/server-settings/settings/page-cache",
+    "page_cache_min_size": "/reference/settings/server-settings/settings/page-cache",
+    "page_cache_policy": "/reference/settings/server-settings/settings/page-cache",
+    "page_cache_shards": "/reference/settings/server-settings/settings/page-cache",
+    "page_cache_size_ratio": "/reference/settings/server-settings/settings/page-cache",
+    "paimon_metadata_files_cache_max_entries": "/reference/settings/server-settings/settings/paimon-metadata",
+    "paimon_metadata_files_cache_policy": "/reference/settings/server-settings/settings/paimon-metadata",
+    "paimon_metadata_files_cache_size": "/reference/settings/server-settings/settings/paimon-metadata",
+    "paimon_metadata_files_cache_size_ratio": "/reference/settings/server-settings/settings/paimon-metadata",
+    "parquet_metadata_cache_max_entries": "/reference/settings/server-settings/settings/parquet-metadata",
+    "parquet_metadata_cache_policy": "/reference/settings/server-settings/settings/parquet-metadata",
+    "parquet_metadata_cache_size": "/reference/settings/server-settings/settings/parquet-metadata",
+    "parquet_metadata_cache_size_ratio": "/reference/settings/server-settings/settings/parquet-metadata",
     "part_log": "/reference/settings/server-settings/settings/other",
-    "parts_kill_delay_period": "/reference/settings/server-settings/settings/parts/kill",
-    "parts_kill_delay_period_random_add": "/reference/settings/server-settings/settings/parts/kill",
-    "parts_killer_max_condemned_parts_per_batch": "/reference/settings/server-settings/settings/parts/killer",
-    "parts_killer_pool_size": "/reference/settings/server-settings/settings/parts/killer",
+    "parts_kill_delay_period": "/reference/settings/server-settings/settings/parts-kill-delay-period",
+    "parts_kill_delay_period_random_add": "/reference/settings/server-settings/settings/parts-kill-delay-period",
+    "parts_killer_max_condemned_parts_per_batch": "/reference/settings/server-settings/settings/parts-killer",
+    "parts_killer_pool_size": "/reference/settings/server-settings/settings/parts-killer",
     "path": "/reference/settings/server-settings/settings/other",
     "per_cpu_untracked_memory_thread_buffer": "/reference/settings/server-settings/settings/other",
     "point_in_polygon_cache_size": "/reference/settings/server-settings/settings/other",
     "postgresql_port": "/reference/settings/server-settings/settings/postgresql",
     "postgresql_require_secure_transport": "/reference/settings/server-settings/settings/postgresql",
-    "prefetch_threadpool_pool_size": "/reference/settings/server-settings/settings/prefetch/threadpool",
-    "prefetch_threadpool_queue_size": "/reference/settings/server-settings/settings/prefetch/threadpool",
+    "prefetch_threadpool_pool_size": "/reference/settings/server-settings/settings/prefetch-threadpool",
+    "prefetch_threadpool_queue_size": "/reference/settings/server-settings/settings/prefetch-threadpool",
     "prefixes_deserialization_thread_pool_thread_pool_queue_size": "/reference/settings/server-settings/settings/other",
     "prepare_system_log_tables_on_startup": "/reference/settings/server-settings/settings/other",
-    "primary_index_cache_policy": "/reference/settings/server-settings/settings/primary/index",
-    "primary_index_cache_prewarm_ratio": "/reference/settings/server-settings/settings/primary/index",
-    "primary_index_cache_size": "/reference/settings/server-settings/settings/primary/index",
-    "primary_index_cache_size_ratio": "/reference/settings/server-settings/settings/primary/index",
+    "primary_index_cache_policy": "/reference/settings/server-settings/settings/primary-index",
+    "primary_index_cache_prewarm_ratio": "/reference/settings/server-settings/settings/primary-index",
+    "primary_index_cache_size": "/reference/settings/server-settings/settings/primary-index",
+    "primary_index_cache_size_ratio": "/reference/settings/server-settings/settings/primary-index",
     "process_query_plan_packet": "/reference/settings/server-settings/settings/other",
     "processors_profile_log": "/reference/settings/server-settings/settings/other",
     "prometheus": "/reference/settings/server-settings/settings/other",
     "prometheus.keeper_metrics_only": "/reference/settings/server-settings/settings/other",
     "proxy": "/reference/settings/server-settings/settings/other",
     "query_cache": "/reference/settings/server-settings/settings/query",
-    "query_cache.max_entries": "/reference/settings/server-settings/settings/query/cache-max",
-    "query_cache.max_entry_size_in_bytes": "/reference/settings/server-settings/settings/query/cache-max",
-    "query_cache.max_entry_size_in_rows": "/reference/settings/server-settings/settings/query/cache-max",
-    "query_cache.max_size_in_bytes": "/reference/settings/server-settings/settings/query/cache-max",
-    "query_condition_cache_policy": "/reference/settings/server-settings/settings/query/condition",
-    "query_condition_cache_size": "/reference/settings/server-settings/settings/query/condition",
-    "query_condition_cache_size_ratio": "/reference/settings/server-settings/settings/query/condition",
+    "query_cache.max_entries": "/reference/settings/server-settings/settings/query-cache-max",
+    "query_cache.max_entry_size_in_bytes": "/reference/settings/server-settings/settings/query-cache-max",
+    "query_cache.max_entry_size_in_rows": "/reference/settings/server-settings/settings/query-cache-max",
+    "query_cache.max_size_in_bytes": "/reference/settings/server-settings/settings/query-cache-max",
+    "query_condition_cache_policy": "/reference/settings/server-settings/settings/query-condition",
+    "query_condition_cache_size": "/reference/settings/server-settings/settings/query-condition",
+    "query_condition_cache_size_ratio": "/reference/settings/server-settings/settings/query-condition",
     "query_log": "/reference/settings/server-settings/settings/query",
     "query_masking_rules": "/reference/settings/server-settings/settings/query",
     "query_metric_log": "/reference/settings/server-settings/settings/query",
@@ -415,10 +415,10 @@
     "remote_servers": "/reference/settings/server-settings/settings/remote",
     "remote_url_allow_hosts": "/reference/settings/server-settings/settings/remote",
     "replica_group_name": "/reference/settings/server-settings/settings/other",
-    "replicated_fetches_http_connection_timeout": "/reference/settings/server-settings/settings/replicated/fetches",
-    "replicated_fetches_http_receive_timeout": "/reference/settings/server-settings/settings/replicated/fetches",
-    "replicated_fetches_http_send_timeout": "/reference/settings/server-settings/settings/replicated/fetches",
-    "replicated_merge_tree": "/reference/settings/server-settings/settings/replicated",
+    "replicated_fetches_http_connection_timeout": "/reference/settings/server-settings/settings/replicated-fetches",
+    "replicated_fetches_http_receive_timeout": "/reference/settings/server-settings/settings/replicated-fetches",
+    "replicated_fetches_http_send_timeout": "/reference/settings/server-settings/settings/replicated-fetches",
+    "replicated_merge_tree": "/reference/settings/server-settings/settings/other",
     "restore_threads": "/reference/settings/server-settings/settings/other",
     "s3_allow_server_credentials_for_system_table_disks": "/reference/settings/server-settings/settings/s3",
     "s3_credentials_provider_max_cache_size": "/reference/settings/server-settings/settings/s3",
@@ -431,81 +431,81 @@
     "series_keeper_path": "/reference/settings/server-settings/settings/other",
     "show_addresses_in_stack_traces": "/reference/settings/server-settings/settings/show",
     "show_license_expiration_warnings": "/reference/settings/server-settings/settings/show",
-    "shutdown_wait_backups_and_restores": "/reference/settings/server-settings/settings/shutdown/wait",
-    "shutdown_wait_unfinished": "/reference/settings/server-settings/settings/shutdown/wait",
-    "shutdown_wait_unfinished_queries": "/reference/settings/server-settings/settings/shutdown/wait",
+    "shutdown_wait_backups_and_restores": "/reference/settings/server-settings/settings/shutdown-wait",
+    "shutdown_wait_unfinished": "/reference/settings/server-settings/settings/shutdown-wait",
+    "shutdown_wait_unfinished_queries": "/reference/settings/server-settings/settings/shutdown-wait",
     "skip_binary_checksum_checks": "/reference/settings/server-settings/settings/skip",
     "skip_check_for_incorrect_settings": "/reference/settings/server-settings/settings/skip",
-    "snapshot_cleaner_period": "/reference/settings/server-settings/settings/snapshot/cleaner",
-    "snapshot_cleaner_pool_size": "/reference/settings/server-settings/settings/snapshot/cleaner",
+    "snapshot_cleaner_period": "/reference/settings/server-settings/settings/snapshot-cleaner",
+    "snapshot_cleaner_pool_size": "/reference/settings/server-settings/settings/snapshot-cleaner",
     "ssh_server": "/reference/settings/server-settings/settings/other",
     "startup_mv_delay_ms": "/reference/settings/server-settings/settings/startup",
     "startup_scripts.throw_on_error": "/reference/settings/server-settings/settings/startup",
     "storage_configuration": "/reference/settings/server-settings/settings/storage",
-    "storage_connections_hard_limit": "/reference/settings/server-settings/settings/storage/connections",
-    "storage_connections_rcvbuf": "/reference/settings/server-settings/settings/storage/connections",
-    "storage_connections_sndbuf": "/reference/settings/server-settings/settings/storage/connections",
-    "storage_connections_soft_limit": "/reference/settings/server-settings/settings/storage/connections",
-    "storage_connections_store_limit": "/reference/settings/server-settings/settings/storage/connections",
-    "storage_connections_warn_limit": "/reference/settings/server-settings/settings/storage/connections",
+    "storage_connections_hard_limit": "/reference/settings/server-settings/settings/storage-connections",
+    "storage_connections_rcvbuf": "/reference/settings/server-settings/settings/storage-connections",
+    "storage_connections_sndbuf": "/reference/settings/server-settings/settings/storage-connections",
+    "storage_connections_soft_limit": "/reference/settings/server-settings/settings/storage-connections",
+    "storage_connections_store_limit": "/reference/settings/server-settings/settings/storage-connections",
+    "storage_connections_warn_limit": "/reference/settings/server-settings/settings/storage-connections",
     "storage_metadata_write_full_object_key": "/reference/settings/server-settings/settings/storage",
     "storage_shared_set_join_use_inner_uuid": "/reference/settings/server-settings/settings/storage",
     "table_engines_require_grant": "/reference/settings/server-settings/settings/other",
-    "tables_loader_background_pool_size": "/reference/settings/server-settings/settings/tables/loader",
-    "tables_loader_foreground_pool_size": "/reference/settings/server-settings/settings/tables/loader",
-    "tcp_close_connection_after_queries_num": "/reference/settings/server-settings/settings/tcp/close",
-    "tcp_close_connection_after_queries_seconds": "/reference/settings/server-settings/settings/tcp/close",
-    "tcp_port": "/reference/settings/server-settings/settings/tcp/port",
-    "tcp_port_secure": "/reference/settings/server-settings/settings/tcp/port",
-    "tcp_ssh_port": "/reference/settings/server-settings/settings/tcp",
-    "temporary_data_in_cache": "/reference/settings/server-settings/settings/temporary/data",
-    "temporary_data_in_distributed_cache": "/reference/settings/server-settings/settings/temporary/data",
-    "text_index_header_cache_max_entries": "/reference/settings/server-settings/settings/text/index",
-    "text_index_header_cache_policy": "/reference/settings/server-settings/settings/text/index",
-    "text_index_header_cache_size": "/reference/settings/server-settings/settings/text/index",
-    "text_index_header_cache_size_ratio": "/reference/settings/server-settings/settings/text/index",
-    "text_index_postings_cache_max_entries": "/reference/settings/server-settings/settings/text/index",
-    "text_index_postings_cache_policy": "/reference/settings/server-settings/settings/text/index",
-    "text_index_postings_cache_size": "/reference/settings/server-settings/settings/text/index",
-    "text_index_postings_cache_size_ratio": "/reference/settings/server-settings/settings/text/index",
-    "text_index_tokens_cache_max_entries": "/reference/settings/server-settings/settings/text/index",
-    "text_index_tokens_cache_policy": "/reference/settings/server-settings/settings/text/index",
-    "text_index_tokens_cache_size": "/reference/settings/server-settings/settings/text/index",
-    "text_index_tokens_cache_size_ratio": "/reference/settings/server-settings/settings/text/index",
-    "text_log": "/reference/settings/server-settings/settings/text",
+    "tables_loader_background_pool_size": "/reference/settings/server-settings/settings/tables-loader",
+    "tables_loader_foreground_pool_size": "/reference/settings/server-settings/settings/tables-loader",
+    "tcp_close_connection_after_queries_num": "/reference/settings/server-settings/settings/tcp-close",
+    "tcp_close_connection_after_queries_seconds": "/reference/settings/server-settings/settings/tcp-close",
+    "tcp_port": "/reference/settings/server-settings/settings/tcp-port",
+    "tcp_port_secure": "/reference/settings/server-settings/settings/tcp-port",
+    "tcp_ssh_port": "/reference/settings/server-settings/settings/other",
+    "temporary_data_in_cache": "/reference/settings/server-settings/settings/temporary-data",
+    "temporary_data_in_distributed_cache": "/reference/settings/server-settings/settings/temporary-data",
+    "text_index_header_cache_max_entries": "/reference/settings/server-settings/settings/text-index",
+    "text_index_header_cache_policy": "/reference/settings/server-settings/settings/text-index",
+    "text_index_header_cache_size": "/reference/settings/server-settings/settings/text-index",
+    "text_index_header_cache_size_ratio": "/reference/settings/server-settings/settings/text-index",
+    "text_index_postings_cache_max_entries": "/reference/settings/server-settings/settings/text-index",
+    "text_index_postings_cache_policy": "/reference/settings/server-settings/settings/text-index",
+    "text_index_postings_cache_size": "/reference/settings/server-settings/settings/text-index",
+    "text_index_postings_cache_size_ratio": "/reference/settings/server-settings/settings/text-index",
+    "text_index_tokens_cache_max_entries": "/reference/settings/server-settings/settings/text-index",
+    "text_index_tokens_cache_policy": "/reference/settings/server-settings/settings/text-index",
+    "text_index_tokens_cache_size": "/reference/settings/server-settings/settings/text-index",
+    "text_index_tokens_cache_size_ratio": "/reference/settings/server-settings/settings/text-index",
+    "text_log": "/reference/settings/server-settings/settings/other",
     "thread_pool_queue_size": "/reference/settings/server-settings/settings/other",
-    "threadpool_local_fs_reader_pool_size": "/reference/settings/server-settings/settings/threadpool/local",
-    "threadpool_local_fs_reader_queue_size": "/reference/settings/server-settings/settings/threadpool/local",
-    "threadpool_remote_fs_reader_pool_size": "/reference/settings/server-settings/settings/threadpool/remote",
-    "threadpool_remote_fs_reader_queue_size": "/reference/settings/server-settings/settings/threadpool/remote",
-    "threadpool_writer_pool_size": "/reference/settings/server-settings/settings/threadpool/writer",
-    "threadpool_writer_queue_size": "/reference/settings/server-settings/settings/threadpool/writer",
+    "threadpool_local_fs_reader_pool_size": "/reference/settings/server-settings/settings/threadpool-local",
+    "threadpool_local_fs_reader_queue_size": "/reference/settings/server-settings/settings/threadpool-local",
+    "threadpool_remote_fs_reader_pool_size": "/reference/settings/server-settings/settings/threadpool-remote",
+    "threadpool_remote_fs_reader_queue_size": "/reference/settings/server-settings/settings/threadpool-remote",
+    "threadpool_writer_pool_size": "/reference/settings/server-settings/settings/threadpool-writer",
+    "threadpool_writer_queue_size": "/reference/settings/server-settings/settings/threadpool-writer",
     "throw_on_unknown_workload": "/reference/settings/server-settings/settings/other",
     "timezone": "/reference/settings/server-settings/settings/other",
     "tmp_path": "/reference/settings/server-settings/settings/tmp",
     "tmp_policy": "/reference/settings/server-settings/settings/tmp",
-    "top_level_domains_list": "/reference/settings/server-settings/settings/top/level",
-    "top_level_domains_path": "/reference/settings/server-settings/settings/top/level",
-    "total_memory_profiler_sample_max_allocation_size": "/reference/settings/server-settings/settings/total/memory",
-    "total_memory_profiler_sample_min_allocation_size": "/reference/settings/server-settings/settings/total/memory",
-    "total_memory_profiler_step": "/reference/settings/server-settings/settings/total/memory",
-    "total_memory_tracker_sample_probability": "/reference/settings/server-settings/settings/total/memory",
+    "top_level_domains_list": "/reference/settings/server-settings/settings/top-level",
+    "top_level_domains_path": "/reference/settings/server-settings/settings/top-level",
+    "total_memory_profiler_sample_max_allocation_size": "/reference/settings/server-settings/settings/total-memory",
+    "total_memory_profiler_sample_min_allocation_size": "/reference/settings/server-settings/settings/total-memory",
+    "total_memory_profiler_step": "/reference/settings/server-settings/settings/total-memory",
+    "total_memory_tracker_sample_probability": "/reference/settings/server-settings/settings/total-memory",
     "trace_log": "/reference/settings/server-settings/settings/other",
-    "uncompressed_cache_policy": "/reference/settings/server-settings/settings/uncompressed/cache",
-    "uncompressed_cache_size": "/reference/settings/server-settings/settings/uncompressed/cache",
-    "uncompressed_cache_size_ratio": "/reference/settings/server-settings/settings/uncompressed/cache",
-    "unique_key_bitmap_cache_policy": "/reference/settings/server-settings/settings/unique/key",
-    "unique_key_bitmap_cache_size_bytes": "/reference/settings/server-settings/settings/unique/key",
-    "unique_key_bitmap_cache_size_ratio": "/reference/settings/server-settings/settings/unique/key",
-    "unique_key_index_cache_policy": "/reference/settings/server-settings/settings/unique/key",
-    "unique_key_index_cache_size_bytes": "/reference/settings/server-settings/settings/unique/key",
-    "unique_key_index_cache_size_ratio": "/reference/settings/server-settings/settings/unique/key",
+    "uncompressed_cache_policy": "/reference/settings/server-settings/settings/uncompressed-cache",
+    "uncompressed_cache_size": "/reference/settings/server-settings/settings/uncompressed-cache",
+    "uncompressed_cache_size_ratio": "/reference/settings/server-settings/settings/uncompressed-cache",
+    "unique_key_bitmap_cache_policy": "/reference/settings/server-settings/settings/unique-key",
+    "unique_key_bitmap_cache_size_bytes": "/reference/settings/server-settings/settings/unique-key",
+    "unique_key_bitmap_cache_size_ratio": "/reference/settings/server-settings/settings/unique-key",
+    "unique_key_index_cache_policy": "/reference/settings/server-settings/settings/unique-key",
+    "unique_key_index_cache_size_bytes": "/reference/settings/server-settings/settings/unique-key",
+    "unique_key_index_cache_size_ratio": "/reference/settings/server-settings/settings/unique-key",
     "url_scheme_mappers": "/reference/settings/server-settings/settings/other",
     "use_minimalistic_part_header_in_zookeeper": "/reference/settings/server-settings/settings/use",
     "use_separate_cache_arena": "/reference/settings/server-settings/settings/use",
     "use_shared_merge_tree_log_pipeline": "/reference/settings/server-settings/settings/use",
-    "user_defined_executable_functions_config": "/reference/settings/server-settings/settings/user/defined",
-    "user_defined_path": "/reference/settings/server-settings/settings/user/defined",
+    "user_defined_executable_functions_config": "/reference/settings/server-settings/settings/user-defined",
+    "user_defined_path": "/reference/settings/server-settings/settings/user-defined",
     "user_directories": "/reference/settings/server-settings/settings/user",
     "user_files_path": "/reference/settings/server-settings/settings/user",
     "user_profile_events_per_cpu": "/reference/settings/server-settings/settings/user",
@@ -513,10 +513,10 @@
     "users_config": "/reference/settings/server-settings/settings/users",
     "users_to_ignore_early_memory_limit_check": "/reference/settings/server-settings/settings/users",
     "validate_tcp_client_information": "/reference/settings/server-settings/settings/other",
-    "vector_similarity_index_cache_max_entries": "/reference/settings/server-settings/settings/vector/similarity",
-    "vector_similarity_index_cache_policy": "/reference/settings/server-settings/settings/vector/similarity",
-    "vector_similarity_index_cache_size": "/reference/settings/server-settings/settings/vector/similarity",
-    "vector_similarity_index_cache_size_ratio": "/reference/settings/server-settings/settings/vector/similarity",
+    "vector_similarity_index_cache_max_entries": "/reference/settings/server-settings/settings/vector-similarity",
+    "vector_similarity_index_cache_policy": "/reference/settings/server-settings/settings/vector-similarity",
+    "vector_similarity_index_cache_size": "/reference/settings/server-settings/settings/vector-similarity",
+    "vector_similarity_index_cache_size_ratio": "/reference/settings/server-settings/settings/vector-similarity",
     "wait_dictionaries_load_at_startup": "/reference/settings/server-settings/settings/other",
     "webassembly_udf_engine": "/reference/settings/server-settings/settings/other",
     "webterminal_allowed_origins": "/reference/settings/server-settings/settings/other",
@@ -528,8 +528,8 @@
   "limits": {
     "settingsPerPage": 150,
     "charactersPerPage": 125000,
-    "minimumSecondLevelGroup": 2,
-    "maximumPrefixDepth": 2
+    "minimumPrefixGroup": 2,
+    "maximumPageDepth": 1
   },
   "routes": [
     {
@@ -543,224 +543,234 @@
       "target": "/reference/settings/server-settings/settings/openssl-server-requiretlsv1"
     },
     {
+      "prefix": "max_server_memory_usage",
+      "mode": "token",
+      "target": "/reference/settings/server-settings/settings/max-server-memory-usage"
+    },
+    {
+      "prefix": "parts_kill_delay_period",
+      "mode": "token",
+      "target": "/reference/settings/server-settings/settings/parts-kill-delay-period"
+    },
+    {
       "prefix": "asynchronous_metrics",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/asynchronous/metrics"
+      "target": "/reference/settings/server-settings/settings/asynchronous-metrics"
     },
     {
       "prefix": "keeper_server.socket",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/keeper/server-socket"
+      "target": "/reference/settings/server-settings/settings/keeper-server-socket"
     },
     {
       "prefix": "background_schedule",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/background/schedule"
+      "target": "/reference/settings/server-settings/settings/background-schedule"
     },
     {
       "prefix": "compiled_expression",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/compiled/expression"
+      "target": "/reference/settings/server-settings/settings/compiled-expression"
     },
     {
       "prefix": "database_replicated",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/database/replicated"
+      "target": "/reference/settings/server-settings/settings/database-replicated"
     },
     {
       "prefix": "prefetch_threadpool",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/prefetch/threadpool"
+      "target": "/reference/settings/server-settings/settings/prefetch-threadpool"
     },
     {
       "prefix": "storage_connections",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/storage/connections"
+      "target": "/reference/settings/server-settings/settings/storage-connections"
     },
     {
       "prefix": "aggregate_function",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/aggregate/function"
+      "target": "/reference/settings/server-settings/settings/aggregate-function"
     },
     {
       "prefix": "allow_experimental",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/allow/experimental"
+      "target": "/reference/settings/server-settings/settings/allow-experimental"
     },
     {
       "prefix": "concurrent_threads",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/concurrent/threads"
+      "target": "/reference/settings/server-settings/settings/concurrent-threads"
     },
     {
       "prefix": "iceberg_compaction",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/iceberg/compaction"
+      "target": "/reference/settings/server-settings/settings/iceberg-compaction"
     },
     {
       "prefix": "index_uncompressed",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/index/uncompressed"
+      "target": "/reference/settings/server-settings/settings/index-uncompressed"
     },
     {
       "prefix": "replicated_fetches",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/replicated/fetches"
+      "target": "/reference/settings/server-settings/settings/replicated-fetches"
     },
     {
       "prefix": "uncompressed_cache",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/uncompressed/cache"
+      "target": "/reference/settings/server-settings/settings/uncompressed-cache"
     },
     {
       "prefix": "background_merges",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/background/merges"
+      "target": "/reference/settings/server-settings/settings/background-merges"
     },
     {
       "prefix": "distributed_cache",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/distributed/cache"
+      "target": "/reference/settings/server-settings/settings/distributed-cache"
     },
     {
       "prefix": "encryption_header",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/encryption/header"
+      "target": "/reference/settings/server-settings/settings/encryption-header"
     },
     {
       "prefix": "iceberg_scheduler",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/iceberg/scheduler"
+      "target": "/reference/settings/server-settings/settings/iceberg-scheduler"
     },
     {
       "prefix": "interserver_https",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/interserver/https"
+      "target": "/reference/settings/server-settings/settings/interserver-https"
     },
     {
       "prefix": "threadpool_remote",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/threadpool/remote"
+      "target": "/reference/settings/server-settings/settings/threadpool-remote"
     },
     {
       "prefix": "threadpool_writer",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/threadpool/writer"
+      "target": "/reference/settings/server-settings/settings/threadpool-writer"
     },
     {
       "prefix": "vector_similarity",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/vector/similarity"
+      "target": "/reference/settings/server-settings/settings/vector-similarity"
     },
     {
       "prefix": "database_catalog",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/database/catalog"
+      "target": "/reference/settings/server-settings/settings/database-catalog"
     },
     {
       "prefix": "disk_connections",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/disk/connections"
+      "target": "/reference/settings/server-settings/settings/disk-connections"
     },
     {
       "prefix": "drop_distributed",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/drop/distributed"
+      "target": "/reference/settings/server-settings/settings/drop-distributed"
     },
     {
       "prefix": "http_connections",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/http/connections"
+      "target": "/reference/settings/server-settings/settings/http-connections"
     },
     {
       "prefix": "iceberg_metadata",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/iceberg/metadata"
+      "target": "/reference/settings/server-settings/settings/iceberg-metadata"
     },
     {
       "prefix": "interserver_http",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/interserver/http"
+      "target": "/reference/settings/server-settings/settings/interserver-http"
     },
     {
       "prefix": "merges_mutations",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/merges/mutations"
+      "target": "/reference/settings/server-settings/settings/merges-mutations"
     },
     {
       "prefix": "mlock_executable",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/mlock/executable"
+      "target": "/reference/settings/server-settings/settings/mlock-executable"
     },
     {
       "prefix": "parquet_metadata",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/parquet/metadata"
+      "target": "/reference/settings/server-settings/settings/parquet-metadata"
     },
     {
       "prefix": "snapshot_cleaner",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/snapshot/cleaner"
+      "target": "/reference/settings/server-settings/settings/snapshot-cleaner"
     },
     {
       "prefix": "threadpool_local",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/threadpool/local"
+      "target": "/reference/settings/server-settings/settings/threadpool-local"
     },
     {
       "prefix": "default_replica",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/default/replica"
+      "target": "/reference/settings/server-settings/settings/default-replica"
     },
     {
       "prefix": "distributed_ddl",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/distributed/ddl"
+      "target": "/reference/settings/server-settings/settings/distributed-ddl"
     },
     {
       "prefix": "global_profiler",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/global/profiler"
+      "target": "/reference/settings/server-settings/settings/global-profiler"
     },
     {
       "prefix": "iceberg_catalog",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/iceberg/catalog"
+      "target": "/reference/settings/server-settings/settings/iceberg-catalog"
     },
     {
       "prefix": "jemalloc_enable",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/jemalloc/enable"
+      "target": "/reference/settings/server-settings/settings/jemalloc-enable"
     },
     {
       "prefix": "max_distributed",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/distributed"
+      "target": "/reference/settings/server-settings/settings/max-distributed"
     },
     {
       "prefix": "paimon_metadata",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/paimon/metadata"
+      "target": "/reference/settings/server-settings/settings/paimon-metadata"
     },
     {
       "prefix": "query_cache.max",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/query/cache-max"
+      "target": "/reference/settings/server-settings/settings/query-cache-max"
     },
     {
       "prefix": "query_condition",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/query/condition"
+      "target": "/reference/settings/server-settings/settings/query-condition"
     },
     {
       "prefix": "access_control",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/access/control"
+      "target": "/reference/settings/server-settings/settings/access-control"
     },
     {
       "prefix": "jemalloc_flush",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/jemalloc/flush"
+      "target": "/reference/settings/server-settings/settings/jemalloc-flush"
     },
     {
       "prefix": "logger.console",
@@ -770,47 +780,47 @@
     {
       "prefix": "max_concurrent",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/concurrent"
+      "target": "/reference/settings/server-settings/settings/max-concurrent"
     },
     {
       "prefix": "max_dictionary",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/dictionary"
+      "target": "/reference/settings/server-settings/settings/max-dictionary"
     },
     {
       "prefix": "max_replicated",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/replicated"
+      "target": "/reference/settings/server-settings/settings/max-replicated"
     },
     {
       "prefix": "temporary_data",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/temporary/data"
+      "target": "/reference/settings/server-settings/settings/temporary-data"
     },
     {
       "prefix": "memory_worker",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/memory/worker"
+      "target": "/reference/settings/server-settings/settings/memory-worker"
     },
     {
       "prefix": "primary_index",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/primary/index"
+      "target": "/reference/settings/server-settings/settings/primary-index"
     },
     {
       "prefix": "shutdown_wait",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/shutdown/wait"
+      "target": "/reference/settings/server-settings/settings/shutdown-wait"
     },
     {
       "prefix": "tables_loader",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/tables/loader"
+      "target": "/reference/settings/server-settings/settings/tables-loader"
     },
     {
       "prefix": "async_insert",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/async/insert"
+      "target": "/reference/settings/server-settings/settings/async-insert"
     },
     {
       "prefix": "asynchronous",
@@ -830,32 +840,32 @@
     {
       "prefix": "max_database",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/database"
+      "target": "/reference/settings/server-settings/settings/max-database"
     },
     {
       "prefix": "max_prefixes",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/prefixes"
+      "target": "/reference/settings/server-settings/settings/max-prefixes"
     },
     {
       "prefix": "max_snapshot",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/snapshot"
+      "target": "/reference/settings/server-settings/settings/max-snapshot"
     },
     {
       "prefix": "parts_killer",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/parts/killer"
+      "target": "/reference/settings/server-settings/settings/parts-killer"
     },
     {
       "prefix": "total_memory",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/total/memory"
+      "target": "/reference/settings/server-settings/settings/total-memory"
     },
     {
       "prefix": "user_defined",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/user/defined"
+      "target": "/reference/settings/server-settings/settings/user-defined"
     },
     {
       "prefix": "distributed",
@@ -870,17 +880,17 @@
     {
       "prefix": "max_backups",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/backups"
+      "target": "/reference/settings/server-settings/settings/max-backups"
     },
     {
       "prefix": "max_pending",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/pending"
+      "target": "/reference/settings/server-settings/settings/max-pending"
     },
     {
       "prefix": "async_load",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/async/load"
+      "target": "/reference/settings/server-settings/settings/async-load"
     },
     {
       "prefix": "background",
@@ -888,64 +898,49 @@
       "target": "/reference/settings/server-settings/settings/background"
     },
     {
-      "prefix": "encryption",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/encryption"
-    },
-    {
       "prefix": "index_mark",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/index/mark"
+      "target": "/reference/settings/server-settings/settings/index-mark"
     },
     {
       "prefix": "load_marks",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/load/marks"
+      "target": "/reference/settings/server-settings/settings/load-marks"
     },
     {
       "prefix": "mark_cache",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/mark/cache"
+      "target": "/reference/settings/server-settings/settings/mark-cache"
     },
     {
       "prefix": "max_format",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/format"
+      "target": "/reference/settings/server-settings/settings/max-format"
     },
     {
       "prefix": "max_remote",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/remote"
-    },
-    {
-      "prefix": "max_server",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/server"
+      "target": "/reference/settings/server-settings/settings/max-remote"
     },
     {
       "prefix": "max_thread",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/thread"
+      "target": "/reference/settings/server-settings/settings/max-thread"
     },
     {
       "prefix": "oom_canary",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/oom/canary"
+      "target": "/reference/settings/server-settings/settings/oom-canary"
     },
     {
       "prefix": "os_threads",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/os/threads"
+      "target": "/reference/settings/server-settings/settings/os-threads"
     },
     {
       "prefix": "page_cache",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/page/cache"
-    },
-    {
-      "prefix": "parts_kill",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/parts/kill"
+      "target": "/reference/settings/server-settings/settings/page-cache"
     },
     {
       "prefix": "postgresql",
@@ -953,54 +948,49 @@
       "target": "/reference/settings/server-settings/settings/postgresql"
     },
     {
-      "prefix": "replicated",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/replicated"
-    },
-    {
       "prefix": "text_index",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/text/index"
+      "target": "/reference/settings/server-settings/settings/text-index"
     },
     {
       "prefix": "unique_key",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/unique/key"
+      "target": "/reference/settings/server-settings/settings/unique-key"
     },
     {
       "prefix": "dns_allow",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/dns/allow"
+      "target": "/reference/settings/server-settings/settings/dns-allow"
     },
     {
       "prefix": "dns_cache",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/dns/cache"
+      "target": "/reference/settings/server-settings/settings/dns-cache"
     },
     {
       "prefix": "max_local",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/local"
+      "target": "/reference/settings/server-settings/settings/max-local"
     },
     {
       "prefix": "max_named",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/named"
+      "target": "/reference/settings/server-settings/settings/max-named"
     },
     {
       "prefix": "max_table",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/table"
+      "target": "/reference/settings/server-settings/settings/max-table"
     },
     {
       "prefix": "tcp_close",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/tcp/close"
+      "target": "/reference/settings/server-settings/settings/tcp-close"
     },
     {
       "prefix": "top_level",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/top/level"
+      "target": "/reference/settings/server-settings/settings/top-level"
     },
     {
       "prefix": "zookeeper",
@@ -1010,12 +1000,7 @@
     {
       "prefix": "cpu_slot",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/cpu/slot"
-    },
-    {
-      "prefix": "database",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/database"
+      "target": "/reference/settings/server-settings/settings/cpu-slot"
     },
     {
       "prefix": "graphite",
@@ -1030,12 +1015,12 @@
     {
       "prefix": "max_view",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/view"
+      "target": "/reference/settings/server-settings/settings/max-view"
     },
     {
       "prefix": "tcp_port",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/tcp/port"
+      "target": "/reference/settings/server-settings/settings/tcp-port"
     },
     {
       "prefix": "workload",
@@ -1056,11 +1041,6 @@
       "prefix": "disable",
       "mode": "token",
       "target": "/reference/settings/server-settings/settings/disable"
-    },
-    {
-      "prefix": "iceberg",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/iceberg"
     },
     {
       "prefix": "license",
@@ -1115,7 +1095,7 @@
     {
       "prefix": "max_io",
       "mode": "token",
-      "target": "/reference/settings/server-settings/settings/max/io"
+      "target": "/reference/settings/server-settings/settings/max-io"
     },
     {
       "prefix": "remote",
@@ -1148,11 +1128,6 @@
       "target": "/reference/settings/server-settings/settings/users"
     },
     {
-      "prefix": "disk",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/disk"
-    },
-    {
       "prefix": "http",
       "mode": "token",
       "target": "/reference/settings/server-settings/settings/http"
@@ -1168,19 +1143,9 @@
       "target": "/reference/settings/server-settings/settings/skip"
     },
     {
-      "prefix": "text",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/text"
-    },
-    {
       "prefix": "user",
       "mode": "token",
       "target": "/reference/settings/server-settings/settings/user"
-    },
-    {
-      "prefix": "dns",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/dns"
     },
     {
       "prefix": "max",
@@ -1191,16 +1156,6 @@
       "prefix": "min",
       "mode": "token",
       "target": "/reference/settings/server-settings/settings/min"
-    },
-    {
-      "prefix": "oom",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/oom"
-    },
-    {
-      "prefix": "tcp",
-      "mode": "token",
-      "target": "/reference/settings/server-settings/settings/tcp"
     },
     {
       "prefix": "tmp",
@@ -1229,155 +1184,146 @@
     }
   ],
   "pages": [
-    "/reference/settings/server-settings/settings/access/control",
-    "/reference/settings/server-settings/settings/aggregate/function",
+    "/reference/settings/server-settings/settings/access-control",
+    "/reference/settings/server-settings/settings/aggregate-function",
     "/reference/settings/server-settings/settings/allow",
-    "/reference/settings/server-settings/settings/allow/experimental",
-    "/reference/settings/server-settings/settings/async/insert",
-    "/reference/settings/server-settings/settings/async/load",
+    "/reference/settings/server-settings/settings/allow-experimental",
+    "/reference/settings/server-settings/settings/async-insert",
+    "/reference/settings/server-settings/settings/async-load",
     "/reference/settings/server-settings/settings/asynchronous",
-    "/reference/settings/server-settings/settings/asynchronous/metrics",
+    "/reference/settings/server-settings/settings/asynchronous-metrics",
     "/reference/settings/server-settings/settings/background",
-    "/reference/settings/server-settings/settings/background/merges",
-    "/reference/settings/server-settings/settings/background/schedule",
+    "/reference/settings/server-settings/settings/background-merges",
+    "/reference/settings/server-settings/settings/background-schedule",
     "/reference/settings/server-settings/settings/backup",
     "/reference/settings/server-settings/settings/backups",
-    "/reference/settings/server-settings/settings/compiled/expression",
-    "/reference/settings/server-settings/settings/concurrent/threads",
-    "/reference/settings/server-settings/settings/cpu/slot",
+    "/reference/settings/server-settings/settings/compiled-expression",
+    "/reference/settings/server-settings/settings/concurrent-threads",
+    "/reference/settings/server-settings/settings/cpu-slot",
     "/reference/settings/server-settings/settings/custom",
-    "/reference/settings/server-settings/settings/database",
-    "/reference/settings/server-settings/settings/database/catalog",
-    "/reference/settings/server-settings/settings/database/replicated",
+    "/reference/settings/server-settings/settings/database-catalog",
+    "/reference/settings/server-settings/settings/database-replicated",
     "/reference/settings/server-settings/settings/default",
-    "/reference/settings/server-settings/settings/default/replica",
+    "/reference/settings/server-settings/settings/default-replica",
     "/reference/settings/server-settings/settings/dictionaries",
     "/reference/settings/server-settings/settings/disable",
-    "/reference/settings/server-settings/settings/disk",
-    "/reference/settings/server-settings/settings/disk/connections",
+    "/reference/settings/server-settings/settings/disk-connections",
     "/reference/settings/server-settings/settings/distributed",
-    "/reference/settings/server-settings/settings/distributed/cache",
-    "/reference/settings/server-settings/settings/distributed/ddl",
-    "/reference/settings/server-settings/settings/dns",
-    "/reference/settings/server-settings/settings/dns/allow",
-    "/reference/settings/server-settings/settings/dns/cache",
-    "/reference/settings/server-settings/settings/drop/distributed",
+    "/reference/settings/server-settings/settings/distributed-cache",
+    "/reference/settings/server-settings/settings/distributed-ddl",
+    "/reference/settings/server-settings/settings/dns-allow",
+    "/reference/settings/server-settings/settings/dns-cache",
+    "/reference/settings/server-settings/settings/drop-distributed",
     "/reference/settings/server-settings/settings/enable",
-    "/reference/settings/server-settings/settings/encryption",
-    "/reference/settings/server-settings/settings/encryption/header",
+    "/reference/settings/server-settings/settings/encryption-header",
     "/reference/settings/server-settings/settings/format",
-    "/reference/settings/server-settings/settings/global/profiler",
+    "/reference/settings/server-settings/settings/global-profiler",
     "/reference/settings/server-settings/settings/graphite",
     "/reference/settings/server-settings/settings/http",
-    "/reference/settings/server-settings/settings/http/connections",
-    "/reference/settings/server-settings/settings/iceberg",
-    "/reference/settings/server-settings/settings/iceberg/catalog",
-    "/reference/settings/server-settings/settings/iceberg/compaction",
-    "/reference/settings/server-settings/settings/iceberg/metadata",
-    "/reference/settings/server-settings/settings/iceberg/scheduler",
-    "/reference/settings/server-settings/settings/index/mark",
-    "/reference/settings/server-settings/settings/index/uncompressed",
+    "/reference/settings/server-settings/settings/http-connections",
+    "/reference/settings/server-settings/settings/iceberg-catalog",
+    "/reference/settings/server-settings/settings/iceberg-compaction",
+    "/reference/settings/server-settings/settings/iceberg-metadata",
+    "/reference/settings/server-settings/settings/iceberg-scheduler",
+    "/reference/settings/server-settings/settings/index-mark",
+    "/reference/settings/server-settings/settings/index-uncompressed",
     "/reference/settings/server-settings/settings/interserver",
-    "/reference/settings/server-settings/settings/interserver/http",
-    "/reference/settings/server-settings/settings/interserver/https",
+    "/reference/settings/server-settings/settings/interserver-http",
+    "/reference/settings/server-settings/settings/interserver-https",
     "/reference/settings/server-settings/settings/jemalloc",
-    "/reference/settings/server-settings/settings/jemalloc/enable",
-    "/reference/settings/server-settings/settings/jemalloc/flush",
+    "/reference/settings/server-settings/settings/jemalloc-enable",
+    "/reference/settings/server-settings/settings/jemalloc-flush",
     "/reference/settings/server-settings/settings/keeper",
-    "/reference/settings/server-settings/settings/keeper/server-socket",
+    "/reference/settings/server-settings/settings/keeper-server-socket",
     "/reference/settings/server-settings/settings/license",
     "/reference/settings/server-settings/settings/listen",
-    "/reference/settings/server-settings/settings/load/marks",
+    "/reference/settings/server-settings/settings/load-marks",
     "/reference/settings/server-settings/settings/logger-async",
     "/reference/settings/server-settings/settings/logger-console",
-    "/reference/settings/server-settings/settings/mark/cache",
+    "/reference/settings/server-settings/settings/mark-cache",
     "/reference/settings/server-settings/settings/max",
-    "/reference/settings/server-settings/settings/max/backups",
-    "/reference/settings/server-settings/settings/max/concurrent",
-    "/reference/settings/server-settings/settings/max/database",
-    "/reference/settings/server-settings/settings/max/dictionary",
-    "/reference/settings/server-settings/settings/max/distributed",
-    "/reference/settings/server-settings/settings/max/format",
-    "/reference/settings/server-settings/settings/max/io",
-    "/reference/settings/server-settings/settings/max/local",
-    "/reference/settings/server-settings/settings/max/named",
-    "/reference/settings/server-settings/settings/max/pending",
-    "/reference/settings/server-settings/settings/max/prefixes",
-    "/reference/settings/server-settings/settings/max/remote",
-    "/reference/settings/server-settings/settings/max/replicated",
-    "/reference/settings/server-settings/settings/max/server",
-    "/reference/settings/server-settings/settings/max/snapshot",
-    "/reference/settings/server-settings/settings/max/table",
-    "/reference/settings/server-settings/settings/max/thread",
-    "/reference/settings/server-settings/settings/max/view",
-    "/reference/settings/server-settings/settings/memory/worker",
+    "/reference/settings/server-settings/settings/max-backups",
+    "/reference/settings/server-settings/settings/max-concurrent",
+    "/reference/settings/server-settings/settings/max-database",
+    "/reference/settings/server-settings/settings/max-dictionary",
+    "/reference/settings/server-settings/settings/max-distributed",
+    "/reference/settings/server-settings/settings/max-format",
+    "/reference/settings/server-settings/settings/max-io",
+    "/reference/settings/server-settings/settings/max-local",
+    "/reference/settings/server-settings/settings/max-named",
+    "/reference/settings/server-settings/settings/max-pending",
+    "/reference/settings/server-settings/settings/max-prefixes",
+    "/reference/settings/server-settings/settings/max-remote",
+    "/reference/settings/server-settings/settings/max-replicated",
+    "/reference/settings/server-settings/settings/max-server-memory-usage",
+    "/reference/settings/server-settings/settings/max-snapshot",
+    "/reference/settings/server-settings/settings/max-table",
+    "/reference/settings/server-settings/settings/max-thread",
+    "/reference/settings/server-settings/settings/max-view",
+    "/reference/settings/server-settings/settings/memory-worker",
     "/reference/settings/server-settings/settings/merge",
-    "/reference/settings/server-settings/settings/merges/mutations",
+    "/reference/settings/server-settings/settings/merges-mutations",
     "/reference/settings/server-settings/settings/min",
-    "/reference/settings/server-settings/settings/mlock/executable",
+    "/reference/settings/server-settings/settings/mlock-executable",
     "/reference/settings/server-settings/settings/mysql",
-    "/reference/settings/server-settings/settings/oom",
-    "/reference/settings/server-settings/settings/oom/canary",
+    "/reference/settings/server-settings/settings/oom-canary",
     "/reference/settings/server-settings/settings/openssl-client-requiretlsv1",
     "/reference/settings/server-settings/settings/openssl-server-requiretlsv1",
     "/reference/settings/server-settings/settings/os",
-    "/reference/settings/server-settings/settings/os/threads",
+    "/reference/settings/server-settings/settings/os-threads",
     "/reference/settings/server-settings/settings/other",
-    "/reference/settings/server-settings/settings/page/cache",
-    "/reference/settings/server-settings/settings/paimon/metadata",
-    "/reference/settings/server-settings/settings/parquet/metadata",
-    "/reference/settings/server-settings/settings/parts/kill",
-    "/reference/settings/server-settings/settings/parts/killer",
+    "/reference/settings/server-settings/settings/page-cache",
+    "/reference/settings/server-settings/settings/paimon-metadata",
+    "/reference/settings/server-settings/settings/parquet-metadata",
+    "/reference/settings/server-settings/settings/parts-kill-delay-period",
+    "/reference/settings/server-settings/settings/parts-killer",
     "/reference/settings/server-settings/settings/postgresql",
-    "/reference/settings/server-settings/settings/prefetch/threadpool",
-    "/reference/settings/server-settings/settings/primary/index",
+    "/reference/settings/server-settings/settings/prefetch-threadpool",
+    "/reference/settings/server-settings/settings/primary-index",
     "/reference/settings/server-settings/settings/query",
-    "/reference/settings/server-settings/settings/query/cache-max",
-    "/reference/settings/server-settings/settings/query/condition",
+    "/reference/settings/server-settings/settings/query-cache-max",
+    "/reference/settings/server-settings/settings/query-condition",
     "/reference/settings/server-settings/settings/remote",
-    "/reference/settings/server-settings/settings/replicated",
-    "/reference/settings/server-settings/settings/replicated/fetches",
+    "/reference/settings/server-settings/settings/replicated-fetches",
     "/reference/settings/server-settings/settings/s3",
     "/reference/settings/server-settings/settings/s3queue",
     "/reference/settings/server-settings/settings/show",
-    "/reference/settings/server-settings/settings/shutdown/wait",
+    "/reference/settings/server-settings/settings/shutdown-wait",
     "/reference/settings/server-settings/settings/skip",
-    "/reference/settings/server-settings/settings/snapshot/cleaner",
+    "/reference/settings/server-settings/settings/snapshot-cleaner",
     "/reference/settings/server-settings/settings/startup",
     "/reference/settings/server-settings/settings/storage",
-    "/reference/settings/server-settings/settings/storage/connections",
-    "/reference/settings/server-settings/settings/tables/loader",
-    "/reference/settings/server-settings/settings/tcp",
-    "/reference/settings/server-settings/settings/tcp/close",
-    "/reference/settings/server-settings/settings/tcp/port",
-    "/reference/settings/server-settings/settings/temporary/data",
-    "/reference/settings/server-settings/settings/text",
-    "/reference/settings/server-settings/settings/text/index",
-    "/reference/settings/server-settings/settings/threadpool/local",
-    "/reference/settings/server-settings/settings/threadpool/remote",
-    "/reference/settings/server-settings/settings/threadpool/writer",
+    "/reference/settings/server-settings/settings/storage-connections",
+    "/reference/settings/server-settings/settings/tables-loader",
+    "/reference/settings/server-settings/settings/tcp-close",
+    "/reference/settings/server-settings/settings/tcp-port",
+    "/reference/settings/server-settings/settings/temporary-data",
+    "/reference/settings/server-settings/settings/text-index",
+    "/reference/settings/server-settings/settings/threadpool-local",
+    "/reference/settings/server-settings/settings/threadpool-remote",
+    "/reference/settings/server-settings/settings/threadpool-writer",
     "/reference/settings/server-settings/settings/tmp",
-    "/reference/settings/server-settings/settings/top/level",
-    "/reference/settings/server-settings/settings/total/memory",
-    "/reference/settings/server-settings/settings/uncompressed/cache",
-    "/reference/settings/server-settings/settings/unique/key",
+    "/reference/settings/server-settings/settings/top-level",
+    "/reference/settings/server-settings/settings/total-memory",
+    "/reference/settings/server-settings/settings/uncompressed-cache",
+    "/reference/settings/server-settings/settings/unique-key",
     "/reference/settings/server-settings/settings/use",
     "/reference/settings/server-settings/settings/user",
-    "/reference/settings/server-settings/settings/user/defined",
+    "/reference/settings/server-settings/settings/user-defined",
     "/reference/settings/server-settings/settings/users",
-    "/reference/settings/server-settings/settings/vector/similarity",
+    "/reference/settings/server-settings/settings/vector-similarity",
     "/reference/settings/server-settings/settings/workload",
     "/reference/settings/server-settings/settings/zookeeper"
   ],
   "pageStats": [
     {
-      "path": "/reference/settings/server-settings/settings/access/control",
+      "path": "/reference/settings/server-settings/settings/access-control",
       "label": "access_control_*",
       "settings": 2,
       "characters": 6352
     },
     {
-      "path": "/reference/settings/server-settings/settings/aggregate/function",
+      "path": "/reference/settings/server-settings/settings/aggregate-function",
       "label": "aggregate_function_*",
       "settings": 2,
       "characters": 687
@@ -1389,19 +1335,19 @@
       "characters": 1687
     },
     {
-      "path": "/reference/settings/server-settings/settings/allow/experimental",
+      "path": "/reference/settings/server-settings/settings/allow-experimental",
       "label": "allow_experimental_*",
       "settings": 3,
       "characters": 971
     },
     {
-      "path": "/reference/settings/server-settings/settings/async/insert",
+      "path": "/reference/settings/server-settings/settings/async-insert",
       "label": "async_insert_*",
       "settings": 2,
       "characters": 485
     },
     {
-      "path": "/reference/settings/server-settings/settings/async/load",
+      "path": "/reference/settings/server-settings/settings/async-load",
       "label": "async_load_*",
       "settings": 2,
       "characters": 2195
@@ -1413,7 +1359,7 @@
       "characters": 2537
     },
     {
-      "path": "/reference/settings/server-settings/settings/asynchronous/metrics",
+      "path": "/reference/settings/server-settings/settings/asynchronous-metrics",
       "label": "asynchronous_metrics_*",
       "settings": 3,
       "characters": 688
@@ -1425,13 +1371,13 @@
       "characters": 3635
     },
     {
-      "path": "/reference/settings/server-settings/settings/background/merges",
+      "path": "/reference/settings/server-settings/settings/background-merges",
       "label": "background_merges_*",
       "settings": 2,
       "characters": 2268
     },
     {
-      "path": "/reference/settings/server-settings/settings/background/schedule",
+      "path": "/reference/settings/server-settings/settings/background-schedule",
       "label": "background_schedule_*",
       "settings": 4,
       "characters": 2123
@@ -1449,19 +1395,19 @@
       "characters": 5476
     },
     {
-      "path": "/reference/settings/server-settings/settings/compiled/expression",
+      "path": "/reference/settings/server-settings/settings/compiled-expression",
       "label": "compiled_expression_*",
       "settings": 2,
       "characters": 551
     },
     {
-      "path": "/reference/settings/server-settings/settings/concurrent/threads",
+      "path": "/reference/settings/server-settings/settings/concurrent-threads",
       "label": "concurrent_threads_*",
       "settings": 4,
       "characters": 3297
     },
     {
-      "path": "/reference/settings/server-settings/settings/cpu/slot",
+      "path": "/reference/settings/server-settings/settings/cpu-slot",
       "label": "cpu_slot_*",
       "settings": 3,
       "characters": 2657
@@ -1473,19 +1419,13 @@
       "characters": 1239
     },
     {
-      "path": "/reference/settings/server-settings/settings/database",
-      "label": "database_*",
-      "settings": 1,
-      "characters": 419
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/database/catalog",
+      "path": "/reference/settings/server-settings/settings/database-catalog",
       "label": "database_catalog_*",
       "settings": 5,
       "characters": 2494
     },
     {
-      "path": "/reference/settings/server-settings/settings/database/replicated",
+      "path": "/reference/settings/server-settings/settings/database-replicated",
       "label": "database_replicated_*",
       "settings": 2,
       "characters": 508
@@ -1497,7 +1437,7 @@
       "characters": 870
     },
     {
-      "path": "/reference/settings/server-settings/settings/default/replica",
+      "path": "/reference/settings/server-settings/settings/default-replica",
       "label": "default_replica_*",
       "settings": 2,
       "characters": 561
@@ -1515,13 +1455,7 @@
       "characters": 1872
     },
     {
-      "path": "/reference/settings/server-settings/settings/disk",
-      "label": "disk_*",
-      "settings": 1,
-      "characters": 340
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/disk/connections",
+      "path": "/reference/settings/server-settings/settings/disk-connections",
       "label": "disk_connections_*",
       "settings": 6,
       "characters": 2378
@@ -1533,37 +1467,31 @@
       "characters": 1490
     },
     {
-      "path": "/reference/settings/server-settings/settings/distributed/cache",
+      "path": "/reference/settings/server-settings/settings/distributed-cache",
       "label": "distributed_cache_*",
       "settings": 3,
       "characters": 1252
     },
     {
-      "path": "/reference/settings/server-settings/settings/distributed/ddl",
+      "path": "/reference/settings/server-settings/settings/distributed-ddl",
       "label": "distributed_ddl_*",
       "settings": 2,
       "characters": 3083
     },
     {
-      "path": "/reference/settings/server-settings/settings/dns",
-      "label": "dns_*",
-      "settings": 1,
-      "characters": 407
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/dns/allow",
+      "path": "/reference/settings/server-settings/settings/dns-allow",
       "label": "dns_allow_*",
       "settings": 2,
       "characters": 390
     },
     {
-      "path": "/reference/settings/server-settings/settings/dns/cache",
+      "path": "/reference/settings/server-settings/settings/dns-cache",
       "label": "dns_cache_*",
       "settings": 2,
       "characters": 357
     },
     {
-      "path": "/reference/settings/server-settings/settings/drop/distributed",
+      "path": "/reference/settings/server-settings/settings/drop-distributed",
       "label": "drop_distributed_*",
       "settings": 2,
       "characters": 455
@@ -1575,13 +1503,7 @@
       "characters": 529
     },
     {
-      "path": "/reference/settings/server-settings/settings/encryption",
-      "label": "encryption_*",
-      "settings": 1,
-      "characters": 2133
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/encryption/header",
+      "path": "/reference/settings/server-settings/settings/encryption-header",
       "label": "encryption_header_*",
       "settings": 3,
       "characters": 861
@@ -1593,7 +1515,7 @@
       "characters": 779
     },
     {
-      "path": "/reference/settings/server-settings/settings/global/profiler",
+      "path": "/reference/settings/server-settings/settings/global-profiler",
       "label": "global_profiler_*",
       "settings": 2,
       "characters": 860
@@ -1611,49 +1533,43 @@
       "characters": 5710
     },
     {
-      "path": "/reference/settings/server-settings/settings/http/connections",
+      "path": "/reference/settings/server-settings/settings/http-connections",
       "label": "http_connections_*",
       "settings": 6,
       "characters": 2321
     },
     {
-      "path": "/reference/settings/server-settings/settings/iceberg",
-      "label": "iceberg_*",
-      "settings": 1,
-      "characters": 309
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/iceberg/catalog",
+      "path": "/reference/settings/server-settings/settings/iceberg-catalog",
       "label": "iceberg_catalog_*",
       "settings": 2,
       "characters": 451
     },
     {
-      "path": "/reference/settings/server-settings/settings/iceberg/compaction",
+      "path": "/reference/settings/server-settings/settings/iceberg-compaction",
       "label": "iceberg_compaction_*",
       "settings": 2,
       "characters": 471
     },
     {
-      "path": "/reference/settings/server-settings/settings/iceberg/metadata",
+      "path": "/reference/settings/server-settings/settings/iceberg-metadata",
       "label": "iceberg_metadata_*",
       "settings": 4,
       "characters": 994
     },
     {
-      "path": "/reference/settings/server-settings/settings/iceberg/scheduler",
+      "path": "/reference/settings/server-settings/settings/iceberg-scheduler",
       "label": "iceberg_scheduler_*",
       "settings": 2,
       "characters": 531
     },
     {
-      "path": "/reference/settings/server-settings/settings/index/mark",
+      "path": "/reference/settings/server-settings/settings/index-mark",
       "label": "index_mark_*",
       "settings": 4,
       "characters": 994
     },
     {
-      "path": "/reference/settings/server-settings/settings/index/uncompressed",
+      "path": "/reference/settings/server-settings/settings/index-uncompressed",
       "label": "index_uncompressed_*",
       "settings": 3,
       "characters": 854
@@ -1665,13 +1581,13 @@
       "characters": 1446
     },
     {
-      "path": "/reference/settings/server-settings/settings/interserver/http",
+      "path": "/reference/settings/server-settings/settings/interserver-http",
       "label": "interserver_http_*",
       "settings": 3,
       "characters": 3142
     },
     {
-      "path": "/reference/settings/server-settings/settings/interserver/https",
+      "path": "/reference/settings/server-settings/settings/interserver-https",
       "label": "interserver_https_*",
       "settings": 2,
       "characters": 567
@@ -1683,13 +1599,13 @@
       "characters": 1116
     },
     {
-      "path": "/reference/settings/server-settings/settings/jemalloc/enable",
+      "path": "/reference/settings/server-settings/settings/jemalloc-enable",
       "label": "jemalloc_enable_*",
       "settings": 2,
       "characters": 967
     },
     {
-      "path": "/reference/settings/server-settings/settings/jemalloc/flush",
+      "path": "/reference/settings/server-settings/settings/jemalloc-flush",
       "label": "jemalloc_flush_*",
       "settings": 3,
       "characters": 975
@@ -1701,7 +1617,7 @@
       "characters": 488
     },
     {
-      "path": "/reference/settings/server-settings/settings/keeper/server-socket",
+      "path": "/reference/settings/server-settings/settings/keeper-server-socket",
       "label": "keeper_server.socket_*",
       "settings": 2,
       "characters": 405
@@ -1719,7 +1635,7 @@
       "characters": 1775
     },
     {
-      "path": "/reference/settings/server-settings/settings/load/marks",
+      "path": "/reference/settings/server-settings/settings/load-marks",
       "label": "load_marks_*",
       "settings": 2,
       "characters": 424
@@ -1737,7 +1653,7 @@
       "characters": 463
     },
     {
-      "path": "/reference/settings/server-settings/settings/mark/cache",
+      "path": "/reference/settings/server-settings/settings/mark-cache",
       "label": "mark_cache_*",
       "settings": 4,
       "characters": 968
@@ -1749,115 +1665,115 @@
       "characters": 9915
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/backups",
+      "path": "/reference/settings/server-settings/settings/max-backups",
       "label": "max_backups_*",
       "settings": 2,
       "characters": 741
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/concurrent",
+      "path": "/reference/settings/server-settings/settings/max-concurrent",
       "label": "max_concurrent_*",
       "settings": 3,
       "characters": 1656
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/database",
+      "path": "/reference/settings/server-settings/settings/max-database",
       "label": "max_database_*",
       "settings": 3,
       "characters": 954
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/dictionary",
+      "path": "/reference/settings/server-settings/settings/max-dictionary",
       "label": "max_dictionary_*",
       "settings": 2,
       "characters": 842
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/distributed",
+      "path": "/reference/settings/server-settings/settings/max-distributed",
       "label": "max_distributed_*",
       "settings": 2,
       "characters": 589
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/format",
+      "path": "/reference/settings/server-settings/settings/max-format",
       "label": "max_format_*",
       "settings": 2,
       "characters": 487
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/io",
+      "path": "/reference/settings/server-settings/settings/max-io",
       "label": "max_io_*",
       "settings": 2,
       "characters": 701
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/local",
+      "path": "/reference/settings/server-settings/settings/max-local",
       "label": "max_local_*",
       "settings": 2,
       "characters": 540
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/named",
+      "path": "/reference/settings/server-settings/settings/max-named",
       "label": "max_named_*",
       "settings": 2,
       "characters": 801
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/pending",
+      "path": "/reference/settings/server-settings/settings/max-pending",
       "label": "max_pending_*",
       "settings": 2,
       "characters": 840
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/prefixes",
+      "path": "/reference/settings/server-settings/settings/max-prefixes",
       "label": "max_prefixes_*",
       "settings": 2,
       "characters": 930
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/remote",
+      "path": "/reference/settings/server-settings/settings/max-remote",
       "label": "max_remote_*",
       "settings": 3,
       "characters": 943
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/replicated",
+      "path": "/reference/settings/server-settings/settings/max-replicated",
       "label": "max_replicated_*",
       "settings": 3,
       "characters": 1116
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/server",
-      "label": "max_server_*",
+      "path": "/reference/settings/server-settings/settings/max-server-memory-usage",
+      "label": "max_server_memory_usage_*",
       "settings": 2,
       "characters": 2346
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/snapshot",
+      "path": "/reference/settings/server-settings/settings/max-snapshot",
       "label": "max_snapshot_*",
       "settings": 2,
       "characters": 637
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/table",
+      "path": "/reference/settings/server-settings/settings/max-table",
       "label": "max_table_*",
       "settings": 3,
       "characters": 1660
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/thread",
+      "path": "/reference/settings/server-settings/settings/max-thread",
       "label": "max_thread_*",
       "settings": 2,
       "characters": 996
     },
     {
-      "path": "/reference/settings/server-settings/settings/max/view",
+      "path": "/reference/settings/server-settings/settings/max-view",
       "label": "max_view_*",
       "settings": 2,
       "characters": 781
     },
     {
-      "path": "/reference/settings/server-settings/settings/memory/worker",
+      "path": "/reference/settings/server-settings/settings/memory-worker",
       "label": "memory_worker_*",
       "settings": 8,
       "characters": 4376
@@ -1869,7 +1785,7 @@
       "characters": 763
     },
     {
-      "path": "/reference/settings/server-settings/settings/merges/mutations",
+      "path": "/reference/settings/server-settings/settings/merges-mutations",
       "label": "merges_mutations_*",
       "settings": 2,
       "characters": 1132
@@ -1881,7 +1797,7 @@
       "characters": 1786
     },
     {
-      "path": "/reference/settings/server-settings/settings/mlock/executable",
+      "path": "/reference/settings/server-settings/settings/mlock-executable",
       "label": "mlock_executable_*",
       "settings": 2,
       "characters": 787
@@ -1893,13 +1809,7 @@
       "characters": 733
     },
     {
-      "path": "/reference/settings/server-settings/settings/oom",
-      "label": "oom_*",
-      "settings": 1,
-      "characters": 173
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/oom/canary",
+      "path": "/reference/settings/server-settings/settings/oom-canary",
       "label": "oom_canary_*",
       "settings": 6,
       "characters": 3074
@@ -1923,37 +1833,37 @@
       "characters": 541
     },
     {
-      "path": "/reference/settings/server-settings/settings/os/threads",
+      "path": "/reference/settings/server-settings/settings/os-threads",
       "label": "os_threads_*",
       "settings": 3,
       "characters": 1097
     },
     {
-      "path": "/reference/settings/server-settings/settings/page/cache",
+      "path": "/reference/settings/server-settings/settings/page-cache",
       "label": "page_cache_*",
       "settings": 7,
       "characters": 1759
     },
     {
-      "path": "/reference/settings/server-settings/settings/paimon/metadata",
+      "path": "/reference/settings/server-settings/settings/paimon-metadata",
       "label": "paimon_metadata_*",
       "settings": 4,
       "characters": 996
     },
     {
-      "path": "/reference/settings/server-settings/settings/parquet/metadata",
+      "path": "/reference/settings/server-settings/settings/parquet-metadata",
       "label": "parquet_metadata_*",
       "settings": 4,
       "characters": 946
     },
     {
-      "path": "/reference/settings/server-settings/settings/parts/kill",
-      "label": "parts_kill_*",
+      "path": "/reference/settings/server-settings/settings/parts-kill-delay-period",
+      "label": "parts_kill_delay_period_*",
       "settings": 2,
       "characters": 608
     },
     {
-      "path": "/reference/settings/server-settings/settings/parts/killer",
+      "path": "/reference/settings/server-settings/settings/parts-killer",
       "label": "parts_killer_*",
       "settings": 2,
       "characters": 890
@@ -1965,13 +1875,13 @@
       "characters": 783
     },
     {
-      "path": "/reference/settings/server-settings/settings/prefetch/threadpool",
+      "path": "/reference/settings/server-settings/settings/prefetch-threadpool",
       "label": "prefetch_threadpool_*",
       "settings": 2,
       "characters": 448
     },
     {
-      "path": "/reference/settings/server-settings/settings/primary/index",
+      "path": "/reference/settings/server-settings/settings/primary-index",
       "label": "primary_index_*",
       "settings": 4,
       "characters": 914
@@ -1983,13 +1893,13 @@
       "characters": 7536
     },
     {
-      "path": "/reference/settings/server-settings/settings/query/cache-max",
+      "path": "/reference/settings/server-settings/settings/query-cache-max",
       "label": "query_cache.max_*",
       "settings": 4,
       "characters": 943
     },
     {
-      "path": "/reference/settings/server-settings/settings/query/condition",
+      "path": "/reference/settings/server-settings/settings/query-condition",
       "label": "query_condition_*",
       "settings": 3,
       "characters": 758
@@ -2001,13 +1911,7 @@
       "characters": 1739
     },
     {
-      "path": "/reference/settings/server-settings/settings/replicated",
-      "label": "replicated_*",
-      "settings": 1,
-      "characters": 404
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/replicated/fetches",
+      "path": "/reference/settings/server-settings/settings/replicated-fetches",
       "label": "replicated_fetches_*",
       "settings": 3,
       "characters": 888
@@ -2031,7 +1935,7 @@
       "characters": 437
     },
     {
-      "path": "/reference/settings/server-settings/settings/shutdown/wait",
+      "path": "/reference/settings/server-settings/settings/shutdown-wait",
       "label": "shutdown_wait_*",
       "settings": 3,
       "characters": 679
@@ -2043,7 +1947,7 @@
       "characters": 522
     },
     {
-      "path": "/reference/settings/server-settings/settings/snapshot/cleaner",
+      "path": "/reference/settings/server-settings/settings/snapshot-cleaner",
       "label": "snapshot_cleaner_*",
       "settings": 2,
       "characters": 493
@@ -2061,67 +1965,55 @@
       "characters": 9365
     },
     {
-      "path": "/reference/settings/server-settings/settings/storage/connections",
+      "path": "/reference/settings/server-settings/settings/storage-connections",
       "label": "storage_connections_*",
       "settings": 6,
       "characters": 2261
     },
     {
-      "path": "/reference/settings/server-settings/settings/tables/loader",
+      "path": "/reference/settings/server-settings/settings/tables-loader",
       "label": "tables_loader_*",
       "settings": 2,
       "characters": 1210
     },
     {
-      "path": "/reference/settings/server-settings/settings/tcp",
-      "label": "tcp_*",
-      "settings": 1,
-      "characters": 232
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/tcp/close",
+      "path": "/reference/settings/server-settings/settings/tcp-close",
       "label": "tcp_close_*",
       "settings": 2,
       "characters": 579
     },
     {
-      "path": "/reference/settings/server-settings/settings/tcp/port",
+      "path": "/reference/settings/server-settings/settings/tcp-port",
       "label": "tcp_port_*",
       "settings": 2,
       "characters": 335
     },
     {
-      "path": "/reference/settings/server-settings/settings/temporary/data",
+      "path": "/reference/settings/server-settings/settings/temporary-data",
       "label": "temporary_data_*",
       "settings": 2,
       "characters": 1364
     },
     {
-      "path": "/reference/settings/server-settings/settings/text",
-      "label": "text_*",
-      "settings": 1,
-      "characters": 1551
-    },
-    {
-      "path": "/reference/settings/server-settings/settings/text/index",
+      "path": "/reference/settings/server-settings/settings/text-index",
       "label": "text_index_*",
       "settings": 12,
       "characters": 3128
     },
     {
-      "path": "/reference/settings/server-settings/settings/threadpool/local",
+      "path": "/reference/settings/server-settings/settings/threadpool-local",
       "label": "threadpool_local_*",
       "settings": 2,
       "characters": 583
     },
     {
-      "path": "/reference/settings/server-settings/settings/threadpool/remote",
+      "path": "/reference/settings/server-settings/settings/threadpool-remote",
       "label": "threadpool_remote_*",
       "settings": 2,
       "characters": 585
     },
     {
-      "path": "/reference/settings/server-settings/settings/threadpool/writer",
+      "path": "/reference/settings/server-settings/settings/threadpool-writer",
       "label": "threadpool_writer_*",
       "settings": 2,
       "characters": 474
@@ -2133,25 +2025,25 @@
       "characters": 1616
     },
     {
-      "path": "/reference/settings/server-settings/settings/top/level",
+      "path": "/reference/settings/server-settings/settings/top-level",
       "label": "top_level_*",
       "settings": 2,
       "characters": 976
     },
     {
-      "path": "/reference/settings/server-settings/settings/total/memory",
+      "path": "/reference/settings/server-settings/settings/total-memory",
       "label": "total_memory_*",
       "settings": 4,
       "characters": 2264
     },
     {
-      "path": "/reference/settings/server-settings/settings/uncompressed/cache",
+      "path": "/reference/settings/server-settings/settings/uncompressed-cache",
       "label": "uncompressed_cache_*",
       "settings": 3,
       "characters": 1038
     },
     {
-      "path": "/reference/settings/server-settings/settings/unique/key",
+      "path": "/reference/settings/server-settings/settings/unique-key",
       "label": "unique_key_*",
       "settings": 6,
       "characters": 1569
@@ -2169,7 +2061,7 @@
       "characters": 4621
     },
     {
-      "path": "/reference/settings/server-settings/settings/user/defined",
+      "path": "/reference/settings/server-settings/settings/user-defined",
       "label": "user_defined_*",
       "settings": 2,
       "characters": 829
@@ -2181,7 +2073,7 @@
       "characters": 466
     },
     {
-      "path": "/reference/settings/server-settings/settings/vector/similarity",
+      "path": "/reference/settings/server-settings/settings/vector-similarity",
       "label": "vector_similarity_*",
       "settings": 4,
       "characters": 1104
@@ -2201,8 +2093,8 @@
     {
       "path": "/reference/settings/server-settings/settings/other",
       "label": "Other",
-      "settings": 109,
-      "characters": 92067
+      "settings": 118,
+      "characters": 98035
     }
   ]
 }

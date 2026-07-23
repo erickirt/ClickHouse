@@ -144,14 +144,14 @@ If no conditions are met for a data part, ClickHouse uses the `lz4` compression.
 </compression>
 ```
 
-## config-file {#config-file}
-
-<SettingsInfoBlock type="String" default_value="config.xml" changeable_without_restart="No" />Points to the server config file.
-
 ## config_reload_interval_ms {#config_reload_interval_ms}
 
 <SettingsInfoBlock type="UInt64" default_value="2000" changeable_without_restart="Yes" />
 How often clickhouse will reload config and check for new changes
+
+## config-file {#config-file}
+
+<SettingsInfoBlock type="String" default_value="config.xml" changeable_without_restart="No" />Points to the server config file.
 
 ## core_dump {#core_dump}
 
@@ -206,6 +206,12 @@ The default server configuration file `config.xml` contains the following settin
 </crash_log>
 ```
 
+## database_atomic_delay_before_drop_table_sec {#database_atomic_delay_before_drop_table_sec}
+
+<SettingsInfoBlock type="UInt64" default_value="480" changeable_without_restart="No" />
+The delay during which a dropped table can be restored using the [`UNDROP`](/reference/statements/undrop) statement. If `DROP TABLE` ran with a `SYNC` modifier, the setting is ignored.
+The default for this setting is `480` (8 minutes).
+
 ## dead_letter_queue {#dead_letter_queue}
 
 Setting for the 'dead_letter_queue' system table.
@@ -227,6 +233,12 @@ The default settings are:
 
 <SettingsInfoBlock type="UInt64" default_value="1000" changeable_without_restart="No" />Interval in milliseconds for reconnection attempts of failed MySQL and Postgres dictionaries having `background_reconnect` enabled.
 
+## disk_transaction_wait_for_blob_removal {#disk_transaction_wait_for_blob_removal}
+
+<SettingsInfoBlock type="Bool" default_value="1" changeable_without_restart="No" />
+Default value for the per-disk `wait_for_blob_removal` setting.
+When enabled, the server waits for background blob removal to complete before acknowledging the operation.
+
 ## display_secrets_in_show_and_select {#display_secrets_in_show_and_select}
 
 <SettingsInfoBlock type="Bool" default_value="0" changeable_without_restart="No" />
@@ -242,6 +254,15 @@ Possible values:
 - `0` — Disabled.
 - `1` — Enabled.
 
+## dns_max_consecutive_failures {#dns_max_consecutive_failures}
+
+<SettingsInfoBlock type="UInt32" default_value="5" changeable_without_restart="No" />
+Stop further attempts to update a hostname's DNS cache after this number of consecutive failures. The information still remains in the DNS cache. Zero means unlimited.
+
+**See also**
+
+- [`SYSTEM DROP DNS CACHE`](/reference/statements/system#drop-dns-cache)
+
 ## dynamic_user_defined_executable_functions_path {#dynamic_user_defined_executable_functions_path}
 
 <SettingsInfoBlock type="String" default_value="/var/lib/clickhouse/dynamic_user_defined_executable_functions/" changeable_without_restart="No" />
@@ -253,6 +274,87 @@ On server restart, the directory is scanned for configuration files and the corr
 ```xml
 <dynamic_user_defined_executable_functions_path>/var/lib/clickhouse/dynamic_user_defined_executable_functions/</dynamic_user_defined_executable_functions_path>
 ```
+
+## encryption {#encryption}
+
+Configures a command to obtain a key to be used by [encryption codecs](/reference/statements/create/table#encryption-codecs). Key (or keys) should be written in environment variables or set in the configuration file.
+
+Keys can be hex or string with a length equal to 16 bytes.
+
+**Example**
+
+Loading from config:
+
+```xml
+<encryption_codecs>
+    <aes_128_gcm_siv>
+        <key>1234567812345678</key>
+    </aes_128_gcm_siv>
+</encryption_codecs>
+```
+
+<Note>
+Storing keys in the configuration file is not recommended. It isn't secure. You can move the keys into a separate config file on a secure disk and put a symlink to that config file to `config.d/` folder.
+</Note>
+
+Loading from config, when the key is in hex:
+
+```xml
+<encryption_codecs>
+    <aes_128_gcm_siv>
+        <key_hex>00112233445566778899aabbccddeeff</key_hex>
+    </aes_128_gcm_siv>
+</encryption_codecs>
+```
+
+Loading key from the environment variable:
+
+```xml
+<encryption_codecs>
+    <aes_128_gcm_siv>
+        <key_hex from_env="ENVVAR"></key_hex>
+    </aes_128_gcm_siv>
+</encryption_codecs>
+```
+
+Here `current_key_id` sets the current key for encryption, and all specified keys can be used for decryption.
+
+Each of these methods can be applied for multiple keys:
+
+```xml
+<encryption_codecs>
+    <aes_128_gcm_siv>
+        <key_hex id="0">00112233445566778899aabbccddeeff</key_hex>
+        <key_hex id="1" from_env="ENVVAR"></key_hex>
+        <current_key_id>1</current_key_id>
+    </aes_128_gcm_siv>
+</encryption_codecs>
+```
+
+Here `current_key_id` shows current key for encryption.
+
+Also, users can add nonce that must be 12 bytes long (by default encryption and decryption processes use nonce that consists of zero bytes):
+
+```xml
+<encryption_codecs>
+    <aes_128_gcm_siv>
+        <nonce>012345678910</nonce>
+    </aes_128_gcm_siv>
+</encryption_codecs>
+```
+
+Or it can be set in hex:
+
+```xml
+<encryption_codecs>
+    <aes_128_gcm_siv>
+        <nonce_hex>abcdefabcdef</nonce_hex>
+    </aes_128_gcm_siv>
+</encryption_codecs>
+```
+<Note>
+Everything mentioned above can be applied for `aes_256_gcm_siv` (but the key must be 32 bytes long).
+</Note>
 
 ## enforce_keeper_component_tracking {#enforce_keeper_component_tracking}
 
@@ -336,6 +438,10 @@ A value of `0` means ClickHouse disables HSTS. If you set a positive number, the
 ```xml
 <hsts_max_age>600000</hsts_max_age>
 ```
+
+## iceberg_background_schedule_pool_size {#iceberg_background_schedule_pool_size}
+
+<SettingsInfoBlock type="UInt64" default_value="10" changeable_without_restart="No" />Size of thread pool to asynchronously fetch the latest metadata from a remote iceberg catalog; the pool is shared by all the active tables.
 
 ## ignore_empty_sql_security_in_create_view_query {#ignore_empty_sql_security_in_create_view_query}
 
@@ -766,6 +872,10 @@ Used to regulate how resources are utilized and shared between mutations and oth
 
 **See Also**
 - [Workload Scheduling](/concepts/features/configuration/server-config/workload-scheduling)
+
+## oom_score {#oom_score}
+
+<SettingsInfoBlock type="Int32" default_value="0" changeable_without_restart="No" />On Linux systems this can control the behavior of OOM killer.
 
 ## openSSL {#openssl}
 
@@ -1291,6 +1401,20 @@ Empty by default.
 <replica_group_name>backups</replica_group_name>
 ```
 
+## replicated_merge_tree {#replicated_merge_tree}
+
+Fine-tuning for tables in the [ReplicatedMergeTree](/reference/engines/table-engines/mergetree-family/mergetree). This setting has a higher priority.
+
+For more information, see the MergeTreeSettings.h header file.
+
+**Example**
+
+```xml
+<replicated_merge_tree>
+    <max_suspicious_broken_parts>5</max_suspicious_broken_parts>
+</replicated_merge_tree>
+```
+
 ## restore_threads {#restore_threads}
 
 <SettingsInfoBlock type="NonZeroUInt64" default_value="16" changeable_without_restart="No" />The maximum number of threads to execute RESTORE requests.
@@ -1348,10 +1472,51 @@ If set to true, users require a grant to create a table with a specific engine e
 By default, for backward compatibility creating table with a specific table engine ignores grant, however you can change this behaviour by setting this to true.
 </Note>
 
+## tcp_ssh_port {#tcp_ssh_port}
+
+Port for the SSH server which allows the user to connect and execute queries in an interactive fashion using the embedded client over the PTY.
+
+Example:
+
+```xml
+<tcp_ssh_port>9022</tcp_ssh_port>
+```
+
+## text_log {#text_log}
+
+Settings for the [text_log](/reference/system-tables/text_log) system table for logging text messages.
+
+<SystemLogParameters/>
+
+Additionally:
+
+| Setting | Description                                                                                                                                                                                                 | Default Value       |
+|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------|
+| `level` | Maximum Message Level (by default `Trace`) which will be stored in a table.                                                                                                                                 | `Trace`             |
+
+**Example**
+
+```xml
+<clickhouse>
+    <text_log>
+        <level>notice</level>
+        <database>system</database>
+        <table>text_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+        <max_size_rows>1048576</max_size_rows>
+        <reserved_size_rows>8192</reserved_size_rows>
+        <buffer_size_rows_flush_threshold>524288</buffer_size_rows_flush_threshold>
+        <flush_on_crash>false</flush_on_crash>
+        <!-- <partition_by>event_date</partition_by> -->
+        <engine>Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + INTERVAL 30 day</engine>
+    </text_log>
+</clickhouse>
+```
+
 ## thread_pool_queue_size {#thread_pool_queue_size}
 
 <SettingsInfoBlock type="UInt64" default_value="10000" changeable_without_restart="No" />
-The maximum number of jobs that can be scheduled on the Global Thread pool. Increasing queue size leads to larger memory usage. It is recommended to keep this value equal to [`max_thread_pool_size`](/reference/settings/server-settings/settings/max/thread#max_thread_pool_size).
+The maximum number of jobs that can be scheduled on the Global Thread pool. Increasing queue size leads to larger memory usage. It is recommended to keep this value equal to [`max_thread_pool_size`](/reference/settings/server-settings/settings/max-thread#max_thread_pool_size).
 
 <Note>
 A value of `0` means unlimited.
