@@ -28,7 +28,7 @@
     : INKEEP_API_KEY_LOCAL;
   // The legacy *.mintlify.app source exposed pages at the host root, while
   // the *.mintlify.site source includes a /docs prefix.
-  var INKEEP_PREVIEW_URL_RE = /^https?:\/\/private-7c7dfe99\.mintlify\.(?:app|site)\/(?:docs\/)?/;
+  var INKEEP_PREVIEW_URL_RE = /^https?:\/\/private-7c7dfe99\.mintlify\.(?:app|site)\/(?:docs(?:\/|(?=[?#]|$)))?/;
 
   // cxkit-mintlify CDN bundle. @0.5 resolves to the latest 0.5.x; pin a full
   // version (e.g. @0.5.119) when deploying for reproducible builds.

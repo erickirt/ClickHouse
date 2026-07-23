@@ -3,7 +3,7 @@ export const GlobalSearch = ({ placeholder = 'Search ClickHouse docs...' }) => {
   // helpers used by the component must stay within the component scope.
   // The legacy *.mintlify.app source exposed pages at the host root, while
   // the *.mintlify.site source includes a /docs prefix.
-  const previewUrlPattern = /^https?:\/\/private-7c7dfe99\.mintlify\.(?:app|site)\/(?:docs\/)?/;
+  const previewUrlPattern = /^https?:\/\/private-7c7dfe99\.mintlify\.(?:app|site)\/(?:docs(?:\/|(?=[?#]|$)))?/;
   const transformSource = (source) => {
     let url = source.url || '';
     const isPreview = previewUrlPattern.test(url);

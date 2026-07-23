@@ -39,7 +39,7 @@ export const SectionSearch = ({ section = '/reference/statements', label = 'Stat
     const EMBED = 'https://cdn.jsdelivr.net/npm/@inkeep/cxkit-js@0.5/dist/embed.js';
     // The legacy *.mintlify.app source exposed pages at the host root, while
     // the *.mintlify.site source includes a /docs prefix.
-    const PREVIEW_RE = /^https?:\/\/private-7c7dfe99\.mintlify\.(?:app|site)\/(?:docs\/)?/;
+    const PREVIEW_RE = /^https?:\/\/private-7c7dfe99\.mintlify\.(?:app|site)\/(?:docs(?:\/|(?=[?#]|$)))?/;
 
     // Reduce any result URL (preview host or canonical) to a bare docs path.
     const toPath = (u) => (u || '')
