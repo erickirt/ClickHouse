@@ -317,7 +317,7 @@ BlockIO runCommandSegments(CommandSegments & segments, const StoragePtr & table,
             auto alter_lock = table->lockForAlter(settings[Setting::lock_acquire_timeout]);
             /// Drop the query-scoped metadata cache, which may hold a snapshot pinned before this
             /// lock. The reads below (validate/prepare/checkAlterIsPossible and the storage's alter)
-            /// then all repopulate from the metadata committed as of holding the lock. See PR #111029.
+            /// then all repopulate from the metadata committed as of holding the lock.
             if (auto metadata_cache = context->getQueryMetadataCache())
             {
                 auto [cache, cache_lock] = metadata_cache->getStorageMetadataCache();
