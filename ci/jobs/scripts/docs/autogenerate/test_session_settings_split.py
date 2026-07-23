@@ -401,6 +401,9 @@ def main():
             assert explorer.index(
                 "  const [anchorRoutes] = useState(() => ("
             ) > component_start
+            assert "w-full overflow-x-auto" in explorer
+            assert "overflow-auto" not in explorer
+            assert "maxHeight" not in explorer
             assert f'const marker = "{family["base_route"]}";' in explorer
             assert (
                 f'"href":"{family["base_route"]}/filesystem/cache'
