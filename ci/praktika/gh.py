@@ -1119,7 +1119,11 @@ class GH:
         """'MERGED' / 'OPEN' / '' for the PR whose head is `branch`.
 
         Merged takes priority: an already-merged PR means the change is in master,
-        so the caller should stop even if a stray open PR also exists. Same
+        so the caller should stop even if a stray open PR also exists. (This is
+        the opposite order from `get_pr_url_by_branch`, which checks open first;
+        they agree unless one branch has both an open and a merged PR - which the
+        release flow's "never recreate once present" invariant prevents for the
+        `auto/<tag>` / `bump_version_<version>` branches this is used with.) Same
         retry / fail-close semantics as `get_pr_url_by_branch` - a failed lookup
         raises rather than being mistaken for 'no PR' (which would recreate a PR
         or skip a needed merge after the release is already published).
