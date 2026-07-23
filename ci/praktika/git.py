@@ -164,8 +164,8 @@ class Git:
         desired end state, so it is treated as success rather than a failure.
 
         A PR is only accepted once its required status checks have completed, so
-        while a required check (e.g. `CH Inc sync`) is still expected/pending the
-        mutation is refused with UNPROCESSABLE. Retry up to `retries` times with
+        while a required check is still expected/pending the mutation is refused
+        with UNPROCESSABLE. Retry up to `retries` times with
         `delay` seconds between attempts to wait that out; the same delay covers a
         transient `mergeStateStatus == UNKNOWN` right after a push.
 
