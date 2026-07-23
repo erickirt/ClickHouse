@@ -6791,7 +6791,7 @@ void StorageReplicatedMergeTree::alter(
     auto table_id = getStorageID();
     const auto & query_settings = query_context->getSettingsRef();
 
-    auto metadata_snapshot = getInMemoryMetadataPtr(query_context, /*bypass_metadata_cache*/ false);
+    auto metadata_snapshot = getInMemoryMetadataPtr(query_context, false);
     StorageInMemoryMetadata future_metadata = *metadata_snapshot;
     /// Snapshot the sorting key before applying commands, to compare with the resolved future one.
     KeyDescription old_sorting_key = future_metadata.sorting_key;
@@ -6913,7 +6913,7 @@ void StorageReplicatedMergeTree::alter(
         alter_entry.emplace();
         mutation_znode.reset();
 
-        auto current_metadata = getInMemoryMetadataPtr(query_context, /*bypass_metadata_cache*/ false);
+        auto current_metadata = getInMemoryMetadataPtr(query_context, false);
 
         ReplicatedMergeTreeTableMetadata future_metadata_in_zk(*this, current_metadata);
         if (ast_to_str(future_metadata.sorting_key.definition_ast) != ast_to_str(current_metadata->sorting_key.definition_ast))

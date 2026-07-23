@@ -12,7 +12,6 @@
 #include <Databases/IDatabase.h>
 #include <Interpreters/AddDefaultDatabaseVisitor.h>
 #include <Interpreters/Context.h>
-#include <Interpreters/QueryMetadataCache.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/FunctionNameNormalizer.h>
 #include <Interpreters/IdentifierSemantic.h>
@@ -21,6 +20,7 @@
 #include <Interpreters/MutationsDateTimeLiteralVisitor.h>
 #include <Interpreters/MutationsNonDeterministicHelpers.h>
 #include <Interpreters/QueryLog.h>
+#include <Interpreters/QueryMetadataCache.h>
 #include <Interpreters/executeDDLQueryOnCluster.h>
 #include <Parsers/ASTAlterQuery.h>
 #include <Parsers/ASTAssignment.h>
@@ -315,15 +315,9 @@ BlockIO runCommandSegments(CommandSegments & segments, const StoragePtr & table,
         if (auto * alter_commands = std::get_if<AlterCommands>(&segment))
         {
             auto alter_lock = table->lockForAlter(settings[Setting::lock_acquire_timeout]);
-            /// The query-scoped metadata cache (`enable_shared_storage_snapshot_in_query`) may have pinned a
-            /// metadata snapshot before this alter lock was acquired: the access check reads it earlier in the
-            /// query (see `isRowExistsLightweightDeleteMarker`). Everything below — `validate`, `prepare`,
-            /// `checkAlterIsPossible` and the storage's `alter` (including the metadata that `alter` commits) —
-            /// must observe the metadata committed as of holding the lock. A stale pinned base is otherwise
-            /// committed back by the comment/settings branches and clobbers a concurrently applied `ALTER`,
-            /// and mixing a stale validation snapshot with a fresh apply turns a concurrent `DROP COLUMN` into a
-            /// logical error. Drop the pinned entries so the reads below repopulate fresh under the lock;
-            /// committed metadata cannot change while `lockForAlter` is held.
+            /// Drop the query-scoped metadata cache, which may hold a snapshot pinned before this
+            /// lock. The reads below (validate/prepare/checkAlterIsPossible and the storage's alter)
+            /// then all repopulate from the metadata committed as of holding the lock. See PR #111029.
             if (auto metadata_cache = context->getQueryMetadataCache())
             {
                 auto [cache, cache_lock] = metadata_cache->getStorageMetadataCache();
