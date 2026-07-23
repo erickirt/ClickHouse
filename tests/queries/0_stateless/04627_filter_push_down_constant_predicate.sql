@@ -24,24 +24,38 @@ DROP TABLE IF EXISTS traces_04627;
 CREATE TABLE traces_04627 (cluster String, ts UInt64, trace_id String) ENGINE = MergeTree ORDER BY tuple();
 INSERT INTO traces_04627 VALUES ('cluster1', 1, 'trace007');
 
--- Liveness oracle: the plan must actually take the lazy-materialization-through-join path this test targets.
-SELECT count() > 0
-FROM
+-- Liveness oracle: assert the plan is the JOIN-specific top-k-through-join + lazy-materialization
+-- path, not merely that some lazy stitch happened. `JoinLazyColumnsStep` alone is generic (single-table
+-- lazy plans build it too, e.g. 02354_vector_search_queries), so it can stay green after the join
+-- rewrite regresses. Three columns, all must be 1:
+--   join_in_plan            - the SQL Join step is present.
+--   preserved_side_topk_sort - top-k-through-join pushed a `Sorting` onto the preserved (left) input,
+--                              i.e. a `Sorting` appears BELOW the Join in the DFS-printed plan.
+--   lazy_stitch             - lazy materialization split the read (`JoinLazyColumnsStep`).
+WITH plan AS
 (
-    EXPLAIN actions = 1
-    SELECT ts
+    SELECT rowNumberInAllBlocks() AS rn, explain
     FROM
     (
-        SELECT t.cluster, t.ts
-        FROM traces_04627 AS t
-        LEFT ANY JOIN (SELECT '' AS cluster, '' AS trace_id) AS a USING (cluster, trace_id)
-        WHERE t.ts BETWEEN 0 AND 10
-    ) AS v
-    WHERE cluster = 'cluster1' AND 1
-    ORDER BY ts DESC
-    LIMIT 10
+        EXPLAIN actions = 1
+        SELECT ts
+        FROM
+        (
+            SELECT t.cluster, t.ts
+            FROM traces_04627 AS t
+            LEFT ANY JOIN (SELECT '' AS cluster, '' AS trace_id) AS a USING (cluster, trace_id)
+            WHERE t.ts BETWEEN 0 AND 10
+        ) AS v
+        WHERE cluster = 'cluster1' AND 1
+        ORDER BY ts DESC
+        LIMIT 10
+    )
 )
-WHERE explain ILIKE '%JoinLazyColumnsStep%';
+SELECT
+    (SELECT count() FROM plan WHERE explain ILIKE '%Join (JOIN%') > 0 AS join_in_plan,
+    (SELECT count() FROM plan WHERE explain ILIKE '%Sorting%'
+             AND rn > (SELECT min(rn) FROM plan WHERE explain ILIKE '%Join (JOIN%')) > 0 AS preserved_side_topk_sort,
+    (SELECT count() FROM plan WHERE explain ILIKE '%JoinLazyColumnsStep%') > 0 AS lazy_stitch;
 
 -- The regression itself: must return a single row, ts = 1.
 SELECT ts
