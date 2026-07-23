@@ -88,7 +88,7 @@ With Managed ClickStack you deploy a standalone ClickStack collector that ingest
 The Datadog receiver is built into and pre-configured in the ClickStack distribution of the OpenTelemetry collector. If you prefer to use the standard [OpenTelemetry Collector Contrib](https://github.com/open-telemetry/opentelemetry-collector-contrib) distribution, you'll need to configure the receiver yourself. All of our changes and improvements to the receiver are pushed upstream, so they're available there too. For configuration options, see the [Datadog receiver README](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/receiver/datadogreceiver/README.md).
 </Note>
 
-Run the [standalone ClickStack collector](/clickstack/ingesting-data/otel-collector), pointing it at your ClickHouse Cloud service. Enable the Datadog receiver with `ENABLE_DATADOG_RECEIVER=true`, expose port `8126`, and secure ingestion by setting your own `OTLP_AUTH_TOKEN`:
+Run the [standalone ClickStack collector](/clickstack/ingesting-data/collector), pointing it at your ClickHouse Cloud service. Enable the Datadog receiver with `ENABLE_DATADOG_RECEIVER=true`, expose port `8126`, and secure ingestion by setting your own `OTLP_AUTH_TOKEN`:
 
 ```shell
 export CLICKHOUSE_ENDPOINT=<HTTPS_ENDPOINT>
@@ -108,7 +108,7 @@ docker run --name clickstack-collector \
   clickhouse/clickstack-otel-collector:latest
 ```
 
-The receiver is now available at `http://localhost:8126`, and the token in `OTLP_AUTH_TOKEN` is the key you pass to the Datadog agent. For more detail on securing the collector, including the Helm equivalent, see ["Securing the collector"](/clickstack/ingesting-data/otel-collector#securing-the-collector).
+The receiver is now available at `http://localhost:8126`, and the token in `OTLP_AUTH_TOKEN` is the key you pass to the Datadog agent. For more detail on securing the collector, including the Helm equivalent, see ["Securing the collector"](/clickstack/ingesting-data/collector#securing-the-collector).
 
 </Step>
 
