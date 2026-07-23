@@ -4,6 +4,7 @@ import re
 import traceback
 from pathlib import Path
 
+from praktika.info import Info
 from praktika.utils import Shell
 
 SYNC_REPO = "ClickHouse/clickhouse-private"
@@ -25,7 +26,9 @@ def get_linked_pr_numbers():
     """
     event_file_path = os.getenv("GITHUB_EVENT_PATH", "")
     if not event_file_path or not Path(event_file_path).is_file():
-        print(f"WARNING: GITHUB_EVENT_PATH is not set or missing: '{event_file_path}'")
+        msg = f"GITHUB_EVENT_PATH is not set or missing: '{event_file_path}' - skipping Sync PR merge"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return []
 
     with open(event_file_path, "r", encoding="utf-8") as f:
@@ -33,7 +36,9 @@ def get_linked_pr_numbers():
 
     commits = github_event.get("commits", [])
     if not commits:
-        print("WARNING: No commits found in the push event payload")
+        msg = "No commits found in the push event payload - skipping Sync PR merge"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return []
 
     pr_numbers = []
@@ -54,26 +59,36 @@ def merge_sync_pr(linked_pr_number):
         retries=5,
     )
     if not raw:
-        print(f"WARNING: Failed to retrieve Sync PR list for pr {linked_pr_number} after retries - skipping merge")
+        msg = f"Failed to retrieve Sync PR list for pr {linked_pr_number} after retries - skipping merge"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     sync_pr_numbers = [n.strip() for n in raw.splitlines() if n.strip()]
 
     if len(sync_pr_numbers) == 0:
-        print(f"WARNING: No open Sync PR found for pr {linked_pr_number} - skipping merge")
+        msg = f"No open Sync PR found for pr {linked_pr_number} - skipping merge"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     if len(sync_pr_numbers) > 1:
-        print(f"WARNING: Expected at most one open Sync PR for branch sync-upstream/pr/{linked_pr_number}, found {len(sync_pr_numbers)}: {sync_pr_numbers} - skipping merge")
+        msg = f"Expected at most one open Sync PR for branch sync-upstream/pr/{linked_pr_number}, found {len(sync_pr_numbers)}: {sync_pr_numbers} - skipping merge"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     sync_pr_number = sync_pr_numbers[0]
     if not sync_pr_number.isdigit() or not int(sync_pr_number):
-        print(f"WARNING: Failed to retrieve Sync PR number for pr {linked_pr_number}")
+        msg = f"Failed to retrieve Sync PR number for pr {linked_pr_number}"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     if not Shell.check(f"gh pr ready {sync_pr_number} --repo {SYNC_REPO}", verbose=True, retries=5):
-        print(f"WARNING: Failed to set Sync PR {sync_pr_number} as ready")
+        msg = f"Failed to set Sync PR {sync_pr_number} as ready"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     if not Shell.check(
@@ -81,7 +96,9 @@ def merge_sync_pr(linked_pr_number):
         verbose=True,
         retries=5,
     ):
-        print(f"WARNING: Failed to merge Sync PR {sync_pr_number}")
+        msg = f"Failed to merge Sync PR {sync_pr_number}"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     print(f"Sync PR {sync_pr_number} merged (for pr {linked_pr_number})")
@@ -91,7 +108,9 @@ def check():
     linked_pr_numbers = get_linked_pr_numbers()
 
     if not linked_pr_numbers:
-        print("WARNING: No linked PR numbers found in the push event - skipping merge")
+        msg = "No linked PR numbers found in the push event - skipping Sync PR merge"
+        print(f"WARNING: {msg}")
+        Info().add_workflow_warning(msg)
         return
 
     print(f"Found linked PR numbers to sync: {linked_pr_numbers}")
