@@ -758,14 +758,12 @@ StorageSystemStackTrace::StorageSystemStackTrace(const StorageID & table_id_)
     if (sigaddset(&sa.sa_mask, STACK_TRACE_SERVICE_SIGNAL))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Cannot set signal handler");
 
-#if defined(OS_DARWIN)
-    /// This handler shares the thread-local async-unwind recovery buffer with the query profiler on
-    /// macOS (see signalHandler above). Block the profiler pause signals (SIGUSR1/SIGUSR2) while it runs
-    /// so a profiler signal cannot nest and clobber that buffer, which would make the next fault's
-    /// siglongjmp jump to the wrong frame. Kept under TSan too, matching the recovery in signalHandler.
+    /// This handler shares the thread-local async-unwind recovery buffer (asynchronous_stack_unwinding
+    /// + sigjmp_buf in StackTrace) with the query profiler. Block the profiler pause signals (SIGUSR1/
+    /// SIGUSR2) while it runs so a profiler signal cannot nest and clobber that buffer, which would make
+    /// the next fault's siglongjmp jump to the wrong frame.
     if (sigaddset(&sa.sa_mask, SIGUSR1) || sigaddset(&sa.sa_mask, SIGUSR2))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Cannot set signal handler");
-#endif
 #pragma clang diagnostic pop
 
     if (sigaction(STACK_TRACE_SERVICE_SIGNAL, &sa, nullptr))
