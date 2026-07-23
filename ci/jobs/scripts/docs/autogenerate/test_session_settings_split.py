@@ -406,9 +406,17 @@ def main():
             assert "overflow-auto" not in explorer
             assert "maxHeight" not in explorer
             assert 'aria-label="Search settings"' in explorer
-            assert 'placeholder="Search settings, for example %materialized%"' in explorer
-            assert 'normalizedSearch.includes("%")' in explorer
-            assert 'normalizedSearch.replaceAll("%", "").length > 0' in explorer
+            assert (
+                'placeholder="Search settings, e.g. parallel replicas or %materialized%"'
+                in explorer
+            )
+            assert "const toPlainSearchTerms = (value) => value" in explorer
+            assert ".split(/[^a-z0-9]+/)" in explorer
+            assert 'term.endsWith("s")' in explorer
+            assert 'const usesWildcard = normalizedSearch.includes("%")' in explorer
+            assert 'normalizedSearch.replaceAll("%", "").trim().length > 0' in explorer
+            assert "candidateTerm.startsWith(searchTerm)" in explorer
+            assert "Search by words, or use % for wildcard patterns." in explorer
             assert "const filteredEntries = isSearching" in explorer
             assert "const isOpen = isSearching || expandedGroups.has(key)" in explorer
             assert "No matching settings" in explorer

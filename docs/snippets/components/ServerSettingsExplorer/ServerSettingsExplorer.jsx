@@ -52,13 +52,30 @@ const ServerSettingsExplorer = () => {
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const normalizedSearch = searchTerm.trim().toLowerCase();
-  const isSearching = normalizedSearch.replaceAll("%", "").length > 0;
+  const toPlainSearchTerms = (value) => value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((term) => term.length > 1)
+    .map((term) => term.length > 3 && term.endsWith("s")
+      ? term.slice(0, -1)
+      : term);
+  const usesWildcard = normalizedSearch.includes("%");
+  const plainSearchTerms = toPlainSearchTerms(searchTerm);
+  const isSearching = usesWildcard
+    ? normalizedSearch.replaceAll("%", "").trim().length > 0
+    : plainSearchTerms.length > 0;
 
   const matchesSearch = (value) => {
     const candidate = value.toLowerCase();
-    if (!normalizedSearch) return true;
-    if (!normalizedSearch.includes("%")) {
-      return candidate.includes(normalizedSearch);
+    if (!isSearching) return true;
+    if (!usesWildcard) {
+      const candidateTerms = toPlainSearchTerms(value);
+      return plainSearchTerms.every((searchTerm) =>
+        candidateTerms.some((candidateTerm) =>
+          candidateTerm.startsWith(searchTerm)
+        )
+      );
     }
 
     const parts = normalizedSearch.split("%");
@@ -191,11 +208,11 @@ const ServerSettingsExplorer = () => {
         type="search"
         value={searchTerm}
         onChange={(event) => setSearchTerm(event.target.value)}
-        placeholder="Search settings, for example %materialized%"
+        placeholder="Search settings, e.g. parallel replicas or %materialized%"
         className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-500 focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 dark:border-white/10 dark:bg-transparent dark:text-white dark:placeholder:text-gray-500"
       />
       <div className="mt-2 flex items-center justify-between gap-4 text-xs text-gray-500 dark:text-gray-400">
-        <span>Use % as a wildcard.</span>
+        <span>Search by words, or use % for wildcard patterns.</span>
         {isSearching && (
           <span>{matchingCount} matching {matchingCount === 1 ? "setting" : "settings"}</span>
         )}
