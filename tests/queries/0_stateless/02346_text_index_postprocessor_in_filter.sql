@@ -23,7 +23,7 @@ SELECT 'if(token NOT IN (keep-set)): only the keep-set survives';
 CREATE TABLE tab_notin (
   id UInt32,
   s String,
-  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s NOT IN ('the', 'fox'), s, ''))
+  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s NOT IN ('the', 'fox'), '', s))
 )
 ENGINE = MergeTree
 ORDER BY id;
@@ -37,7 +37,7 @@ SELECT 'if(token IN (tuple)): listed stop words retained, non-stop words dropped
 CREATE TABLE tab_in_reversed (
   id UInt32,
   s String,
-  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s IN ('the', 'a', 'is'), '', s))
+  INDEX idx(s) TYPE text(tokenizer = 'splitByNonAlpha', postprocessor = if(s IN ('the', 'a', 'is'), s, ''))
 )
 ENGINE = MergeTree
 ORDER BY id;
@@ -106,7 +106,6 @@ SELECT count() FROM tab_materialized WHERE hasToken(s, 'the');
 
 DROP TABLE tab_in;
 DROP TABLE tab_notin;
-DROP TABLE tab_in_reversed;
 DROP TABLE tab_array;
 DROP TABLE tab_multiif;
 DROP TABLE tab_fixed;
