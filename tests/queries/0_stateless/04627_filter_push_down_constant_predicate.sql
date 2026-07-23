@@ -18,6 +18,10 @@ SET query_plan_top_k_through_join = 1;
 SET query_plan_optimize_lazy_materialization = 1;
 SET query_plan_max_limit_for_lazy_materialization = 0;
 SET query_plan_max_limit_for_top_k_optimization = 0;
+-- Pin the join orientation: under `auto` the logical join-order optimizer can swap this `ANY`
+-- join's sides and reverse `LEFT` to `RIGHT`. The oracle below matches `Join` regardless of
+-- orientation, so an unpinned swap would let it stay green on the wrong path.
+SET query_plan_join_swap_table = false;
 
 DROP TABLE IF EXISTS traces_04627;
 
