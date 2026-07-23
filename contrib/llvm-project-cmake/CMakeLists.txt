@@ -62,13 +62,22 @@ endif()
 # The host triple must reflect the host OS, not just the architecture: the target ABI depends
 # on it. For example the AArch64 backend reserves x18 only for Darwin/Windows/Android, so a
 # native macOS build that reports a Linux triple lets JIT-compiled code use the OS-reserved x18
-# register and crash. Cross-builds set CMAKE_C_COMPILER_TARGET (handled below); for native
-# builds derive the OS component from the host.
-if (OS_DARWIN)
+# register and crash. Cross-builds set CMAKE_C_COMPILER_TARGET (handled below); for native builds
+# derive the OS component from the host, and only for host OSes with a verified JIT target triple.
+if (OS_LINUX)
+    set (LLVM_HOST_TRIPLE_OS "unknown-linux-gnu")
+elseif (OS_DARWIN)
     set (LLVM_HOST_TRIPLE_OS "apple-darwin")
 elseif (OS_FREEBSD)
     set (LLVM_HOST_TRIPLE_OS "unknown-freebsd")
 else()
+    # Unrecognized host OS for JIT (e.g. SunOS). Do not fall back to a Linux triple: CHJIT would
+    # then compile against the wrong ABI on a non-Linux host. Disable the embedded compiler here
+    # instead; the placeholder triple below is inert metadata for the DWARF/BLAKE3 LLVM build.
+    if (ENABLE_EMBEDDED_COMPILER)
+        message (STATUS "Disabling the embedded compiler: no verified LLVM JIT host triple for ${CMAKE_SYSTEM_NAME}")
+        set (ENABLE_EMBEDDED_COMPILER OFF CACHE INTERNAL "" FORCE)
+    endif()
     set (LLVM_HOST_TRIPLE_OS "unknown-linux-gnu")
 endif()
 set (LLVM_HOST_TRIPLE_DEFAULT "${LLVM_HOST_TRIPLE_ARCH}-${LLVM_HOST_TRIPLE_OS}")
