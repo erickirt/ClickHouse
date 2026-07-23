@@ -171,6 +171,7 @@
             {
               "group": "Build your own",
               "pages": [
+                "guides/use-cases/observability/build-your-own/index",
                 "guides/use-cases/observability/build-your-own/introduction",
                 "guides/use-cases/observability/build-your-own/schema-design",
                 "guides/use-cases/observability/build-your-own/integrating-opentelemetry",

@@ -1,35 +1,11 @@
 [
   {
-    "source": "/clickstack/migration/elastic",
-    "destination": "/clickstack/migration/elastic/intro"
-  },
-  {
-    "source": "/clickstack/migration/elastic/index",
-    "destination": "/clickstack/migration/elastic/intro"
-  },
-  {
-    "source": "/concepts/features/operations/update",
-    "destination": "/concepts/features/operations/update/overview"
-  },
-  {
-    "source": "/concepts/features/operations/update/index",
-    "destination": "/concepts/features/operations/update/overview"
-  },
-  {
     "source": "/guides/oss/deployment-and-scaling",
     "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "source": "/guides/oss/deployment-and-scaling/index",
     "destination": "/guides/oss/deployment-and-scaling/terminology"
-  },
-  {
-    "source": "/guides/use-cases/observability/build-your-own",
-    "destination": "/guides/use-cases/observability/build-your-own/introduction"
-  },
-  {
-    "source": "/guides/use-cases/observability/build-your-own/index",
-    "destination": "/guides/use-cases/observability/build-your-own/introduction"
   },
   {
     "source": "/integrations/clickpipes/kinesis/index",
@@ -46,22 +22,6 @@
   {
     "source": "/products/cloud/reference/billing/marketplace/index",
     "destination": "/products/cloud/reference/billing/marketplace/overview"
-  },
-  {
-    "source": "/clickstack/ingesting-data",
-    "destination": "/clickstack/ingesting-data/overview"
-  },
-  {
-    "source": "/clickstack/ingesting-data/index",
-    "destination": "/clickstack/ingesting-data/overview"
-  },
-  {
-    "source": "/get-started/migrate/bigquery",
-    "destination": "/get-started/migrate/bigquery/overview"
-  },
-  {
-    "source": "/get-started/migrate/bigquery/index",
-    "destination": "/get-started/migrate/bigquery/overview"
   },
   {
     "source": "/get-started/migrate/postgres",
@@ -1602,7 +1562,7 @@
   },
   {
     "source": "/cloud/manage",
-    "destination": "/products/cloud/features/admin-features/api"
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
   },
   {
     "source": "/cloud/manage/api/api-overview",
@@ -1658,7 +1618,7 @@
   },
   {
     "source": "/cloud/manage/billing",
-    "destination": "/products/cloud/reference/billing"
+    "destination": "/products/cloud/reference/billing/billing-overview"
   },
   {
     "source": "/cloud/manage/billing/overview",
@@ -1678,7 +1638,7 @@
   },
   {
     "source": "/cloud/manage/cloud-api",
-    "destination": "/products/cloud/features/admin-features/api"
+    "destination": "/products/cloud/features/admin-features/api/api-overview"
   },
   {
     "source": "/cloud/manage/cloud-tiers",
@@ -1706,7 +1666,7 @@
   },
   {
     "source": "/cloud/manage/jan-2025-faq/billing",
-    "destination": "/products/cloud/reference/billing"
+    "destination": "/products/cloud/reference/billing/billing-overview"
   },
   {
     "source": "/cloud/manage/jan-2025-faq/new-tiers",
@@ -1906,7 +1866,7 @@
   },
   {
     "source": "/cloud/marketplace",
-    "destination": "/products/cloud/reference/billing/marketplace"
+    "destination": "/products/cloud/reference/billing/marketplace/overview"
   },
   {
     "source": "/cloud/marketplace/marketplace-billing",
@@ -3810,7 +3770,7 @@
   },
   {
     "source": "/guides/manage-and-deploy-index",
-    "destination": "/guides/oss/deployment-and-scaling"
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "source": "/guides/replacing-merge-tree",
@@ -26958,7 +26918,7 @@
   },
   {
     "source": "/migrations/postgresql",
-    "destination": "/get-started/migrate/postgres"
+    "destination": "/get-started/migrate/postgres/overview"
   },
   {
     "source": "/migrations/postgresql/appendix",
@@ -27062,7 +27022,7 @@
   },
   {
     "source": "/operations",
-    "destination": "/guides/oss/deployment-and-scaling"
+    "destination": "/guides/oss/deployment-and-scaling/terminology"
   },
   {
     "source": "/operations/access-rights",
@@ -27378,7 +27338,7 @@
   },
   {
     "source": "/operations/system-tables/",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/operations/system-tables/aggregate_function_combinators",
@@ -28066,7 +28026,7 @@
   },
   {
     "source": "/operations/system_tables",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/operations/table_engines",
@@ -41206,79 +41166,79 @@
   },
   {
     "source": "/system_tables",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.asynchronous_metrics",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.clusters",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.columns",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.databases",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.dictionaries",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.events",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.functions",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.merges",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.metrics",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.numbers",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.numbers_mt",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.one",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.parts",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.processes",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.replicas",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.settings",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.tables",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/system_tables/system.zookeeper",
-    "destination": "/reference/system-tables"
+    "destination": "/reference/system-tables/overview"
   },
   {
     "source": "/table_engines/replication",
@@ -41306,7 +41266,7 @@
   },
   {
     "source": "/updating-data",
-    "destination": "/concepts/features/operations/update/overview"
+    "destination": "/concepts/features/operations/update"
   },
   {
     "source": "/updating-data/overview",
@@ -41510,7 +41470,7 @@
   },
   {
     "source": "/use-cases/observability/build-your-own",
-    "destination": "/guides/use-cases/observability/build-your-own/introduction"
+    "destination": "/guides/use-cases/observability/build-your-own"
   },
   {
     "source": "/use-cases/observability/clickstack",
@@ -41894,7 +41854,7 @@
   },
   {
     "source": "/use-cases/observability/clickstack/migration/elastic",
-    "destination": "/clickstack/migration/elastic/intro"
+    "destination": "/clickstack/migration/elastic"
   },
   {
     "source": "/use-cases/observability/clickstack/migration/elastic/concepts",

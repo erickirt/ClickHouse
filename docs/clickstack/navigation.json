@@ -143,6 +143,7 @@
         {
           "group": "Ingesting data",
           "pages": [
+            "clickstack/ingesting-data/index",
             "clickstack/ingesting-data/overview",
             "clickstack/ingesting-data/opentelemetry",
             "clickstack/ingesting-data/vector",
@@ -209,6 +210,7 @@
             {
               "group": "Migrating from Elastic",
               "pages": [
+                "clickstack/migration/elastic/index",
                 "clickstack/migration/elastic/intro",
                 "clickstack/migration/elastic/concepts",
                 "clickstack/migration/elastic/types",

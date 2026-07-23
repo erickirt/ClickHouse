@@ -103,6 +103,7 @@
             {
               "group": "Update",
               "pages": [
+                "concepts/features/operations/update/index",
                 "concepts/features/operations/update/overview",
                 "concepts/features/operations/update/on-fly-mutations",
                 "concepts/features/operations/update/replacing-merge-tree"
