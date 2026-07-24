@@ -543,10 +543,14 @@ def main():
             # output, which eats the leading space of a worktree-modified line and
             # would drop a char off the first path). Tracked changes vs HEAD +
             # any untracked new files, scoped to the artifact paths.
-            pathspec = (
-                "utils/list-versions/version_date.tsv "
-                f"docs/changelogs/{shlex.quote(release_tag)}.md SECURITY.md "
-                "'docker/keeper/Dockerfile*' 'docker/server/Dockerfile*'"
+            pathspec = " ".join(
+                [
+                    "utils/list-versions/version_date.tsv",
+                    "docs/changelogs/" + shlex.quote(release_tag) + ".md",
+                    "SECURITY.md",
+                    "'docker/keeper/Dockerfile*'",
+                    "'docker/server/Dockerfile*'",
+                ]
             )
             changed = Shell.get_output(
                 f"git diff --name-only HEAD -- {pathspec}", strict=True
