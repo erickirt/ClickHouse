@@ -545,7 +545,7 @@ def main():
             # any untracked new files, scoped to the artifact paths.
             pathspec = (
                 "utils/list-versions/version_date.tsv "
-                f"{shlex.quote(f'docs/changelogs/{release_tag}.md')} SECURITY.md "
+                f"docs/changelogs/{shlex.quote(release_tag)}.md SECURITY.md "
                 "'docker/keeper/Dockerfile*' 'docker/server/Dockerfile*'"
             )
             changed = Shell.get_output(
