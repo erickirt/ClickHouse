@@ -538,15 +538,25 @@ def main():
             # origin/master (-f, so the switch can't abort on "local changes would
             # be overwritten"), restore those paths, and stage only them. -B so a
             # rerun re-creates the branch instead of failing on "already exists".
-            porcelain = Shell.get_output(
-                "git status --porcelain --no-renames --untracked-files=all -- "
+            # Collect the paths as clean, one-per-line names (NOT via
+            # `git status --porcelain` slicing: Shell.get_output strips the
+            # output, which eats the leading space of a worktree-modified line and
+            # would drop a char off the first path). Tracked changes vs HEAD +
+            # any untracked new files, scoped to the artifact paths.
+            pathspec = (
                 "utils/list-versions/version_date.tsv "
                 f"{shlex.quote(f'docs/changelogs/{release_tag}.md')} SECURITY.md "
-                "'docker/keeper/Dockerfile*' 'docker/server/Dockerfile*'",
-                strict=True,
+                "'docker/keeper/Dockerfile*' 'docker/server/Dockerfile*'"
             )
-            # Porcelain line is "XY <path>"; the path starts at column 3.
-            artifact_files = [ln[3:] for ln in porcelain.splitlines() if ln.strip()]
+            changed = Shell.get_output(
+                f"git diff --name-only HEAD -- {pathspec}", strict=True
+            )
+            untracked = Shell.get_output(
+                f"git ls-files --others --exclude-standard -- {pathspec}", strict=True
+            )
+            artifact_files = sorted(
+                {f for f in changed.splitlines() + untracked.splitlines() if f.strip()}
+            )
             backup_dir = tempfile.mkdtemp(prefix="changelog-artifacts-")
             for f in artifact_files:
                 dst = os.path.join(backup_dir, f)
