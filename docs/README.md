@@ -62,12 +62,12 @@ which walks you through how to make your first contribution.
 | `ar/`, `es/`, `fr/`, `ja/`, `ko/`, `pt-BR/`, `ru/`, `zh/` | Generated translations — do not edit these directly; edit the English content instead |
 | `images/` | Image assets used across the documentation |
 | `snippets/` | Reusable content snippets that can be imported into multiple pages |
-| `_description_templates/` | Templates for writing new documentation pages (functions, settings, engines, etc.) |
+| `_templates/` | Templates for writing new documentation pages (functions, settings, engines, etc.) |
 | `_includes/` | Shared content included across multiple pages |
 | `_site/` | Site customizations: styles, scripts, logos, and redirects |
 | `_migration/` | Tooling used for the migration from the previous documentation site |
 
-The site navigation (sidebar structure) is defined in `docs.json`.
+Top-level site tabs and languages are configured in `docs.json`, while each section's sidebar entries are defined in its own `navigation.json` file.
 
 ## Docs translations
 
@@ -182,4 +182,4 @@ Guidelines:
 
 ## How to Build Documentation
 
-You can build your documentation manually by following the instructions in the docs repo [contrib-writing-guide](https://github.com/ClickHouse/clickhouse-docs/blob/main/contribute/contrib-writing-guide.md). Also, our CI runs the documentation build after the `documentation` label is added to PR. You can see the results of a build in the GitHub interface. If you have no permissions to add labels, a reviewer of your PR will add it.
+You can build your documentation manually by following the instructions in the docs repo [contrib-writing-guide](https://github.com/ClickHouse/clickhouse-docs/blob/main/contribute/contrib-writing-guide.md). Also, our CI runs the documentation build after the `pr-documentation` label is added to PR. You can see the results of a build in the GitHub interface. If you have no permissions to add labels, a reviewer of your PR will add it.
