@@ -1058,15 +1058,19 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
   const [entries] = useState(() => (__SESSION_SETTINGS_ENTRIES__));
   const [anchorRoutes] = useState(() => (__ANCHOR_ROUTES__));
 
-  useEffect(() => {
+  // Resolve moved fragments before rendering the explorer so legacy external
+  // links do not briefly land on the overview page.
+  const resolveLegacyRedirect = () => {
+    if (typeof window === "undefined") return null;
+
     const rawHash = window.location.hash.slice(1);
-    if (!rawHash) return;
+    if (!rawHash) return null;
 
     let decodedHash;
     try {
       decodedHash = decodeURIComponent(rawHash);
     } catch {
-      return;
+      return null;
     }
 
     const canonicalAnchor = (value) => {
@@ -1084,7 +1088,7 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
 
     const directAnchor = canonicalAnchor(decodedHash);
     const baseAnchor = directAnchor || canonicalAnchor(decodedHash.split("-", 1)[0]);
-    if (!baseAnchor) return;
+    if (!baseAnchor) return null;
     const target = anchorRoutes[baseAnchor];
     const targetHash = directAnchor || rawHash;
 
@@ -1097,13 +1101,18 @@ def _settings_explorer_component(pages, anchor_routes=None, family=None):
       basePath = "/docs";
     }
 
-    window.location.replace(
-      `${basePath}${target}${window.location.search}#${targetHash}`,
-    );
-  }, []);
+    return `${basePath}${target}${window.location.search}#${targetHash}`;
+  };
 
+  const [redirectUrl] = useState(resolveLegacyRedirect);
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [searchTerm, setSearchTerm] = useState("");
+  useEffect(() => {
+    if (redirectUrl) window.location.replace(redirectUrl);
+  }, [redirectUrl]);
+
+  if (redirectUrl) return null;
+
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const toPlainSearchTerms = (value) => value
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")

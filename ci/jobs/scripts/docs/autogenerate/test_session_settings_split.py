@@ -221,6 +221,10 @@ def main():
         assert "const [anchorRoutes] = useState(() => (" in explorer
         assert 'canonicalAnchor(decodedHash.split("-", 1)[0])' in explorer
         assert "window.location.replace(" in explorer
+        assert 'if (typeof window === "undefined") return null;' in explorer
+        assert "const [redirectUrl] = useState(resolveLegacyRedirect);" in explorer
+        assert explorer.index("if (redirectUrl) return null;") < explorer.index(
+            "const normalizedSearch")
         assert '"openssl":"/reference/settings/session-settings/filesystem-cache"' in explorer
         assert (
             '"href":"/reference/settings/session-settings/filesystem-cache#filesystem_cache_alpha"'
