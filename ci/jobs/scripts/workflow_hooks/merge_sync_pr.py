@@ -32,6 +32,10 @@ def get_linked_pr_numbers():
     from the head commit backwards and stop at the first commit that is not a
     merge-queue merge commit. This picks up exactly the batch and avoids matching
     unrelated commits deeper in the push (e.g. a revert of an old merge commit).
+
+    The result is returned oldest-to-newest (public batch merge order) so the
+    Sync PRs are replayed into the private repo in the same order they were
+    merged into public master.
     """
     event_file_path = os.getenv("GITHUB_EVENT_PATH", "")
     if not event_file_path or not Path(event_file_path).is_file():
@@ -58,6 +62,9 @@ def get_linked_pr_numbers():
         pr_number = int(match.group(1))
         if pr_number not in pr_numbers:
             pr_numbers.append(pr_number)
+    # Collected newest-to-oldest while walking from the head; reverse back to the
+    # public batch merge order (oldest-to-newest) before returning.
+    pr_numbers.reverse()
     return pr_numbers
 
 
@@ -122,9 +129,10 @@ def check():
     linked_pr_numbers = get_linked_pr_numbers()
 
     if not linked_pr_numbers:
-        msg = "No linked PR numbers found in the push event - skipping Sync PR merge"
-        print(f"WARNING: {msg}")
-        Info().add_workflow_warning(msg)
+        # Expected no-op for any push whose tip is not a merge-queue merge commit
+        # (e.g. direct automation commits to master) - nothing to sync. Genuine
+        # payload-read failures are already reported inside get_linked_pr_numbers.
+        print("No linked PR numbers found in the push event - nothing to sync")
         return
 
     print(f"Found linked PR numbers to sync: {linked_pr_numbers}")
