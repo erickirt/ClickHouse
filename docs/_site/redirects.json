@@ -9581,10 +9581,6 @@
   },
   {
     "destination": "/ja/integrations/language-clients/python",
-    "source": "/jp/integrations/language-clients/python/driver-api"
-  },
-  {
-    "destination": "/ja/integrations/language-clients/python",
     "source": "/jp/integrations/language-clients/python/inserts"
   },
   {
