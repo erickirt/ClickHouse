@@ -1,3 +1,13 @@
+"""ClickHouse release pipeline job.
+
+INVARIANT: every run starts in a clean, empty GitHub Actions `_work` directory -
+the runner is ephemeral and the workspace is a fresh `actions/checkout` (a depth-1
+shallow clone). There is NO state carried over from a previous run. So do not add
+"in case a previous run left X on a reused runner" defenses here: there is no
+reuse. The repo is always shallow at the start (hence the unconditional
+`--unshallow`), and no leftover files/branches/credentials can exist.
+"""
+
 import argparse
 import json
 import os
