@@ -32,6 +32,14 @@
     "destination": "/get-started/migrate/postgres/overview"
   },
   {
+    "source": "/get-started/migrate/bigquery",
+    "destination": "/get-started/migrate/bigquery/overview"
+  },
+  {
+    "source": "/get-started/migrate/bigquery/index",
+    "destination": "/get-started/migrate/bigquery/overview"
+  },
+  {
     "source": "/products/cloud/features/admin-features/api",
     "destination": "/products/cloud/features/admin-features/api/api-overview"
   },
@@ -26872,7 +26880,7 @@
     "source": "/merges"
   },
   {
-    "destination": "/get-started/migrate/bigquery",
+    "destination": "/get-started/migrate/bigquery/overview",
     "source": "/migrations/bigquery"
   },
   {
