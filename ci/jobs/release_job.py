@@ -543,13 +543,21 @@ def main():
             # output, which eats the leading space of a worktree-modified line and
             # would drop a char off the first path). Tracked changes vs HEAD +
             # any untracked new files, scoped to the artifact paths.
+            # The exact files the generation steps touch. update-docker-version.sh
+            # bumps `ARG VERSION` in these Dockerfiles (keeper's Dockerfile.alpine
+            # / Dockerfile.ubuntu are symlinks to keeper/Dockerfile, so the edit
+            # lands on keeper/Dockerfile itself). Listed explicitly rather than
+            # globbed so nothing unexpected is ever swept in.
             pathspec = " ".join(
                 [
                     "utils/list-versions/version_date.tsv",
                     "docs/changelogs/" + shlex.quote(release_tag) + ".md",
                     "SECURITY.md",
-                    "'docker/keeper/Dockerfile*'",
-                    "'docker/server/Dockerfile*'",
+                    "docker/keeper/Dockerfile",
+                    "docker/keeper/Dockerfile.distroless",
+                    "docker/server/Dockerfile.alpine",
+                    "docker/server/Dockerfile.distroless",
+                    "docker/server/Dockerfile.ubuntu",
                 ]
             )
             changed = Shell.get_output(
