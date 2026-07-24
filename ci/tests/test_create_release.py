@@ -140,16 +140,17 @@ def test_release_job_points_at_moved_paths():
     assert "tests/ci/artifactory.py" not in text
 
 
-def test_patch_version_bump_is_deferred_after_merge_prs():
-    """The patch branch version bump must run after the merge-PRs step, new before.
+def test_enqueue_is_last_and_patch_bump_is_deferred():
+    """The PR enqueue must be the last release step, and the patch bump deferred.
 
-    Deferring the patch bump to the end keeps the release branch tip equal to the
-    released commit throughout publishing, so a rerun after any failure sees an
-    un-bumped branch and prepare recovers the existing release instead of
-    refusing it as out-of-order or minting a below-tip release — the root-cause
-    fix for the rerun/stale-branch review comments, without scanning git tags.
-    The "new" release bump must stay before the merge step because it opens the
-    master bump PR that the merge step merges.
+    Enqueue runs last so the release PR's `CH Inc sync` check gets the maximum
+    time (the whole publish) to complete before we add the PR to the merge queue.
+    The patch version bump is still deferred to near the end (after the changelog
+    PR is created, not right after the tag push): that keeps the branch tip equal
+    to the released commit through publishing, so a rerun after any failure sees
+    an un-bumped branch and prepare recovers the existing release instead of
+    minting a below-tip one. The "new" release bump stays early (it opens the
+    master bump PR the enqueue later merges).
     """
     text = _read(RELEASE_JOB)
     # Match the actual create_release.py invocations, not prose in comments.
@@ -157,19 +158,26 @@ def test_patch_version_bump_is_deferred_after_merge_prs():
         m.start()
         for m in re.finditer(r"create_release\.py --create-bump-version-pr", text)
     ]
-    # The merge step is an in-process function call (merge_created_prs), anchored
+    # The enqueue step is an in-process function call (merge_created_prs), anchored
     # by its unique step name rather than a CLI string.
     merge_pos = text.find('name="Update Release Info and Merge Created PRs"')
+    changelog_pr_pos = text.find('name="Create ChangeLog PR"')
     assert len(bump_positions) >= 2, (
         "expected a separate 'new' and deferred 'patch' --create-bump-version-pr"
     )
-    assert merge_pos != -1, "release_job.py should have the merge-PRs step"
-    assert any(p < merge_pos for p in bump_positions), (
-        "the 'new' version bump must run before the merge step (it opens the PR "
-        "that the merge step merges)"
+    assert merge_pos != -1, "release_job.py should have the enqueue step"
+    assert changelog_pr_pos != -1, "release_job.py should have the Create ChangeLog PR step"
+    # Enqueue is the last release action: after both version bumps.
+    assert all(p < merge_pos for p in bump_positions), (
+        "the enqueue step must run after both version bumps (it is the last step)"
     )
-    assert any(p > merge_pos for p in bump_positions), (
-        "the 'patch' version bump must be deferred to after the merge step"
+    # The 'new' bump is early (before the changelog PR step); the 'patch' bump is
+    # deferred to after it.
+    assert min(bump_positions) < changelog_pr_pos, (
+        "the 'new' version bump must run early (before the changelog PR step)"
+    )
+    assert max(bump_positions) > changelog_pr_pos, (
+        "the 'patch' version bump must be deferred to after the changelog PR step"
     )
 
 

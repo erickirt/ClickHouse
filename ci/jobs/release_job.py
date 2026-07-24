@@ -860,15 +860,31 @@ def main():
     if results[-1].status != Result.Status.OK:
         ok = False
 
-    # Merging the created PRs is a release mutation that must only happen when
-    # every preceding step succeeded. Use step(), which skips when ok is already
-    # False — so if anything failed, the Slack post below reports the failing
-    # step instead of merging.
-    #
-    # Merge the release PR (just created above, or left open by a failed prior
-    # run). Skipped only when it is already merged - the "merged -> continue"
-    # branch of the algorithm. merge_prs looks the PR up by branch and enqueues
-    # it (best-effort); it is a no-op if the lookup finds nothing.
+    # Deferred patch version bump. Bumping the branch version file here (rather
+    # than right after the tag push) keeps the branch tip equal to the released
+    # commit for the whole publish phase, so any rerun in that window sees an
+    # un-bumped branch and prepare recovers the existing release instead of
+    # refusing it or minting a below-tip release. `step` skips it when a prior
+    # step already failed, so a failed publish leaves the branch un-bumped and
+    # recoverable. ("new" bumps earlier, above, because the merge step below
+    # merges the master bump PR it opens.)
+    if create_new_release and args.release_type == "patch":
+        step(
+            name="Bump CH Version and Update Contributors' List",
+            command=[
+                f"python3 ./ci/jobs/scripts/create_release.py --create-bump-version-pr"
+                f" {dry_run_flag}".strip()
+            ],
+            workdir=REPO_PATH,
+        )
+
+    # Enqueue the release PR - the LAST release action, so its `CH Inc sync`
+    # required check gets the maximum time (the whole publish above) to complete
+    # before we enqueue. Only when every preceding step succeeded (step() skips
+    # when ok is already False). Merge the PR created earlier (or left open by a
+    # failed prior run); skipped only when it is already merged (the "merged ->
+    # continue" branch). merge_prs looks the PR up by branch and enqueues it
+    # (best-effort); a no-op if the lookup finds nothing.
     def merge_created_prs():
         # Imported lazily so the module-level boto3 dependency of create_release
         # is only needed on the release machine, not at praktika config time.
@@ -887,24 +903,6 @@ def main():
         step(
             name="Update Release Info and Merge Created PRs",
             command=merge_created_prs,
-            workdir=REPO_PATH,
-        )
-
-    # Deferred patch version bump — the LAST release mutation. Bumping the branch
-    # version file here (rather than right after the tag push) keeps the branch
-    # tip equal to the released commit for the whole publish phase, so any rerun
-    # in that window sees an un-bumped branch and prepare recovers the existing
-    # release instead of refusing it or minting a below-tip release. `step` skips
-    # it when a prior step already failed, so a failed publish leaves the branch
-    # un-bumped and recoverable. ("new" bumps earlier, above, because the merge_prs step
-    # merges the master bump PR it opens.)
-    if create_new_release and args.release_type == "patch":
-        step(
-            name="Bump CH Version and Update Contributors' List",
-            command=[
-                f"python3 ./ci/jobs/scripts/create_release.py --create-bump-version-pr"
-                f" {dry_run_flag}".strip()
-            ],
             workdir=REPO_PATH,
         )
 
