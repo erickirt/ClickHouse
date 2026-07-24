@@ -197,7 +197,7 @@ close it.
 
     def pop_prs(self, prs: PullRequests) -> PullRequests:
         """the method processes all prs and pops the ReleaseBranch related prs"""
-        to_pop = []  # type: List[int]
+        to_pop: List[int] = []
         for i, pr in enumerate(prs):
             if self.name not in pr.head.ref:
                 # this pr is not for the current branch
@@ -663,8 +663,8 @@ class BackportPRs:
 
         self._repo = None  # type: Optional[Repository]
         self.release_prs = []  # type: PullRequests
-        self.release_branches = []  # type: List[str]
-        self.labels_to_backport = []  # type: List[str]
+        self.release_branches: List[str] = []
+        self.labels_to_backport: List[str] = []
         self.prs_for_backport = []  # type: PullRequests
         self.error = None  # type: Optional[Exception]
 
@@ -820,9 +820,9 @@ class BackportPRs:
             )
             return
 
-        branches = [
+        branches: List[ReleaseBranch] = [
             ReleaseBranch(br, pr, self.repo) for br in branch_names
-        ]  # type: List[ReleaseBranch]
+        ]
 
         logging.info(
             "  PR #%s is supposed to be backported to %s",
