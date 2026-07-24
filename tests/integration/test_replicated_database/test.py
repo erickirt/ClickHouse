@@ -2154,8 +2154,10 @@ def _drive_comment_alter_race(db, cycles=14, wide_columns=1500, extra_url_settin
     /metadata version.
 
     Returns the name of the lost column, or None if every synchronized cycle
-    preserved it. Raises if no cycle ever synchronized (SYNC_FOUND stayed 0), so a
-    run where the race window never opened cannot silently false-pass.
+    preserved it. Raises if a synchronized cycle's comment ALTER returned an error
+    (the fix promises it succeeds under overlap), or if no cycle ever synchronized
+    (SYNC_FOUND stayed 0), so a run where the race window never opened cannot
+    silently false-pass.
     """
     main_node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
     competing_node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
@@ -2238,6 +2240,16 @@ echo "ALTER_DONE"
             # any further metadata ALTER would repair the structure and hide the bug.
             return f"m{i}"
 
+        # A synchronized cycle must complete without a user-visible error: the fix
+        # promises the comment ALTER succeeds even when it overlaps the applied
+        # ALTER_METADATA. Failing here closes the false-pass mode where the race
+        # regresses from "silent clobber" to "always throw under overlap".
+        if "DB::Exception" in race_out or "Code:" in race_out:
+            raise Exception(
+                f"comment-alter race cycle {i} synchronized but the comment-only "
+                f"ALTER returned an error instead of succeeding: {race_out}"
+            )
+
     if synced_cycles == 0:
         raise Exception(
             f"comment-alter race never synchronized in {cycles} cycles "
@@ -2286,6 +2298,8 @@ def _drive_mixed_alter_race(db, cycles=8, wide_columns=6000, extra_url_settings=
 
     Returns (lost_column, alter_error, forensics) for the first cycle where the
     replica lost the concurrently added column, or (None, last_error, None).
+    Raises if a synchronized cycle's mixed ALTER returned an error (the fix
+    promises it succeeds under overlap), or if no cycle ever synchronized.
     """
     for node in [main_node, competing_node]:
         node.query(f"DROP DATABASE IF EXISTS {db} SYNC")
@@ -2402,6 +2416,17 @@ echo "ALTER_DONE"
             }
             logging.info("mixed-alter race fired: %s", forensics)
             return (f"m{i}", alter_error, forensics)
+
+        # A synchronized cycle must complete without a user-visible error: with the
+        # fix, the mixed ALTER re-reads fresh metadata inside the ZK retry loop and
+        # succeeds even when it overlaps the applied ALTER_METADATA. Failing here
+        # closes the false-pass mode where the race regresses from "silent clobber"
+        # to "always throw under overlap".
+        if alter_error is not None:
+            raise Exception(
+                f"mixed-alter race cycle {i} synchronized but the mixed ALTER "
+                f"returned an error instead of succeeding: {alter_error}"
+            )
 
     if synced_cycles == 0:
         raise Exception(
