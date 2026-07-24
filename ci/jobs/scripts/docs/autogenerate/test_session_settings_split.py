@@ -151,6 +151,7 @@ def main():
         expected_paths = {
             dest,
             docs / "snippets/components/SessionSettingsExplorer/SessionSettingsExplorer.jsx",
+            docs / "_site/customizations/settings-legacy-routes/session-settings.js",
             docs / "reference/settings/session-settings/filesystem-cache.mdx",
             docs / "reference/settings/session-settings/filesystem-prefetch.mdx",
             docs / "reference/settings/session-settings/force.mdx",
@@ -194,15 +195,12 @@ def main():
             assert f'<a id="{name}" href="' not in by_path[dest]
         assert "SessionSettingsRedirect" not in by_path[dest]
         assert "SessionSettingsExplorer" in by_path[dest]
-        assert "<script" in by_path[dest]
-        assert "dangerouslySetInnerHTML" in by_path[dest]
-        assert "window.location.replace(" in by_path[dest]
+        routes_script = by_path[
+            docs / "_site/customizations/settings-legacy-routes/session-settings.js"]
         assert (
-            '\\"filesystem_cache_alpha\\":'
-            '\\"/reference/settings/session-settings/filesystem-cache\\"'
-        ) in by_path[dest]
-        assert by_path[dest].index("<script") < by_path[dest].index(
-            "Generated introduction.")
+            '"filesystem_cache_alpha":'
+            '"/reference/settings/session-settings/filesystem-cache"'
+        ) in routes_script
         explorer = by_path[
             docs / "snippets/components/SessionSettingsExplorer/SessionSettingsExplorer.jsx"]
         assert '"label":"filesystem_*"' not in explorer
@@ -227,9 +225,9 @@ def main():
         assert "window.location" not in explorer
         assert "resolveLegacyRedirect" not in explorer
         assert (
-            '\\"openssl\\":'
-            '\\"/reference/settings/session-settings/filesystem-cache\\"'
-        ) in by_path[dest]
+            '"openssl":'
+            '"/reference/settings/session-settings/filesystem-cache"'
+        ) in routes_script
         assert (
             '"href":"/reference/settings/session-settings/filesystem-cache#filesystem_cache_alpha"'
             in explorer)
@@ -428,11 +426,17 @@ def main():
             assert f"<{family['component_name']} />" in root
             assert f"## {family['browse_title']}" in root
             assert "## filesystem_cache_alpha" not in root
-            assert "<script" in root
-            assert "dangerouslySetInnerHTML" in root
-            assert "window.location.replace(" in root
-            assert root.index("<script") < root.index("Generated introduction.")
-            assert family["base_route"] in root
+            routes_script_path = (
+                docs / "_site/customizations/settings-legacy-routes"
+                / f"{family_name}.js"
+            )
+            routes_script = by_path[routes_script_path]
+            assert "window.clickhouseSettingsLegacyRoutes" in routes_script
+            assert family["base_route"] in routes_script
+            assert (
+                '"filesystem_cache_alpha":'
+                f'"{family["base_route"]}/filesystem-cache"'
+            ) in routes_script
             if family_name == "server-settings":
                 assert '<a id="server-settings"></a>' in root
                 assert "# Server Settings" not in root
@@ -470,7 +474,6 @@ def main():
             assert "const filteredEntries = isSearching" in explorer
             assert "const isOpen = isSearching || expandedGroups.has(key)" in explorer
             assert "No matching settings" in explorer
-            assert f'var marker = \\"{family["base_route"]}\\";' in root
             assert (
                 f'"href":"{family["base_route"]}/filesystem-cache'
                 '#filesystem_cache_alpha"'

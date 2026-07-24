@@ -1016,65 +1016,15 @@ def _settings_explorer(family):
     )
 
 
-def _settings_legacy_redirect(anchor_routes, family):
-    """Emit a parser-blocking fragment redirect before React hydration."""
-    anchor_routes_json = json.dumps(
+def _settings_legacy_routes_script(anchor_routes, family):
+    """Expose moved settings anchors to the global Mintlify redirect script."""
+    base_route = json.dumps(family["base_route"])
+    routes = json.dumps(
         anchor_routes, separators=(",", ":")).replace("<", "\\u003c")
-    script = '''(function () {
-      var anchorRoutes = __ANCHOR_ROUTES__;
-      var rawHash = window.location.hash.slice(1);
-      if (!rawHash) return;
-
-      var decodedHash;
-      try {
-        decodedHash = decodeURIComponent(rawHash);
-      } catch (error) {
-        return;
-      }
-
-      function canonicalAnchor(value) {
-        var candidates = [
-          value,
-          value.replace(/[?,;:!'"()[\\]{}]/g, ""),
-        ];
-        for (var index = 0; index < candidates.length; index += 1) {
-          var candidate = candidates[index];
-          if (anchorRoutes[candidate]) return candidate;
-          var lowerValue = candidate.toLowerCase();
-          if (anchorRoutes[lowerValue]) return lowerValue;
-        }
-        return null;
-      }
-
-      var directAnchor = canonicalAnchor(decodedHash);
-      var baseAnchor = directAnchor || canonicalAnchor(decodedHash.split("-", 1)[0]);
-      if (!baseAnchor) return;
-
-      var marker = "__BASE_ROUTE__";
-      var markerIndex = window.location.pathname.indexOf(marker);
-      var basePath = "";
-      if (markerIndex >= 0) {
-        basePath = window.location.pathname.slice(0, markerIndex);
-      } else if (window.location.pathname.indexOf("/docs/") === 0) {
-        basePath = "/docs";
-      }
-
-      window.location.replace(
-        basePath + anchorRoutes[baseAnchor] + window.location.search +
-        "#" + (directAnchor || rawHash)
-      );
-    })();'''
-    script = (
-        script
-        .replace("__ANCHOR_ROUTES__", anchor_routes_json)
-        .replace("__BASE_ROUTE__", family["base_route"])
-    )
     return (
-        "<script\n"
-        "  dangerouslySetInnerHTML={{\n"
-        f"    __html: {json.dumps(script)},\n"
-        "  }}\n"
-        "/>"
+        "window.clickhouseSettingsLegacyRoutes = "
+        "window.clickhouseSettingsLegacyRoutes || {};\n"
+        f"window.clickhouseSettingsLegacyRoutes[{base_route}] = {routes};\n"
     )
 
 
@@ -1116,9 +1066,9 @@ def _settings_explorer_component(pages, family=None):
   // preserving module-scope bindings. Lazy state keeps the generated data in
   // that evaluation scope while constructing it only once per mount.
   const [entries] = useState(() => (__SESSION_SETTINGS_ENTRIES__));
-
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const [searchTerm, setSearchTerm] = useState("");
+
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const toPlainSearchTerms = (value) => value
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -1337,13 +1287,17 @@ def split_settings_page(dest, content, docs_dir, family_name):
     )
     root_content = (
         root_frontmatter + "\n\n" + explorer_import + "\n\n"
-        + _settings_legacy_redirect(anchor_routes, family) + "\n\n"
         + preamble_without_imports + "\n\n" + _settings_explorer(family)
     )
     artifacts = [GeneratedArtifact(Path(dest), root_content)]
     artifacts.append(GeneratedArtifact(
         Path(docs_dir) / family["component_path"],
         _settings_explorer_component(pages, family),
+    ))
+    artifacts.append(GeneratedArtifact(
+        Path(docs_dir) / "_site/customizations/settings-legacy-routes"
+        / f"{family_name}.js",
+        _settings_legacy_routes_script(anchor_routes, family),
     ))
 
     page_manifest = []
