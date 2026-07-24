@@ -393,7 +393,12 @@ def main():
     # merged, idempotently: create it if absent, merge it if open, skip if it is
     # already merged. This converges a fresh release and a recovery / rerun after
     # a failed merge through the same path. only-repo/only-docker are targeted
-    # artifact re-publish recoveries and never touch this PR.
+    # artifact re-publish recoveries: they never *create* this PR, but they do
+    # enqueue an already-open one, so a cheap recovery run can finish landing a
+    # release whose original run created the PR but failed to enqueue it (e.g.
+    # the enqueue lost the race with a still-pending `CH Inc sync` required
+    # check). Hence the branch lookup runs regardless of the recovery flags; only
+    # PR creation stays gated to a full run.
     if args.dry_run:
         # No gh reads on dry-run (it may be a local run without gh auth): fall
         # back to the fresh-release signal so the generation is still previewed.
@@ -402,7 +407,7 @@ def main():
     else:
         release_pr_branch = None
         release_pr_state = ""  # "MERGED" | "OPEN" | ""
-        if ok and not args.only_repo and not args.only_docker:
+        if ok:
             with open(RELEASE_INFO_FILE) as f:
                 _info = json.load(f)
             release_pr_branch = (
@@ -417,7 +422,16 @@ def main():
                 f"Release PR branch [{release_pr_branch}] state: "
                 + (release_pr_state or "absent — will create")
             )
-        release_pr_absent = release_pr_branch is not None and release_pr_state == ""
+        # Recovery re-publishes an existing release and must never mint the PR,
+        # so creation is gated to a full run.
+        recovery = args.only_repo or args.only_docker
+        release_pr_absent = (
+            not recovery
+            and release_pr_branch is not None
+            and release_pr_state == ""
+        )
+        # The enqueue runs on recovery too: an existing-but-unmerged PR gets
+        # landed without re-publishing the whole release.
         release_pr_needs_merge = (
             release_pr_branch is not None and release_pr_state != "MERGED"
         )
