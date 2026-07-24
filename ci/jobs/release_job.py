@@ -199,13 +199,15 @@ def main():
             # No `|| true`: the runner is ephemeral, so the checkout is always the
             # fresh depth-1 shallow clone and --unshallow always applies - a
             # failure here is real and must fail the step, not be swallowed.
-            "git fetch --filter=tree:0 --unshallow --no-recurse-submodules origin",
+            #
+            # `--quiet` on all three: without it fetch prints a "[new ref]" line
+            # per branch/tag, which floods the log for a repo with this many refs.
+            "git fetch --quiet --filter=tree:0 --unshallow --no-recurse-submodules origin",
             # actions/checkout configures origin to fetch only the workflow ref,
-            # but prepare reads origin/<release_branch> and a commit_sha that an
-            # auto_releases run may pass from a different branch. Fetch all heads
-            # and tags so those refs are always present.
-            "git fetch --no-recurse-submodules origin '+refs/heads/*:refs/remotes/origin/*'",
-            "git fetch --tags --no-recurse-submodules origin",
+            # but prepare needs origin/<release_branch> (and origin/master); fetch
+            # all heads so those refs are present regardless of the release branch.
+            "git fetch --quiet --no-recurse-submodules origin '+refs/heads/*:refs/remotes/origin/*'",
+            "git fetch --quiet --tags --no-recurse-submodules origin",
         ],
         workdir=REPO_PATH,
     )
