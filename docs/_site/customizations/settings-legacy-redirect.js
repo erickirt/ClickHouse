@@ -11,6 +11,7 @@
     '/reference/settings/formats':
       '/_site/customizations/settings-legacy-routes/format-settings.js',
   };
+  var BASE = /^\/docs(\/|$)/.test(window.location.pathname) ? '/docs' : '';
   var loadingRoutes = {};
   var lastLocation = '';
   var framesRemaining = 180;
@@ -55,7 +56,7 @@
         if (!loadingRoutes[baseRoute]) {
           loadingRoutes[baseRoute] = true;
           var script = document.createElement('script');
-          script.src = routeFiles[baseRoute];
+          script.src = BASE + routeFiles[baseRoute];
           script.onload = redirectLegacySettingAnchor;
           script.onerror = function () {
             loadingRoutes[baseRoute] = false;
