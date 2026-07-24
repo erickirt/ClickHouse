@@ -1128,7 +1128,8 @@ def is_asan_build(args):
     # hung-check path). Read the ASan bit straight from the binary via `clickhouse
     # local`, which is independent of server state. ASAN_OPTIONS is not a usable
     # signal here: the fast macOS runners export it even for non-ASan builds.
-    local = find_clickhouse_command(args.binary, "local")
+    binary = getattr(args, "binary", "clickhouse")
+    local = find_clickhouse_command(binary, "local")
     out = shell_get_output(
         f"{local} --query \"SELECT count() FROM system.build_options "
         f"WHERE name = 'CXX_FLAGS' AND position('sanitize=address' IN value)\"",
