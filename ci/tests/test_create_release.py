@@ -1021,25 +1021,12 @@ def test_enqueue_release_pr_skips_already_merged(monkeypatch):
     assert not enqueued
 
 
-def test_enqueue_release_pr_open_forces_sync_then_enqueues(monkeypatch):
-    """An OPEN PR: force CH Inc sync on its head, then enqueue it."""
+def test_enqueue_release_pr_open_enqueues(monkeypatch):
+    """An OPEN PR is enqueued (no status is force-set — CH Inc sync runs on its
+    own; the PR is opened early enough to complete by enqueue time)."""
     cr = _create_release_module()
     ri = _make_release_info(cr)
-    outputs = iter(["OPEN", "abc123sha"])  # state, then headRefOid
-    monkeypatch.setattr(
-        cr.Shell, "get_output", staticmethod(lambda *a, **k: next(outputs))
-    )
-    posted = {}
-    monkeypatch.setattr(
-        cr.GH,
-        "post_commit_status",
-        staticmethod(
-            lambda name, status, desc, url, sha="", repo="": posted.update(
-                name=name, sha=sha
-            )
-            or True
-        ),
-    )
+    monkeypatch.setattr(cr.Shell, "get_output", staticmethod(lambda *a, **k: "OPEN"))
     enq = {}
     monkeypatch.setattr(
         cr.Git,
@@ -1047,5 +1034,4 @@ def test_enqueue_release_pr_open_forces_sync_then_enqueues(monkeypatch):
         staticmethod(lambda pr, repo, **k: enq.update(pr=pr) or True),
     )
     assert ri._enqueue_release_pr("https://x/pull/111", "ChangeLog", False) is True
-    assert posted["name"] == cr.CH_INC_SYNC and posted["sha"] == "abc123sha"
     assert enq["pr"] == 111

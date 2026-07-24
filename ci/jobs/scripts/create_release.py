@@ -56,13 +56,7 @@ from ci.jobs.scripts.clickhouse_version import (
 )
 from ci.praktika.gh import GH
 from ci.praktika.git import Git
-from ci.praktika.result import Result
 from ci.praktika.utils import Shell
-
-# The release changelog / version-bump PRs carry `do not test`, so the real
-# `CH Inc sync` required check takes ~10+ min to even start; force it to success
-# on the PR head so the merge queue accepts these bot PRs right away.
-CH_INC_SYNC = "CH Inc sync"
 
 # S3Helper requires boto3 (installed on release machines); ssh has no external deps.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../tests/ci"))
@@ -619,7 +613,10 @@ class ReleaseInfo:
                     else:
                         Shell.check(
                             f"gh pr create --repo {GITHUB_REPOSITORY} --title 'Update version after release' "
-                            f"--head {branch_upd} --base master --body \"{body}\" --assignee {actor}",
+                            f"--head {branch_upd} --base master --body \"{body}\" --assignee {actor}"
+                            # 'do not test': this bot PR is auto-enqueued to the
+                            # merge queue, so it must not run the full PR CI.
+                            f" --label 'do not test'",
                             strict=True,
                             dry_run=dry_run,
                             verbose=True,
@@ -744,19 +741,18 @@ class ReleaseInfo:
 
         `master` is behind a merge queue, and `gh pr merge --auto`
         (`enablePullRequestAutoMerge`) is disabled there, so the PR is added via
-        `enqueuePullRequest` - GitHub then merges it from the queue once its
-        checks pass. GitHub refuses to enqueue a PR whose required `CH Inc sync`
-        check has not completed, so force that status to success on the PR head
-        first, then enqueue with a few retries to ride out the transient
-        `mergeStateStatus == UNKNOWN` GitHub reports right after the status write.
+        `enqueuePullRequest` - GitHub merges it from the queue once its required
+        checks pass. The PR is opened before the long package export / docker
+        publish, so its `CH Inc sync` check has time to run before this enqueue at
+        the end of the release; the retries ride out any short remaining wait.
+        Best-effort: it never raises, so a PR that is not yet mergeable does not
+        fail the already-published release (merge_prs then only warns; a later
+        rerun re-enqueues it).
         """
         pr_num = 23456 if dry_run else int(pr_url.rsplit("/", 1)[-1])
         if not dry_run:
-            # Best-effort throughout: the release is already published by now, so a
-            # transient `gh` failure here must not fail the release - use
-            # non-strict reads and return False (merge_prs then only warns).
-            #
             # Idempotent for recovery / reruns: only an open PR needs enqueuing.
+            # Non-strict read: a transient gh failure must not fail the release.
             state = Shell.get_output(
                 f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
                 f" --json state --jq .state"
@@ -768,22 +764,6 @@ class ReleaseInfo:
                 print(f"{label} PR #{pr_num} is {state}, nothing to merge")
                 return True
         print(f"Enqueuing {label} PR to the merge queue")
-        if not dry_run:
-            head_sha = Shell.get_output(
-                f"gh pr view {pr_num} --repo {GITHUB_REPOSITORY}"
-                f" --json headRefOid --jq .headRefOid"
-            ).strip()
-            if not head_sha:
-                print(f"ERROR: could not fetch head sha for {label} PR #{pr_num}")
-                return False
-            GH.post_commit_status(
-                CH_INC_SYNC,
-                Result.Status.OK,
-                "release PR: dummy sync status to enable the merge queue",
-                "",
-                sha=head_sha,
-                repo=GITHUB_REPOSITORY,
-            )
         return Git.enqueue_pull_request(
             pr_num, GITHUB_REPOSITORY, dry_run=dry_run, retries=10, delay=30
         )

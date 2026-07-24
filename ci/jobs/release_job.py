@@ -176,9 +176,20 @@ def main():
             ok = False
 
     step(
-        name="Fetch Full Repository",
+        name="Fetch Repository History (treeless)",
         command=[
-            "git fetch --unshallow --no-recurse-submodules origin ||:",
+            # This job only needs full commit history - for the version tweak
+            # (commit count since the previous tag), changelog.py, and the
+            # all-time contributors `git shortlog` - not the file contents of that
+            # history. A treeless partial clone (`--filter=tree:0`) fetches every
+            # commit but no trees/blobs, so the unshallow is far cheaper than a
+            # full one; any tree/blob a later step actually reads is fetched
+            # lazily from the promisor remote.
+            #
+            # No `|| true`: the runner is ephemeral, so the checkout is always the
+            # fresh depth-1 shallow clone and --unshallow always applies - a
+            # failure here is real and must fail the step, not be swallowed.
+            "git fetch --filter=tree:0 --unshallow --no-recurse-submodules origin",
             # actions/checkout configures origin to fetch only the workflow ref,
             # but prepare reads origin/<release_branch> and a commit_sha that an
             # auto_releases run may pass from a different branch. Fetch all heads
@@ -399,6 +410,9 @@ def main():
             release_pr_branch is not None and release_pr_state != "MERGED"
         )
 
+    # Fail-fast: verify the release packages exist (this downloads them) before
+    # pushing the tag or opening the changelog PR, so a missing-artifacts run
+    # aborts without leaving a tag / PR behind.
     if args.release_type == "patch" and not args.only_docker:
         step(
             name="Download All Release Artifacts",
