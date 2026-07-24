@@ -221,6 +221,7 @@ def main():
         assert "const [anchorRoutes] = useState(() => (" in explorer
         assert 'canonicalAnchor(decodedHash.split("-", 1)[0])' in explorer
         assert "window.location.replace(" in explorer
+        # External legacy links reach the overview with a moved fragment.
         assert 'if (typeof window === "undefined") return null;' in explorer
         assert "const [redirectUrl] = useState(resolveLegacyRedirect);" in explorer
         assert explorer.index("if (redirectUrl) return null;") < explorer.index(
