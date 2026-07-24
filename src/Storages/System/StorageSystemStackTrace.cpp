@@ -758,11 +758,13 @@ StorageSystemStackTrace::StorageSystemStackTrace(const StorageID & table_id_)
     if (sigaddset(&sa.sa_mask, STACK_TRACE_SERVICE_SIGNAL))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Cannot set signal handler");
 
-    /// This handler shares the thread-local async-unwind recovery buffer (asynchronous_stack_unwinding
-    /// + sigjmp_buf in StackTrace) with the query profiler. Block the profiler pause signals (SIGUSR1/
-    /// SIGUSR2) while it runs so a profiler signal cannot nest and clobber that buffer, which would make
-    /// the next fault's siglongjmp jump to the wrong frame.
-    if (sigaddset(&sa.sa_mask, SIGUSR1) || sigaddset(&sa.sa_mask, SIGUSR2))
+    /// This handler captures through StackTrace(ucontext), sharing one thread-local async-unwind recovery
+    /// (asynchronous_stack_unwinding + sigjmp_buf in StackTrace) with the query profiler and the debug
+    /// SIGTSTP stack dumper. Block their signals (SIGUSR1/SIGUSR2 profilers, SIGTSTP) while it runs so
+    /// none can nest and clobber that buffer, which would make the next fault's siglongjmp jump to the
+    /// wrong frame (or, if SIGTSTP cleared the flag on return, turn a recoverable unwind fault into a
+    /// fatal crash).
+    if (sigaddset(&sa.sa_mask, SIGUSR1) || sigaddset(&sa.sa_mask, SIGUSR2) || sigaddset(&sa.sa_mask, SIGTSTP))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Cannot set signal handler");
 #pragma clang diagnostic pop
 

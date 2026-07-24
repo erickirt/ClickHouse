@@ -497,12 +497,15 @@ QueryProfilerBase<ProfilerImpl>::QueryProfilerBase(
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Failed to add signal to mask for query profiler");
 
 #if defined(OS_LINUX) || defined(OS_DARWIN)
-    /// The Real (SIGUSR1) and CPU (SIGUSR2) profilers and system.stack_trace (STACK_TRACE_SERVICE_SIGNAL)
-    /// all share one thread-local stack-unwinding recovery (the asynchronous_stack_unwinding flag +
-    /// sigjmp_buf in StackTrace). Block all of them while a handler runs so they cannot nest and clobber
-    /// that buffer - a corrupted siglongjmp jumps to a garbage address and faults.
+    /// The Real (SIGUSR1) and CPU (SIGUSR2) profilers, system.stack_trace (STACK_TRACE_SERVICE_SIGNAL)
+    /// and the debug SIGTSTP stack dumper all capture through StackTrace(ucontext) and share one
+    /// thread-local stack-unwinding recovery (the asynchronous_stack_unwinding flag + sigjmp_buf in
+    /// StackTrace). Block all of them while a handler runs so none can nest and clobber that buffer - a
+    /// corrupted siglongjmp jumps to a garbage address, and a cleared flag turns the next unwind fault
+    /// back into a fatal crash. SIGTSTP is the only one of these that returns to the interrupted handler;
+    /// the fatal signals do not.
     if (sigaddset(&sa.sa_mask, QueryProfilerReal::PAUSE_SIGNAL) || sigaddset(&sa.sa_mask, QueryProfilerCPU::PAUSE_SIGNAL)
-        || sigaddset(&sa.sa_mask, STACK_TRACE_SERVICE_SIGNAL))
+        || sigaddset(&sa.sa_mask, STACK_TRACE_SERVICE_SIGNAL) || sigaddset(&sa.sa_mask, SIGTSTP))
         throw ErrnoException(ErrorCodes::CANNOT_MANIPULATE_SIGSET, "Failed to add profiler signals to mask for query profiler");
 #endif
 #pragma clang diagnostic pop
