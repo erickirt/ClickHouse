@@ -121,7 +121,7 @@ def main():
         complex_pages, source_sections=complex_sections
     )
     complex_explorer = mod._settings_explorer_component(
-        complex_pages, complex_anchor_routes, server_family
+        complex_pages, server_family
     )
     assert (
         '"name":"openSSL.client.caConfig",'
@@ -194,6 +194,15 @@ def main():
             assert f'<a id="{name}" href="' not in by_path[dest]
         assert "SessionSettingsRedirect" not in by_path[dest]
         assert "SessionSettingsExplorer" in by_path[dest]
+        assert "<script" in by_path[dest]
+        assert "dangerouslySetInnerHTML" in by_path[dest]
+        assert "window.location.replace(" in by_path[dest]
+        assert (
+            '\\"filesystem_cache_alpha\\":'
+            '\\"/reference/settings/session-settings/filesystem-cache\\"'
+        ) in by_path[dest]
+        assert by_path[dest].index("<script") < by_path[dest].index(
+            "Generated introduction.")
         explorer = by_path[
             docs / "snippets/components/SessionSettingsExplorer/SessionSettingsExplorer.jsx"]
         assert '"label":"filesystem_*"' not in explorer
@@ -211,22 +220,16 @@ def main():
         assert explorer.index(
             "  const [entries] = useState(() => ("
         ) > component_start
-        assert explorer.index(
-            "  const [anchorRoutes] = useState(() => ("
-        ) > component_start
         assert "const entries = " not in explorer
         assert "const anchorRoutes = " not in explorer
         assert "<ExplorerGroup" not in explorer
         assert "<Branch" not in explorer
-        assert "const [anchorRoutes] = useState(() => (" in explorer
-        assert 'canonicalAnchor(decodedHash.split("-", 1)[0])' in explorer
-        assert "window.location.replace(" in explorer
-        # External legacy links reach the overview with a moved fragment.
-        assert 'if (typeof window === "undefined") return null;' in explorer
-        assert "const [redirectUrl] = useState(resolveLegacyRedirect);" in explorer
-        assert explorer.index("if (redirectUrl) return null;") < explorer.index(
-            "const normalizedSearch")
-        assert '"openssl":"/reference/settings/session-settings/filesystem-cache"' in explorer
+        assert "window.location" not in explorer
+        assert "resolveLegacyRedirect" not in explorer
+        assert (
+            '\\"openssl\\":'
+            '\\"/reference/settings/session-settings/filesystem-cache\\"'
+        ) in by_path[dest]
         assert (
             '"href":"/reference/settings/session-settings/filesystem-cache#filesystem_cache_alpha"'
             in explorer)
@@ -425,6 +428,11 @@ def main():
             assert f"<{family['component_name']} />" in root
             assert f"## {family['browse_title']}" in root
             assert "## filesystem_cache_alpha" not in root
+            assert "<script" in root
+            assert "dangerouslySetInnerHTML" in root
+            assert "window.location.replace(" in root
+            assert root.index("<script") < root.index("Generated introduction.")
+            assert family["base_route"] in root
             if family_name == "server-settings":
                 assert '<a id="server-settings"></a>' in root
                 assert "# Server Settings" not in root
@@ -441,9 +449,7 @@ def main():
             assert explorer.index(
                 "  const [entries] = useState(() => ("
             ) > component_start
-            assert explorer.index(
-                "  const [anchorRoutes] = useState(() => ("
-            ) > component_start
+            assert "window.location" not in explorer
             assert "w-full overflow-x-auto" in explorer
             assert "dark:border-white/10 dark:bg-transparent" in explorer
             assert "overflow-auto" not in explorer
@@ -464,7 +470,7 @@ def main():
             assert "const filteredEntries = isSearching" in explorer
             assert "const isOpen = isSearching || expandedGroups.has(key)" in explorer
             assert "No matching settings" in explorer
-            assert f'const marker = "{family["base_route"]}";' in explorer
+            assert f'var marker = \\"{family["base_route"]}\\";' in root
             assert (
                 f'"href":"{family["base_route"]}/filesystem-cache'
                 '#filesystem_cache_alpha"'
