@@ -123,7 +123,10 @@ namespace
             ProfileEvents::incrementSignalSafe(ProfileEvents::QueryProfilerErrors);
 #endif
 
-        if (stack_trace)
+        /// Skip empty captures: StackTrace(ucontext) recovers from an unwind fault by returning a
+        /// zero-frame trace (already counted as QueryProfilerErrors above). Sending it would add a
+        /// meaningless empty row to system.trace_log and inflate the sample count.
+        if (stack_trace && stack_trace->getSize() != 0)
             TraceSender::send(trace_type, *stack_trace, {});
 
         ProfileEvents::incrementSignalSafe(ProfileEvents::QueryProfilerRuns);
